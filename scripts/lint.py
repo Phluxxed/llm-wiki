@@ -34,7 +34,7 @@ except ImportError:
     sys.exit("pyyaml required: pip3 install pyyaml")
 
 WIKI_ROOT = Path(__file__).parent.parent
-EXCLUDE_FILES = {"CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
+EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
 
 REQUIRED_FRONTMATTER = {"title", "category", "status", "owner", "tags", "created", "last_reviewed"}
 USE_CASE_MANDATORY_SECTIONS = {"What This Is", "How It Works", "Risk Register", "Prerequisites"}

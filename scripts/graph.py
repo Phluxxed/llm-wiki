@@ -19,7 +19,7 @@ except ImportError:
     sys.exit("pyyaml required: pip3 install pyyaml")
 
 WIKI_ROOT = Path(__file__).parent.parent
-EXCLUDE_FILES = {"CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
+EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
 
 
 def parse_frontmatter(text: str) -> dict:

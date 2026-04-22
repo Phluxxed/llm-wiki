@@ -17,7 +17,7 @@ your-wiki/
 ├── _templates/
 │   ├── {page-type}.md   ← template for new pages (use cases, papers, experiments, etc.)
 │   └── entity.md        ← template for entity/concept pages
-├── sources/             ← immutable raw inputs (Jira tickets, Slack threads, docs)
+├── sources/             ← immutable raw inputs (never edited after saving)
 └── scripts/
     ├── graph.py         ← generates graph.html — D3.js force-directed graph of all pages
     ├── lint.py          ← structural health check
@@ -53,7 +53,7 @@ The skill asks two questions — what the wiki is for, and what the primary page
 
 **Supported page types:** use cases, papers, experiments, runbooks, ADRs, or anything else you name.
 
-**Safe on existing projects:** if a `CLAUDE.md` or `AGENTS.md` already exists, the skill appends a single pointer line rather than overwriting it. If `wiki-agent.md` already exists, the skill stops — you already have a wiki.
+**Safe on existing projects:** if a `CLAUDE.md`, `AGENTS.md`, or `GEMINI.md` already exists, the skill appends a single pointer line rather than overwriting it. If `wiki-agent.md` already exists, the skill stops — you already have a wiki.
 
 ## Scripts
 
