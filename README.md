@@ -1,8 +1,8 @@
 # llm-wiki
 
-A Claude Code skill that scaffolds a persistent, LLM-maintained wiki — inspired by Karpathy's personal wiki pattern.
+A skill that scaffolds a persistent, LLM-maintained wiki — inspired by Karpathy's personal wiki pattern.
 
-Drop the skill into your `.claude/skills/` directory (or symlink it), then run `/wikime` in any project to get a fully operational wiki scaffold in seconds.
+Drop it into your agent's skills directory, then run `/wikime` in any project to get a fully operational wiki scaffold in seconds.
 
 ## What it sets up
 
@@ -27,13 +27,15 @@ your-wiki/
 ## Installation
 
 ```bash
-# Option A — symlink (recommended, keeps it version-controlled)
+# Clone the repo
 git clone https://github.com/Phluxxed/llm-wiki ~/llm-wiki
-ln -s ~/llm-wiki ~/.claude/skills/wikime
 
-# Option B — copy directly
-cp -r ~/llm-wiki ~/.claude/skills/wikime
+# Symlink into your agent's skills directory (recommended — keeps it version-controlled)
+# Claude Code example:
+ln -s ~/llm-wiki ~/.claude/skills/wikime
 ```
+
+Each agent has its own skills directory — your agent will know where to look.
 
 Requires `pyyaml` for the scripts:
 
@@ -65,7 +67,7 @@ The skill asks two questions — what the wiki is for, and what the primary page
 
 ## Agent compatibility
 
-The skill itself runs in **Claude Code** — invoke it with `/wikime`. The wiki it scaffolds can be maintained by any agent: all three schema files are created automatically, each containing a one-line pointer to `wiki-agent.md`.
+Works with any agent that supports skills. The wiki it scaffolds is readable by all three — all schema files are created automatically, each a one-line pointer to `wiki-agent.md`.
 
 | Agent | Schema file | Pointer format |
 | --- | --- | --- |
