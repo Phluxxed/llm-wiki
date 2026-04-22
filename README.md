@@ -65,8 +65,12 @@ The skill asks two questions — what the wiki is for, and what the primary page
 
 ## Agent compatibility
 
+The skill itself runs in **Claude Code** — invoke it with `/wikime`. The wiki it scaffolds can be maintained by any agent: all three schema files are created automatically, each containing a one-line pointer to `wiki-agent.md`.
+
 | Agent | Schema file | Pointer format |
 | --- | --- | --- |
 | Claude Code | `CLAUDE.md` | `@wiki-agent.md` (native include) |
 | Codex | `AGENTS.md` | Natural-language pointer |
 | Gemini CLI | `GEMINI.md` | Natural-language pointer |
+
+No configuration needed — whichever agent opens the wiki directory will find its instructions.

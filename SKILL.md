@@ -22,14 +22,17 @@ In a single message, ask:
 
 Wait for answers. Do not scaffold until you have both.
 
-## Step 2 — Detect agent → pick schema filename
+## Step 2 — Schema files
 
-| Running as | Schema file |
+The skill creates pointer files for all three major agent platforms so the resulting wiki works with any agent from day one.
+
+| File | Pointer content |
 | --- | --- |
-| Claude Code | `CLAUDE.md` |
-| Codex | `AGENTS.md` |
-| Gemini CLI | `GEMINI.md` |
-| Unknown | `AGENTS.md` |
+| `CLAUDE.md` | `@wiki-agent.md` |
+| `AGENTS.md` | `This folder contains a wiki. All agent instructions are in wiki-agent.md and must be adhered to.` |
+| `GEMINI.md` | `This folder contains a wiki. All agent instructions are in wiki-agent.md and must be adhered to.` |
+
+For each file: if it already exists, append the pointer line. If it does not exist, create it containing only that line.
 
 ## Step 3 — Pre-flight check
 
@@ -43,7 +46,9 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | File | Notes |
 | --- | --- |
 | `wiki-agent.md` | Agent operating manual — see Schema sections below. This is the wiki's source of truth; all agent instructions live here. |
-| `{SCHEMA_FILE}` | **If the file already exists**: append the pointer line (do not overwrite). **If it does not exist**: create it containing only the pointer line. Pointer format depends on platform — see below. |
+| `CLAUDE.md` | Pointer file — see Step 2 for format. Append if exists; create if not. |
+| `AGENTS.md` | Pointer file — see Step 2 for format. Append if exists; create if not. |
+| `GEMINI.md` | Pointer file — see Step 2 for format. Append if exists; create if not. |
 | `CONVENTIONS.md` | Copy from skill bundle (`skills/wikime/_templates/CONVENTIONS.md`); fill in `{WIKI_NAME}`, `{REPO_NAME}`, `{PAGE_TYPE}`, `{PAGE_TYPE_SINGULAR}`, `{PAGE_TYPE_SLUG}` placeholders |
 | `README.md` | Quick start, operations cheat sheet, directory structure, useful commands, Scripts & Tooling section |
 | `index.md` | Empty catalog with a commented example showing exact format |
@@ -56,18 +61,6 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `scripts/lint.py` | Copy from skill bundle (`skills/wikime/scripts/lint.py`); structural lint — missing sections, frontmatter, broken refs, open risks, index consistency |
 
 Both scripts require `pyyaml`: `pip3 install pyyaml`
-
-### Schema file pointer format
-
-**Claude Code (`CLAUDE.md`)** — use the native include directive:
-```
-@wiki-agent.md
-```
-
-**All other platforms (`AGENTS.md`, `GEMINI.md`)** — use a natural-language pointer:
-```
-This folder contains a wiki. All agent instructions are in wiki-agent.md and must be adhered to.
-```
 
 ## wiki-agent.md — required sections
 
