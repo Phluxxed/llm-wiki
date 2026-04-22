@@ -67,12 +67,10 @@ The skill asks two questions — what the wiki is for, and what the primary page
 
 ## Agent compatibility
 
-Works with any agent that supports skills. The wiki it scaffolds is readable by all three — all schema files are created automatically, each a one-line pointer to `wiki-agent.md`.
+Works with any agent that supports skills. The running agent creates its own schema file — a one-line pointer to `wiki-agent.md` where all instructions live.
 
 | Agent | Schema file | Pointer format |
 | --- | --- | --- |
 | Claude Code | `CLAUDE.md` | `@wiki-agent.md` (native include) |
 | Codex | `AGENTS.md` | Natural-language pointer |
 | Gemini CLI | `GEMINI.md` | Natural-language pointer |
-
-No configuration needed — whichever agent opens the wiki directory will find its instructions.

@@ -22,17 +22,17 @@ In a single message, ask:
 
 Wait for answers. Do not scaffold until you have both.
 
-## Step 2 — Schema files
+## Step 2 — Schema file
 
-The skill creates pointer files for all three major agent platforms so the resulting wiki works with any agent from day one.
+Create the schema file for your own platform. You know which agent you are.
 
-| File | Pointer content |
-| --- | --- |
-| `CLAUDE.md` | `@wiki-agent.md` |
-| `AGENTS.md` | `This folder contains a wiki. All agent instructions are in wiki-agent.md and must be adhered to.` |
-| `GEMINI.md` | `This folder contains a wiki. All agent instructions are in wiki-agent.md and must be adhered to.` |
+| Agent | File | Pointer content |
+| --- | --- | --- |
+| Claude Code | `CLAUDE.md` | `@wiki-agent.md` |
+| Codex | `AGENTS.md` | `This folder contains a wiki. All agent instructions are in wiki-agent.md and must be adhered to.` |
+| Gemini CLI | `GEMINI.md` | `This folder contains a wiki. All agent instructions are in wiki-agent.md and must be adhered to.` |
 
-For each file: if it already exists, append the pointer line. If it does not exist, create it containing only that line.
+If the file already exists: append the pointer line. If it does not exist: create it containing only that line.
 
 ## Step 3 — Pre-flight check
 
@@ -46,9 +46,7 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | File | Notes |
 | --- | --- |
 | `wiki-agent.md` | Agent operating manual — see Schema sections below. This is the wiki's source of truth; all agent instructions live here. |
-| `CLAUDE.md` | Pointer file — see Step 2 for format. Append if exists; create if not. |
-| `AGENTS.md` | Pointer file — see Step 2 for format. Append if exists; create if not. |
-| `GEMINI.md` | Pointer file — see Step 2 for format. Append if exists; create if not. |
+| `{your schema file}` | Pointer file for your platform — see Step 2. Append if exists; create if not. |
 | `CONVENTIONS.md` | Copy from skill bundle (`skills/wikime/_templates/CONVENTIONS.md`); fill in `{WIKI_NAME}`, `{REPO_NAME}`, `{PAGE_TYPE}`, `{PAGE_TYPE_SINGULAR}`, `{PAGE_TYPE_SLUG}` placeholders |
 | `README.md` | Quick start, operations cheat sheet, directory structure, useful commands, Scripts & Tooling section |
 | `index.md` | Empty catalog with a commented example showing exact format |
