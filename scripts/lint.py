@@ -85,6 +85,7 @@ def parse_index_entries() -> set[str]:
     if not index.exists():
         return set()
     text = index.read_text(encoding="utf-8")
+    text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
     return set(re.findall(r'\]\(\./([^)]+\.md)\)', text))
 
 
