@@ -83,7 +83,7 @@ This file is the agent's operating manual. Include all of these:
 8. **Wiki Page Frontmatter** — YAML schema: title, category, status, owner, source, tags, created, last_reviewed
 9. **index.md Format** — one row per page grouped by category; focus summaries on what it does not what it is
 10. **log.md Format** — `## [YYYY-MM-DD] action | detail`; grep-able; append-only
-11. **Entity and Concept Pages** — `type: entity | concept` frontmatter field; `mentioned_in: []` backlink list (filenames); mandatory sections: What It Is, How We Use It, Where It Appears; optional: Cross-Cutting Risks, Key References; created automatically during Ingest for any tool/platform/pattern central to how the use case works
+11. **Entity and Concept Pages** — `type: entity | concept` frontmatter field; `mentioned_in: []` backlink list (filenames); mandatory sections: What It Is, How We Use It, Where It Appears; optional: Cross-Cutting Risks, Key References; created automatically during Ingest for any tool/platform/pattern central to how the page works
 
 ### Lint checks — include all of these in the schema file's Lint section
 
@@ -97,7 +97,7 @@ This file is the agent's operating manual. Include all of these:
 - Entity/concept pages missing mandatory sections (What It Is, How We Use It, Where It Appears)
 - Entity/concept pages with `mentioned_in` entries pointing to files that don't exist
 - **Contradiction scan** — read all wiki pages together and flag factual contradictions: conflicting claims about the same tool, service, pattern, credential approach, or behaviour. Report as: "`page-a.md` claims X; `page-b.md` claims Y — conflict on Z." Only flag genuine contradictions, not differences in scope or context.
-- **Source drift** — for any wiki page whose source file contains a fetchable URL (Jira, Confluence, web), re-fetch it and compare to the saved content in `sources/`. Flag pages where the live source has changed substantially since last ingest. Skip sources with no URL (pasted text, local docs, meeting notes).
+- **Source drift** — for any wiki page whose source file contains a fetchable URL, re-fetch it and compare to the saved content in `sources/`. Flag pages where the live source has changed substantially since last ingest. Skip sources with no URL (pasted text, local docs, meeting notes).
 
 Report all findings as a markdown checklist. Do not auto-fix — report and let the user decide.
 
@@ -107,8 +107,8 @@ Report all findings as a markdown checklist. Do not auto-fix — report and let 
 
 YAML frontmatter block (title, category, status, owner, source, tags, created, last_reviewed), then:
 
-- **Mandatory**: What This Is, How It Works, Risk Register (seed with credential row), Prerequisites
-- **Optional** (commented out): Architecture, Authentication, MCP Servers, CI/CD Setup, Output, Setup, Usage, Notes & Lessons Learned
+- **Mandatory**: What This Is, How It Works, Risk Register, Prerequisites
+- **Optional** (commented out): add domain-appropriate sections based on the wiki's topic and page type
 
 ## Entity Template — required sections
 

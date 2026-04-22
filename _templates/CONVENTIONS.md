@@ -17,7 +17,7 @@
 ├── _templates/
 │   └── {PAGE_TYPE_SLUG}.md ← template for new {PAGE_TYPE}
 ├── sources/                ← immutable raw inputs (never edited after saving)
-│   └── {source-files}      ← tickets, meeting notes, Slack exports, docs, etc.
+│   └── {source-files}      ← raw inputs: docs, threads, notes, exports, etc.
 └── {wiki-page-files}.md    ← wiki pages derived from sources
 ```
 
@@ -56,7 +56,7 @@ When adding or significantly updating a page:
 
 Mandatory sections (always include): **What This Is**, **How It Works**, **Risk Register**, **Prerequisites**
 
-Optional sections (include only if relevant): Architecture, Authentication, MCP Servers, CI/CD Setup, Output, Setup, Usage, Notes & Lessons Learned
+Optional sections (include only if relevant): add domain-appropriate sections based on this wiki's topic and page type
 
 ## Risk Register Status Legend
 
