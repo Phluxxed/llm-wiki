@@ -110,7 +110,8 @@ YAML frontmatter block (title, type: entity|concept, category: Entities & Concep
 
 ## Step 5 — After scaffolding
 
-- Run `pip3 install pyyaml` (required by all three scripts)
+- Install pyyaml (required by all three scripts): `pip3 install --user pyyaml`
+  If that fails (externally-managed environment error), try `pip3 install pyyaml --break-system-packages` or create a venv: `python3 -m venv .venv && source .venv/bin/activate && pip install pyyaml`
 - Ensure `README.md` includes a `## Scripts & Tooling` section with all three commands and what each produces:
   - `python3 scripts/lint.py` → structural health check
   - `python3 scripts/query.py --help` → frontmatter query filters

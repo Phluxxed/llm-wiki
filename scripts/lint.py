@@ -77,7 +77,7 @@ def collect_source_files() -> set[str]:
     sources_dir = WIKI_ROOT / "sources"
     if not sources_dir.exists():
         return set()
-    return {f.name for f in sources_dir.iterdir() if f.is_file()}
+    return {f.name for f in sources_dir.iterdir() if f.is_file() and not f.name.startswith(".")}
 
 
 def parse_index_entries() -> set[str]:
