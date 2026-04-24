@@ -46,14 +46,17 @@ def parse_frontmatter(text: str) -> dict:
 
 def collect_pages() -> list[dict]:
     pages = []
-    for md in sorted(WIKI_ROOT.glob("*.md")):
+    for md in sorted(WIKI_ROOT.rglob("*.md")):
+        rel = md.relative_to(WIKI_ROOT)
+        if rel.parts[0] in EXCLUDE_DIRS:
+            continue
         if md.name in EXCLUDE_FILES:
             continue
         text = md.read_text(encoding="utf-8")
         fm = parse_frontmatter(text)
         if not fm:
             continue
-        fm["_file"] = md.name
+        fm["_file"] = str(rel)
         fm["_text"] = text
         pages.append(fm)
     return pages

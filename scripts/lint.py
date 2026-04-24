@@ -35,6 +35,7 @@ except ImportError:
 
 WIKI_ROOT = Path(__file__).parent.parent
 EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
+EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals"}
 
 REQUIRED_FRONTMATTER = {"title", "category", "status", "owner", "tags", "created", "last_reviewed"}
 USE_CASE_MANDATORY_SECTIONS = {"What This Is", "How It Works", "Risk Register", "Prerequisites"}
@@ -62,14 +63,17 @@ def extract_sections(text: str) -> set[str]:
 
 def collect_pages() -> list[dict]:
     pages = []
-    for md in sorted(WIKI_ROOT.glob("*.md")):
+    for md in sorted(WIKI_ROOT.rglob("*.md")):
+        rel = md.relative_to(WIKI_ROOT)
+        if rel.parts[0] in EXCLUDE_DIRS:
+            continue
         if md.name in EXCLUDE_FILES:
             continue
         text = md.read_text(encoding="utf-8")
         fm = parse_frontmatter(text)
         if not fm:
             continue
-        pages.append({"file": md.name, "fm": fm, "text": text, "sections": extract_sections(text)})
+        pages.append({"file": str(rel), "fm": fm, "text": text, "sections": extract_sections(text)})
     return pages
 
 
@@ -148,11 +152,12 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
         for risk in open_risks:
             issues.append({"file": f, "check": "open_risk", "detail": f"🔲 {risk}"})
 
-        # mentioned_in entries resolve
+        # mentioned_in entries resolve (values are wiki-root-relative paths, e.g. papers/foo.md)
         if is_entity:
             for ref in (fm.get("mentioned_in") or []):
-                if str(ref) not in wiki_files:
-                    issues.append({"file": f, "check": "mentioned_in_missing", "detail": f"mentioned_in: '{ref}' does not exist"})
+                ref_norm = str(ref).replace("\\", "/")
+                if ref_norm not in wiki_files:
+                    issues.append({"file": f, "check": "mentioned_in_missing", "detail": f"mentioned_in: '{ref_norm}' does not exist"})
 
         # Not in index
         if f not in index_entries:
@@ -167,8 +172,10 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
     # index.md entries pointing to missing files (structural files like CONVENTIONS.md are excluded from
     # wiki_files but do exist on disk — only flag entries where the file genuinely doesn't exist)
     for entry in sorted(index_entries):
-        if entry not in wiki_files and not (WIKI_ROOT / entry).exists():
-            issues.append({"file": "index.md", "check": "index_dead_link", "detail": f"entry '{entry}' does not exist"})
+        # Normalise to forward-slash relative path for comparison
+        entry_norm = entry.replace("\\", "/")
+        if entry_norm not in wiki_files and not (WIKI_ROOT / entry_norm).exists():
+            issues.append({"file": "index.md", "check": "index_dead_link", "detail": f"entry '{entry_norm}' does not exist"})
 
     return issues
 

@@ -20,6 +20,7 @@ except ImportError:
 
 WIKI_ROOT = Path(__file__).parent.parent
 EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
+EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals"}
 
 
 def parse_frontmatter(text: str) -> dict:
@@ -46,14 +47,18 @@ def page_type(fm: dict) -> str:
 
 def collect_pages() -> dict:
     pages = {}
-    for md in WIKI_ROOT.glob("*.md"):
+    for md in sorted(WIKI_ROOT.rglob("*.md")):
+        rel = md.relative_to(WIKI_ROOT)
+        if rel.parts[0] in EXCLUDE_DIRS:
+            continue
         if md.name in EXCLUDE_FILES:
             continue
         text = md.read_text(encoding="utf-8")
         fm = parse_frontmatter(text)
         if not fm:
             continue
-        pages[md.name] = {
+        key = str(rel)
+        pages[key] = {
             "title": fm.get("title") or md.stem.replace("-", " ").title(),
             "type": page_type(fm),
             "tags": list(fm.get("tags") or []),
@@ -67,12 +72,15 @@ def collect_edges(pages: dict) -> list[tuple[str, str]]:
     edges = set()
     for src_file, page in pages.items():
         for raw in re.findall(r'\[(?:[^\]]+)\]\(\.?/?([^)#\s]+\.md)\)', page["text"]):
-            tgt = Path(raw).name
+            # Normalise to root-relative path (strip leading ./ if present)
+            tgt = raw[2:] if raw.startswith("./") else raw
+            tgt = tgt.replace("\\", "/")
             if tgt in pages and tgt != src_file:
                 edges.add((src_file, tgt))
+        # mentioned_in values are wiki-root-relative paths (e.g. papers/foo.md)
         mentioned = page["fm"].get("mentioned_in") or []
         for referrer in mentioned:
-            referrer = str(referrer)
+            referrer = str(referrer).replace("\\", "/")
             if referrer in pages and referrer != src_file:
                 edges.add((referrer, src_file))
     return list(edges)

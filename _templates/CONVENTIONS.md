@@ -2,23 +2,30 @@
 
 ## File Naming
 
-| Has ticket ID | Filename pattern | Example |
-| --- | --- | --- |
-| Yes | `{TICKET-ID}-{kebab-case-title}.md` | `PROJ-123-my-{PAGE_TYPE_SLUG}.md` |
-| No | `{kebab-case-title}.md` | `my-{PAGE_TYPE_SLUG}.md` |
+| Page type | Location | Filename pattern | Example |
+| --- | --- | --- | --- |
+| Primary ({PAGE_TYPE}) | `{PAGE_TYPE_SLUG}/` | `{kebab-case-title}.md` or `{TICKET-ID}-{kebab-case-title}.md` | `{PAGE_TYPE_SLUG}/my-{PAGE_TYPE_SLUG}.md` |
+| Entity / concept | `entities/` | `{kebab-case-title}.md` | `entities/openai.md` |
+
+Links between pages use wiki-root-relative paths: `[title](./{PAGE_TYPE_SLUG}/my-page.md)` or `[title](./entities/openai.md)`. Use this format in both inline links and `mentioned_in` frontmatter values.
 
 ## Folder Structure
 
 ```
 {REPO_NAME}/
-├── CONVENTIONS.md          ← this file
-├── index.md                ← one-liner index of all wiki pages
-├── log.md                  ← append-only change history
+├── CONVENTIONS.md             ← this file
+├── index.md                   ← one-liner index of all wiki pages
+├── log.md                     ← append-only change history
+├── {PAGE_TYPE_SLUG}/          ← primary wiki pages (e.g. papers/, use-cases/)
+│   └── {wiki-page-files}.md
+├── entities/                  ← entity and concept pages
+│   └── {entity-files}.md
 ├── _templates/
-│   └── {PAGE_TYPE_SLUG}.md ← template for new {PAGE_TYPE}
-├── sources/                ← immutable raw inputs (never edited after saving)
-│   └── {source-files}      ← raw inputs: docs, threads, notes, exports, etc.
-└── {wiki-page-files}.md    ← wiki pages derived from sources
+│   ├── {PAGE_TYPE_SLUG}.md    ← template for new {PAGE_TYPE}
+│   └── entity.md              ← template for entity/concept pages
+├── sources/                   ← immutable raw inputs (never edited after saving)
+│   └── {source-files}         ← raw inputs: docs, threads, notes, exports, etc.
+└── scripts/
 ```
 
 ## Sources Layer

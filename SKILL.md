@@ -53,6 +53,8 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `log.md` | Seeded: `## [YYYY-MM-DD] init | Created wiki: {files listed}` |
 | `_templates/{page-type}.md` | Page template — see Template sections below |
 | `_templates/entity.md` | Entity/concept template — see Entity Template section below |
+| `{page-type-slug}/` | Empty directory for primary wiki pages (e.g. `papers/`, `use-cases/`, `experiments/`) |
+| `entities/` | Empty directory for entity and concept pages |
 | `sources/` | Empty directory for immutable raw inputs |
 | `scripts/graph.py` | Copy from skill bundle (`skills/wikime/scripts/graph.py`); generates `graph.html` — D3.js force-directed graph, orphan detection, filter panel |
 | `scripts/query.py` | Copy from skill bundle (`skills/wikime/scripts/query.py`); frontmatter queries — `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
@@ -64,15 +66,15 @@ Both scripts require `pyyaml`: `pip3 install pyyaml`
 
 This file is the agent's operating manual. Include all of these:
 
-1. **Directory structure** — annotated tree
+1. **Directory structure** — annotated tree showing `{page-type-slug}/`, `entities/`, `sources/`, `_templates/`, `scripts/` and the root control files
 2. **This Wiki's Page Type** — name the chosen type; note it's a wiki-level choice, not universal
-3. **Absolute Rules** — never edit `sources/`; always update `index.md`; always append to `log.md`; every derived page needs `source` in frontmatter
+3. **Absolute Rules** — never edit `sources/`; always update `index.md`; always append to `log.md`; every derived page needs `source` in frontmatter; primary pages go in `{page-type-slug}/`; entity/concept pages go in `entities/`
 4. **Operations** — Ingest (ask user: quick or deep before extracting; after creating the wiki page, scan for entities/concepts and create/update entity pages automatically), Query (read index.md first; file substantive answers back as new pages), Update, Lint (structural checks + contradiction scan across all pages + source drift check for pages with fetchable source URLs)
-5. **File Naming** — source files: kebab-case with ID if one exists; wiki pages: `{id}-{title}.md` or `{title}.md`
+5. **File Naming** — source files: kebab-case with ID if one exists; primary wiki pages: `{page-type-slug}/{id}-{title}.md` or `{page-type-slug}/{title}.md`; entity/concept pages: `entities/{title}.md`; all cross-page links use wiki-root-relative paths (e.g. `./papers/foo.md`, `./entities/openai.md`); `mentioned_in` frontmatter values also use wiki-root-relative paths
 6. **Source File Header Block** — immutability header template (source type, URL, fetched date, do-not-edit warning)
 7. **Risk Register Format** — table with Likelihood/Impact/Mitigation/Status; status reflects design clarity not build status
 8. **Wiki Page Frontmatter** — YAML schema: title, category, status, owner, source, tags, created, last_reviewed
-9. **index.md Format** — one row per page grouped by category; focus summaries on what it does not what it is
+9. **index.md Format** — one row per page grouped by category; links use wiki-root-relative paths (e.g. `[title](./papers/foo.md)`, `[title](./entities/openai.md)`); focus summaries on what it does not what it is
 10. **log.md Format** — `## [YYYY-MM-DD] action | detail`; grep-able; append-only
 11. **Entity and Concept Pages** — `type: entity | concept` frontmatter field; `mentioned_in: []` backlink list (filenames); mandatory sections: What It Is, How We Use It, Where It Appears; optional: Cross-Cutting Risks, Key References; created automatically during Ingest for any tool/platform/pattern central to how the page works
 

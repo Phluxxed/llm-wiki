@@ -8,20 +8,24 @@ Drop it into your agent's skills directory, then run `/wikime` in any project to
 
 ```
 your-wiki/
-├── wiki-agent.md        ← agent operating manual (all instructions live here)
-├── CLAUDE.md            ← @wiki-agent.md (or natural-language pointer for other agents)
-├── CONVENTIONS.md       ← human-readable naming and structure reference
-├── README.md            ← quick start and scripts reference
-├── index.md             ← one-liner catalog of all wiki pages
-├── log.md               ← append-only change history
+├── wiki-agent.md          ← agent operating manual (all instructions live here)
+├── CLAUDE.md              ← @wiki-agent.md (or natural-language pointer for other agents)
+├── CONVENTIONS.md         ← human-readable naming and structure reference
+├── README.md              ← quick start and scripts reference
+├── index.md               ← one-liner catalog of all wiki pages
+├── log.md                 ← append-only change history
+├── {page-type}/           ← primary wiki pages (e.g. papers/, use-cases/, experiments/)
+│   └── *.md
+├── entities/              ← entity and concept pages
+│   └── *.md
 ├── _templates/
-│   ├── {page-type}.md   ← template for new pages (use cases, papers, experiments, etc.)
-│   └── entity.md        ← template for entity/concept pages
-├── sources/             ← immutable raw inputs (never edited after saving)
+│   ├── {page-type}.md     ← template for new pages
+│   └── entity.md          ← template for entity/concept pages
+├── sources/               ← immutable raw inputs (never edited after saving)
 └── scripts/
-    ├── graph.py         ← generates graph.html — D3.js force-directed graph of all pages
-    ├── lint.py          ← structural health check
-    └── query.py         ← frontmatter queries (filter by status, category, tag, etc.)
+    ├── graph.py           ← generates graph.html — D3.js force-directed graph of all pages
+    ├── lint.py            ← structural health check
+    └── query.py           ← frontmatter queries (filter by status, category, tag, etc.)
 ```
 
 ## Installation
