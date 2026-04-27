@@ -69,7 +69,21 @@ This file is the agent's operating manual. Include all of these:
 1. **Directory structure** — annotated tree showing `{page-type-slug}/`, `entities/`, `sources/`, `_templates/`, `scripts/` and the root control files
 2. **This Wiki's Page Type** — name the chosen type; note it's a wiki-level choice, not universal
 3. **Absolute Rules** — never edit `sources/`; always update `index.md`; always append to `log.md`; every derived page needs `source` in frontmatter; primary pages go in `{page-type-slug}/`; entity/concept pages go in `entities/`
-4. **Operations** — Ingest (ask user: quick or deep before extracting; after creating the wiki page, scan for entities/concepts and create/update entity pages automatically), Query (read index.md first; file substantive answers back as new pages), Update, Lint (structural checks + contradiction scan across all pages + source drift check for pages with fetchable source URLs)
+4. **Operations** — Ingest (ask user: quick or deep before extracting; then follow the completeness protocol below), Query (read index.md first; file substantive answers back as new pages), Update, Lint (structural checks + contradiction scan across all pages + source drift check for pages with fetchable source URLs)
+
+   **Ingest completeness protocol (deep):**
+   - **ToC first**: For any structured document (paper, standard, report, spec), extract or identify the table of contents before writing the wiki page. Use it as a checklist.
+   - **Account for every section**: For each section in the ToC, either capture it with appropriate detail OR explicitly note it is excluded and why (e.g., boilerplate, reference list, glossary). Silence is not acceptable — a section that is skipped without acknowledgement is an error.
+   - **Appendices are first-class**: Never treat appendices as peripheral. In technical standards and research papers, appendices frequently contain the most operationally useful content (actor task breakdowns, threat enumeration, design rationale). Read and extract them as carefully as the main body.
+   - **Template structure ≠ coverage ceiling**: The page template provides format guidance, not a coverage limit. A filled-in template with thin one-liners is worse than a longer page that captures actual content. If the document's sections don't map to template sections, add new sections to the page — do not compress distinct content into an ill-fitting template bucket.
+   - **Scale check**: Before declaring an ingest done, ask: does the output reflect the depth of the source? A 40-page document should produce substantially more than 100 lines of wiki content. If the ratio seems wrong, re-read and expand.
+   - **Completeness gate**: Before writing the final log entry and declaring done, compare the document's ToC against what was captured. Any uncovered section must be either added or explicitly excluded with a reason.
+
+   **Ingest completeness protocol (quick):**
+   - Capture: title, abstract or executive summary, key claims (≤5 bullets), and threat model or attack surface if present.
+   - Note explicitly in the page what was not extracted, so a future deep ingest knows what to add.
+
+   After creating the wiki page, scan for entities/concepts and create/update entity pages automatically.
 5. **File Naming** — source files: kebab-case with ID if one exists; primary wiki pages: `{page-type-slug}/{id}-{title}.md` or `{page-type-slug}/{title}.md`; entity/concept pages: `entities/{title}.md`; all cross-page links use wiki-root-relative paths (e.g. `./papers/foo.md`, `./entities/openai.md`); `mentioned_in` frontmatter values also use wiki-root-relative paths
 6. **Source File Header Block** — immutability header template (source type, URL, fetched date, do-not-edit warning)
 7. **Risk Register Format** — table with Likelihood/Impact/Mitigation/Status; status reflects design clarity not build status
