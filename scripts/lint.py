@@ -10,6 +10,7 @@ Checks performed (structural/mechanical — no LLM required):
   - Mandatory sections present in use-case and entity pages
   - Required YAML frontmatter fields present
   - source frontmatter points to an existing file in sources/
+  - Pages without a source field whose body references sources/X (likely missed ingest)
   - Risk Register rows with status 🔲 (not yet addressed)
   - Files in sources/ with no corresponding wiki page
   - Wiki pages not listed in index.md
@@ -41,6 +42,7 @@ REQUIRED_FRONTMATTER = {"title", "category", "status", "owner", "tags", "created
 USE_CASE_MANDATORY_SECTIONS = {"What This Is", "How It Works", "Risk Register", "Prerequisites"}
 ENTITY_MANDATORY_SECTIONS = {"What It Is", "How We Use It", "Where It Appears"}
 OPEN_RISK_STATUS = "🔲"
+SOURCE_REF_RE = re.compile(r'\bsources/[\w\-./]+\.\w+')
 
 
 # ── parsing ───────────────────────────────────────────────────────────────────
@@ -136,6 +138,21 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
             if src_name not in source_files:
                 issues.append({"file": f, "check": "source_missing", "detail": f"source '{src}' not found in sources/"})
 
+        # Page has no source field but body references a sources/X file —
+        # likely an ingest where the agent forgot to set the frontmatter source.
+        # Skip entity/concept pages (legitimately have no source) and meta pages.
+        is_meta_pre = "meta" in str(fm.get("category", "")).lower() or fm.get("type") == "meta"
+        if not src and not is_entity and not is_meta_pre:
+            body_refs = SOURCE_REF_RE.findall(p["text"])
+            if body_refs:
+                unique = sorted(set(body_refs))
+                refs_preview = ", ".join(unique[:3]) + ("…" if len(unique) > 3 else "")
+                issues.append({
+                    "file": f,
+                    "check": "likely_missing_source",
+                    "detail": f"body references {refs_preview} but no source field — should this be set?",
+                })
+
         # Mandatory sections (skip meta pages — free-form structure)
         is_meta = "meta" in str(fm.get("category", "")).lower() or fm.get("type") == "meta"
         if is_entity:
@@ -185,6 +202,7 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
 CHECK_LABELS = {
     "frontmatter":        "Frontmatter",
     "source_missing":     "Broken source ref",
+    "likely_missing_source": "Likely missing source field",
     "missing_section":    "Missing section",
     "open_risk":          "Open risk",
     "mentioned_in_missing": "Broken mentioned_in",
