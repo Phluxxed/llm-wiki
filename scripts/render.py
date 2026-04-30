@@ -324,6 +324,54 @@ function renderHome() {
 """
 
 
+HTML_SCRIPT_PAGE = """
+function edgesFor(path) {
+  const out = [], inc = [];
+  WIKI_DATA.edges.forEach(([s, t]) => {
+    if (s === path) out.push(t);
+    if (t === path) inc.push(s);
+  });
+  return { out, inc };
+}
+
+function renderPage(path) {
+  const page = WIKI_DATA.pages[path];
+  const root = document.getElementById('view-page');
+  if (!page) { root.innerHTML = '<p class="muted">Page not found.</p>'; return; }
+  const { out, inc } = edgesFor(path);
+  const meta = [];
+  if (page.status)        meta.push('<span class="badge">' + page.status + '</span>');
+  if (page.owner)         meta.push('<span class="muted">owner: ' + page.owner + '</span>');
+  if (page.last_reviewed) meta.push('<span class="muted">reviewed ' + page.last_reviewed + '</span>');
+  const tags = (page.tags || []).map(t => '<span class="badge">#' + t + '</span>').join(' ');
+  const linkList = (paths, title) => {
+    if (!paths.length) return '';
+    const items = paths.map(p => '<li><a href="#" data-page="' + p + '">' + (WIKI_DATA.pages[p] ? WIKI_DATA.pages[p].title : p) + '</a></li>').join('');
+    return '<div style="margin-top:18px"><div class="muted" style="margin-bottom:6px">' + title + '</div><ul style="list-style:none;padding:0">' + items + '</ul></div>';
+  };
+  root.innerHTML =
+    '<div style="display:grid;grid-template-columns:1fr 220px;gap:32px">' +
+      '<div>' +
+        '<h2>' + page.title + '</h2>' +
+        '<div style="margin-bottom:12px">' + meta.join(' ') + '</div>' +
+        (tags ? '<div style="margin-bottom:18px">' + tags + '</div>' : '') +
+        '<div class="markdown-body">' + (page.rendered_html || '') + '</div>' +
+      '</div>' +
+      '<aside>' +
+        linkList(out, 'Mentions') +
+        linkList(inc, 'Mentioned by') +
+        (page.source ? '<div style="margin-top:18px"><div class="muted" style="margin-bottom:6px">Source</div><div class="muted">' + page.source + '</div></div>' : '') +
+      '</aside>' +
+    '</div>';
+  root.querySelectorAll('a[data-page]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); window.openPage(a.dataset.page); });
+  });
+}
+
+window.openPage = function(path) { renderPage(path); showView('page'); };
+"""
+
+
 HTML_SCRIPT_VIEW_SWITCH = """
 const buttons = document.querySelectorAll('#sidebar nav button');
 const views = document.querySelectorAll('.view');
@@ -393,8 +441,8 @@ window.WIKI_DATA = {data_json};
 </script>
 <script>
 {HTML_SCRIPT_HOME}
+{HTML_SCRIPT_PAGE}
 {HTML_SCRIPT_VIEW_SWITCH}
-window.openPage = function(p) {{ /* implemented in Task 10 */ }};
 renderHome();
 </script>
 </body>

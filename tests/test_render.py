@@ -285,5 +285,14 @@ class HomeViewTest(unittest.TestCase):
         self.assertIn('"Foo"', html)
 
 
+class PageViewTest(unittest.TestCase):
+    def test_page_view_script_renders_markdown_and_edges(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn("function renderPage", html)
+        self.assertIn("Mentions", html)
+        self.assertIn("Mentioned by", html)
+
+
 if __name__ == "__main__":
     unittest.main()
