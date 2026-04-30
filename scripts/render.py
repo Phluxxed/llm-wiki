@@ -72,6 +72,25 @@ def render_markdown(body: str) -> str:
     return _MD.convert(body)
 
 
+def collect_edges(pages: dict) -> list[tuple[str, str]]:
+    edges = set()
+    link_re = re.compile(r'\[(?:[^\]]+)\]\(\.?/?([^)#\s]+\.md)\)')
+    for src_file, page in pages.items():
+        for raw in link_re.findall(page["body"]):
+            tgt = raw[2:] if raw.startswith("./") else raw
+            tgt = tgt.replace("\\", "/")
+            if tgt in pages and tgt != src_file:
+                edges.add((src_file, tgt))
+        mentioned = page["fm"].get("mentioned_in") or []
+        for referrer in mentioned:
+            referrer = str(referrer).replace("\\", "/")
+            if referrer.startswith("./"):
+                referrer = referrer[2:]
+            if referrer in pages and referrer != src_file:
+                edges.add((referrer, src_file))
+    return sorted(edges)
+
+
 def collect_pages(wiki_root: Path = WIKI_ROOT) -> dict:
     pages = {}
     for path in sorted(wiki_root.rglob("*.md")):
