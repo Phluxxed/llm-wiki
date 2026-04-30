@@ -302,5 +302,14 @@ class SearchViewTest(unittest.TestCase):
         self.assertIn("function renderSearch", html)
 
 
+class GraphViewTest(unittest.TestCase):
+    def test_graph_view_includes_d3_and_render_function(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn("d3js.org", html)
+        self.assertIn("function renderGraph", html)
+        self.assertIn('id="graph-svg"', html)
+
+
 if __name__ == "__main__":
     unittest.main()

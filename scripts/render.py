@@ -415,6 +415,70 @@ function renderSearch() {
 """
 
 
+HTML_SCRIPT_GRAPH = """
+let _graphBuilt = false;
+function renderGraph() {
+  const root = document.getElementById('view-graph');
+  if (!_graphBuilt) {
+    root.innerHTML = '<h2>Graph</h2><svg id="graph-svg" width="100%" height="600" style="background:#0a0d14;border-radius:6px"></svg>';
+    _graphBuilt = true;
+    initGraph();
+  }
+}
+
+function initGraph() {
+  const pageList = Object.keys(WIKI_DATA.pages).sort();
+  if (pageList.length === 0) return;
+  const idMap = Object.fromEntries(pageList.map((p, i) => [p, i]));
+  const inbound = Object.fromEntries(pageList.map(p => [p, 0]));
+  WIKI_DATA.edges.forEach(([s, t]) => { inbound[t] = (inbound[t] || 0) + 1; });
+  const nodes = pageList.map(p => ({
+    id: idMap[p],
+    label: WIKI_DATA.pages[p].title,
+    type: WIKI_DATA.pages[p].type || 'use-case',
+    file: p,
+    tags: WIKI_DATA.pages[p].tags || [],
+    orphan: inbound[p] === 0,
+  }));
+  const links = WIKI_DATA.edges.map(([s, t]) => ({ source: idMap[s], target: idMap[t] }));
+
+  const svg = d3.select('#graph-svg');
+  const width = svg.node().getBoundingClientRect().width;
+  const height = 600;
+  const cx = width / 2, cy = height / 2;
+  const colorByType = { 'use-case': '#60a5fa', entity: '#34d399', concept: '#a78bfa', meta: '#f59e0b' };
+
+  const sim = d3.forceSimulation(nodes)
+    .force('link',      d3.forceLink(links).id(d => d.id).distance(120))
+    .force('charge',    d3.forceManyBody().strength(-450))
+    .force('center',    d3.forceCenter(cx, cy).strength(0.3))
+    .force('x',         d3.forceX(cx).strength(0.06))
+    .force('y',         d3.forceY(cy).strength(0.06))
+    .force('collision', d3.forceCollide().radius(20));
+
+  const link = svg.append('g').attr('stroke', '#334155').attr('stroke-opacity', 0.6).selectAll('line')
+    .data(links).join('line').attr('stroke-width', 1);
+
+  const node = svg.append('g').selectAll('g').data(nodes).join('g')
+    .style('cursor', 'pointer')
+    .on('click', (e, d) => window.openPage(d.file))
+    .call(d3.drag()
+      .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+  node.append('circle').attr('r', 8).attr('fill', d => colorByType[d.type] || '#64748b');
+  node.append('text').text(d => d.label).attr('x', 12).attr('y', 4).attr('fill', '#cbd5e1').attr('font-size', '11px');
+
+  sim.on('tick', () => {
+    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
+  });
+}
+"""
+
+
 HTML_SCRIPT_VIEW_SWITCH = """
 const buttons = document.querySelectorAll('#sidebar nav button');
 const views = document.querySelectorAll('.view');
@@ -476,6 +540,7 @@ def render_html(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wiki</title>
 <script src="https://cdn.jsdelivr.net/npm/minisearch@6/dist/umd/index.min.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
 <style>{HTML_HEAD_CSS}</style>
 </head>
 <body>
@@ -492,6 +557,7 @@ window.WIKI_DATA = {data_json};
 {HTML_SCRIPT_HOME}
 {HTML_SCRIPT_PAGE}
 {HTML_SCRIPT_SEARCH}
+{HTML_SCRIPT_GRAPH}
 {HTML_SCRIPT_VIEW_SWITCH}
 renderHome();
 </script>
