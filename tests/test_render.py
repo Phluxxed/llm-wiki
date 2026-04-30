@@ -122,5 +122,38 @@ class CollectLogTest(unittest.TestCase):
         self.assertEqual(render.collect_log(self.wiki_root), [])
 
 
+class ExtractRisksTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write_page(self, rel: str, frontmatter: dict, body: str) -> None:
+        import yaml
+        path = self.wiki_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fm = yaml.safe_dump(frontmatter, sort_keys=False).strip()
+        path.write_text(f"---\n{fm}\n---\n{body}\n", encoding="utf-8")
+
+    def test_collects_open_risks_only(self):
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("p.md", {**base, "title": "P"}, (
+            "## Risk Register\n\n"
+            "| Risk | Likelihood | Impact | Mitigation | Status |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| R1 | Low | High | M1 | ⚠️ Action required |\n"
+            "| R2 | High | High | M2 | ✅ Handled |\n"
+            "| R3 | Med | Med | M3 | 🔲 Not yet addressed |\n"
+        ))
+        pages = render.collect_pages(self.wiki_root)
+        risks = render.extract_risks(pages)
+        self.assertEqual(len(risks), 2)
+        statuses = {r["status_symbol"] for r in risks}
+        self.assertEqual(statuses, {"⚠️", "🔲"})
+
+
 if __name__ == "__main__":
     unittest.main()

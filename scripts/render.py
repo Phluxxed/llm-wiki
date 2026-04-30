@@ -72,6 +72,58 @@ def render_markdown(body: str) -> str:
     return _MD.convert(body)
 
 
+RISK_OPEN_SYMBOLS = ("⚠️", "🔲")
+
+
+def _parse_risk_rows(body: str) -> list[dict]:
+    rows = []
+    in_register = False
+    in_table = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("##"):
+            in_register = "risk register" in stripped.lower()
+            in_table = False
+            continue
+        if not in_register:
+            continue
+        if stripped.startswith("|") and "---" in stripped:
+            in_table = True
+            continue
+        if not in_table or not stripped.startswith("|"):
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if len(cells) < 5:
+            continue
+        risk, likelihood, impact, mitigation, status = cells[:5]
+        if risk.lower() == "risk":
+            continue
+        rows.append({
+            "risk": risk,
+            "likelihood": likelihood,
+            "impact": impact,
+            "mitigation": mitigation,
+            "status": status,
+        })
+    return rows
+
+
+def extract_risks(pages: dict) -> list[dict]:
+    risks = []
+    for path, page in pages.items():
+        for row in _parse_risk_rows(page["body"]):
+            symbol = next((s for s in RISK_OPEN_SYMBOLS if row["status"].startswith(s)), None)
+            if symbol is None:
+                continue
+            risks.append({
+                "page": path,
+                "page_title": page["title"],
+                "status_symbol": symbol,
+                **row,
+            })
+    return risks
+
+
 LOG_LINE_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})\]\s*([^|]+?)\s*\|\s*(.+?)\s*$")
 
 
