@@ -479,6 +479,99 @@ function initGraph() {
 """
 
 
+HTML_SCRIPT_RISKS = """
+function renderRisks() {
+  const root = document.getElementById('view-risks');
+  const risks = WIKI_DATA.risks || [];
+  const rows = risks.map(r =>
+    '<tr>' +
+      '<td><a href="#" data-page="' + r.page + '">' + r.page_title + '</a></td>' +
+      '<td>' + r.risk + '</td>' +
+      '<td>' + r.likelihood + '</td>' +
+      '<td>' + r.impact + '</td>' +
+      '<td>' + r.status + '</td>' +
+    '</tr>'
+  ).join('');
+  root.innerHTML =
+    '<h2>Open risks (' + risks.length + ')</h2>' +
+    (risks.length === 0
+      ? '<p class="muted">No open risks.</p>'
+      : '<table><thead><tr><th>Page</th><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>');
+  root.querySelectorAll('a[data-page]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); window.openPage(a.dataset.page); });
+  });
+}
+"""
+
+
+HTML_SCRIPT_RECENT = """
+function renderRecent() {
+  const root = document.getElementById('view-recent');
+  const log = WIKI_DATA.log || [];
+  const rows = log.map(e =>
+    '<tr>' +
+      '<td class="muted" style="white-space:nowrap">' + e.date + '</td>' +
+      '<td><span class="badge">' + e.action + '</span></td>' +
+      '<td>' + e.detail + '</td>' +
+    '</tr>'
+  ).join('');
+  root.innerHTML =
+    '<h2>Recent changes</h2>' +
+    (log.length === 0
+      ? '<p class="muted">No log entries.</p>'
+      : '<table><tbody>' + rows + '</tbody></table>');
+}
+"""
+
+
+HTML_SCRIPT_OPEN_QS = """
+function renderOpenQs() {
+  const root = document.getElementById('view-open-qs');
+  const qs = WIKI_DATA.open_qs || [];
+  const rows = qs.map(q =>
+    '<div class="card">' +
+      '<div>' + q.question + '</div>' +
+      '<div class="muted" style="margin-top:6px">' +
+        '<a href="#" data-page="' + q.page + '">' + q.page_title + '</a>' +
+      '</div>' +
+    '</div>'
+  ).join('');
+  root.innerHTML =
+    '<h2>Open questions (' + qs.length + ')</h2>' +
+    (qs.length === 0 ? '<p class="muted">No open questions.</p>' : rows);
+  root.querySelectorAll('a[data-page]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); window.openPage(a.dataset.page); });
+  });
+}
+"""
+
+
+HTML_SCRIPT_ENTITIES = """
+function renderEntities() {
+  const root = document.getElementById('view-entities');
+  const entities = Object.values(WIKI_DATA.pages).filter(p => p.type === 'entity' || p.type === 'concept');
+  const inbound = {};
+  WIKI_DATA.edges.forEach(([s, t]) => { inbound[t] = (inbound[t] || 0) + 1; });
+  entities.sort((a, b) => (inbound[b.path] || 0) - (inbound[a.path] || 0));
+  const rows = entities.map(e =>
+    '<tr>' +
+      '<td><a href="#" data-page="' + e.path + '">' + e.title + '</a></td>' +
+      '<td><span class="badge">' + (e.type || 'entity') + '</span></td>' +
+      '<td class="muted">' + (inbound[e.path] || 0) + ' mentions</td>' +
+    '</tr>'
+  ).join('');
+  root.innerHTML =
+    '<h2>Entities (' + entities.length + ')</h2>' +
+    (entities.length === 0
+      ? '<p class="muted">No entity pages yet.</p>'
+      : '<table><tbody>' + rows + '</tbody></table>');
+  root.querySelectorAll('a[data-page]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); window.openPage(a.dataset.page); });
+  });
+}
+"""
+
+
 HTML_SCRIPT_VIEW_SWITCH = """
 const buttons = document.querySelectorAll('#sidebar nav button');
 const views = document.querySelectorAll('.view');
@@ -558,6 +651,10 @@ window.WIKI_DATA = {data_json};
 {HTML_SCRIPT_PAGE}
 {HTML_SCRIPT_SEARCH}
 {HTML_SCRIPT_GRAPH}
+{HTML_SCRIPT_RISKS}
+{HTML_SCRIPT_RECENT}
+{HTML_SCRIPT_OPEN_QS}
+{HTML_SCRIPT_ENTITIES}
 {HTML_SCRIPT_VIEW_SWITCH}
 renderHome();
 </script>

@@ -311,5 +311,35 @@ class GraphViewTest(unittest.TestCase):
         self.assertIn('id="graph-svg"', html)
 
 
+class RisksViewTest(unittest.TestCase):
+    def test_risks_view_renders_table(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn("function renderRisks", html)
+        self.assertIn("Likelihood", html)
+        self.assertIn("Impact", html)
+
+
+class RecentViewTest(unittest.TestCase):
+    def test_recent_view_renders_log(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn("function renderRecent", html)
+
+
+class OpenQsViewTest(unittest.TestCase):
+    def test_open_qs_view_renders_list(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn("function renderOpenQs", html)
+
+
+class EntitiesViewTest(unittest.TestCase):
+    def test_entities_view_renders_list(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn("function renderEntities", html)
+
+
 if __name__ == "__main__":
     unittest.main()
