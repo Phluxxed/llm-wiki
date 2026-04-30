@@ -38,7 +38,7 @@ If the file already exists: append the pointer line. If it does not exist: creat
 
 Before creating any files, check whether `wiki-agent.md` already exists in the directory.
 
-- **If it exists**: this is an existing wiki. Do not overwrite anything. Tell the user and stop.
+- **If it exists**: this is an existing wiki. Do not overwrite anything. **Migration check**: if `scripts/graph.py` or `graph.html` exists, this wiki predates the `render.py` change. Offer the user a one-line migration: replace `scripts/graph.py` with the current `skills/wikime/scripts/render.py`, delete `graph.html`, run `pip3 install --user markdown`, then `python3 scripts/render.py`. After confirming, also update `wiki-agent.md`'s Operations section to add the `render.py` rule. Otherwise tell the user and stop.
 - **If it does not exist**: proceed with scaffolding below.
 
 ## Step 4 — Create these files
@@ -56,11 +56,11 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `{page-type-slug}/` | Empty directory for primary wiki pages (e.g. `papers/`, `use-cases/`, `experiments/`) |
 | `entities/` | Empty directory for entity and concept pages |
 | `sources/` | Empty directory for immutable raw inputs |
-| `scripts/graph.py` | Copy from skill bundle (`skills/wikime/scripts/graph.py`); generates `graph.html` — D3.js force-directed graph, orphan detection, filter panel |
+| `scripts/render.py` | Copy from skill bundle (`skills/wikime/scripts/render.py`); generates `wiki.html` — single-file reader artifact with eight views (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities) |
 | `scripts/query.py` | Copy from skill bundle (`skills/wikime/scripts/query.py`); frontmatter queries — `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
 | `scripts/lint.py` | Copy from skill bundle (`skills/wikime/scripts/lint.py`); structural lint — missing sections, frontmatter, broken refs, open risks, index consistency |
 
-Both scripts require `pyyaml`: `pip3 install pyyaml`
+The scripts require `pyyaml` and `markdown`: `pip3 install pyyaml markdown`
 
 ## wiki-agent.md — required sections
 
@@ -70,6 +70,15 @@ This file is the agent's operating manual. Include all of these:
 2. **This Wiki's Page Type** — name the chosen type; note it's a wiki-level choice, not universal
 3. **Absolute Rules** — never edit `sources/`; always update `index.md`; always append to `log.md`; every derived page needs `source` in frontmatter; primary pages go in `{page-type-slug}/`; entity/concept pages go in `entities/`
 4. **Operations** — Ingest (ask user: quick or deep before extracting; then follow the completeness protocol below), Query (read index.md first; file substantive answers back as new pages), Update, Lint (structural checks + contradiction scan across all pages + source drift check for pages with fetchable source URLs)
+
+   **Saving sources — by type:**
+   - **PDFs**: already a file — move/copy to `sources/` as-is. Do not add a header block.
+   - **Confluence pages**: fetch content via the Atlassian MCP tool (`getConfluencePage` with `contentFormat: "markdown"`), write to `sources/` as a `.md` file (e.g. `sources/page-title-YYYY-MM-DD.md`), and prepend the Source File Header Block with the Confluence URL.
+   - **Other web pages / markdown / pastes**: write to `sources/` as a `.md` file and prepend the Source File Header Block.
+
+   **After every ingest, run `python3 scripts/lint.py`** and report findings before declaring done.
+
+   **After every ingest, also run `python3 scripts/render.py`** to regenerate `wiki.html`. The artifact must always reflect the current state of the wiki — this is non-optional.
 
    **Ingest completeness protocol (deep):**
    - **ToC first**: For any structured document (paper, standard, report, spec), extract or identify the table of contents before writing the wiki page. Use it as a checklist.
@@ -91,6 +100,7 @@ This file is the agent's operating manual. Include all of these:
 9. **index.md Format** — one row per page grouped by category; links use wiki-root-relative paths (e.g. `[title](./papers/foo.md)`, `[title](./entities/openai.md)`); focus summaries on what it does not what it is
 10. **log.md Format** — `## [YYYY-MM-DD] action | detail`; grep-able; append-only
 11. **Entity and Concept Pages** — `type: entity | concept` frontmatter field; `mentioned_in: []` backlink list (filenames); mandatory sections: What It Is, How We Use It, Where It Appears; optional: Cross-Cutting Risks, Key References; created automatically during Ingest for any tool/platform/pattern central to how the page works
+12. **Open Questions** — when a page contains an unresolved thread, mark it with the blockquote convention `> **Open question:** <text>`. The render script aggregates these into the Open questions view in `wiki.html`. Use one blockquote per question; one line each. Do not add `Open question:` headers — only the blockquote pattern is recognised.
 
 ### Lint checks — include all of these in the schema file's Lint section
 
@@ -126,11 +136,11 @@ YAML frontmatter block (title, type: entity|concept, category: Entities & Concep
 
 ## Step 5 — After scaffolding
 
-- Install pyyaml (required by all three scripts): `pip3 install --user pyyaml`
-  If that fails (externally-managed environment error), try `pip3 install pyyaml --break-system-packages` or create a venv: `python3 -m venv .venv && source .venv/bin/activate && pip install pyyaml`
+- Install dependencies (required by the scripts): `pip3 install --user pyyaml markdown`
+  If that fails (externally-managed environment error), try `pip3 install pyyaml markdown --break-system-packages` or create a venv: `python3 -m venv .venv && source .venv/bin/activate && pip install pyyaml markdown`
 - Ensure `README.md` includes a `## Scripts & Tooling` section with all three commands and what each produces:
   - `python3 scripts/lint.py` → structural health check
   - `python3 scripts/query.py --help` → frontmatter query filters
-  - `python3 scripts/graph.py` → generates `graph.html` (open in browser)
+  - `python3 scripts/render.py` → generates `wiki.html` (open in browser, or view as a Claude artifact)
 - Offer `git init && echo '.env' >> .gitignore` if this looks like a standalone repo
 - Confirm page type and categories look right before the user adds their first page

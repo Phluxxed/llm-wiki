@@ -60,6 +60,17 @@ When adding or significantly updating a page:
 1. Update `index.md` — add or revise the one-liner for that page
 2. Append a row to `log.md` — `## [YYYY-MM-DD] action | detail`
 3. Add a `Related` link in the new page if it connects to an existing one
+4. Re-run `python3 scripts/render.py` to refresh `wiki.html` so the reader reflects the change
+
+### Open Questions
+
+When a page raises something unresolved, mark it with a blockquote:
+
+```markdown
+> **Open question:** Does the rate limit reset on a sliding window or fixed window?
+```
+
+The render script aggregates these into the Open questions tab of `wiki.html`. Use one blockquote per question.
 
 Mandatory sections (always include): **What This Is**, **How It Works**, **Risk Register**, **Prerequisites**
 
@@ -79,6 +90,6 @@ Optional sections (include only if relevant): add domain-appropriate sections ba
 | --- | --- | --- |
 | `scripts/lint.py` | `python3 scripts/lint.py` | Structural health check — missing sections, broken refs, open risks, index consistency |
 | `scripts/query.py` | `python3 scripts/query.py --status Draft` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
-| `scripts/graph.py` | `python3 scripts/graph.py` | Generates `graph.html` — D3.js force-directed graph of all pages and entity relationships |
+| `scripts/render.py` | `python3 scripts/render.py` | Generates `wiki.html` — single-file reader with Home / Page / Search / Graph / Risks / Recent changes / Open questions / Entities views |
 
-Requires: `pip3 install pyyaml`
+Requires: `pip3 install pyyaml markdown`

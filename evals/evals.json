@@ -1,0 +1,77 @@
+{
+  "skill_name": "wikime",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "I want to set up a wiki to track my team's AI automation use cases. We mainly build Claude integrations and internal tools.",
+      "expected_output": "Fully scaffolded wiki in the working directory: wiki-agent.md (operating manual with all 11 required sections), CLAUDE.md (@wiki-agent.md pointer only), CONVENTIONS.md, README.md, index.md, log.md, _templates/ with page-type and entity templates, scripts/ with lint.py/query.py/graph.py, sources/ directory. python3 scripts/lint.py exits clean.",
+      "files": [],
+      "assertions": [
+        "wiki-agent.md exists",
+        "CLAUDE.md exists and its content is exactly '@wiki-agent.md' (one line, nothing else)",
+        "CONVENTIONS.md exists",
+        "_templates/ contains at least 2 .md files",
+        "scripts/ contains lint.py, query.py, and render.py",
+        "sources/ directory exists",
+        "index.md exists",
+        "log.md exists and contains an init entry",
+        "lint_output.txt contains 'No structural issues found'",
+        "wiki-agent.md contains all 11 required sections: Directory Structure, Page Type, Absolute Rules, Operations, File Naming, Source File Header Block, Risk Register Format, Wiki Page Frontmatter, index.md Format, log.md Format, Entity and Concept Pages"
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "Create a wiki for me",
+      "expected_output": "Skill asks both questions (what the wiki is for, what the primary page type is) before touching any files, then scaffolds the same complete structure as eval 0 based on the answers.",
+      "files": [],
+      "assertions": [
+        "wiki-agent.md exists",
+        "CLAUDE.md exists and contains '@wiki-agent.md'",
+        "CONVENTIONS.md exists",
+        "_templates/ contains at least 2 .md files",
+        "scripts/ contains lint.py, query.py, and render.py",
+        "sources/ directory exists",
+        "index.md exists",
+        "log.md exists and contains an init entry",
+        "lint_output.txt contains 'No structural issues found'",
+        "The skill asked at least one clarifying question before creating any wiki files (check transcript for questions before Write/Bash file creation calls)"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Set up a wiki for this project",
+      "expected_output": "Skill detects existing CLAUDE.md and appends '@wiki-agent.md' to it rather than overwriting. Original content (including EXISTING_CONTENT_MARKER) is preserved. All other wiki files are created normally. lint passes clean.",
+      "files": [],
+      "assertions": [
+        "wiki-agent.md exists",
+        "CLAUDE.md contains the string 'EXISTING_CONTENT_MARKER' (original content preserved)",
+        "CLAUDE.md also contains '@wiki-agent.md' (pointer appended)",
+        "CONVENTIONS.md exists",
+        "_templates/ contains at least 2 .md files",
+        "scripts/ contains lint.py, query.py, and render.py",
+        "sources/ directory exists",
+        "index.md exists",
+        "log.md exists and contains an init entry",
+        "lint_output.txt contains 'No structural issues found'"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Set up a wiki for tracking AI use cases. After scaffolding, ingest one short paper-style page using a brief test text I will paste in chat, then run scripts/render.py.",
+      "expected_output": "Same wiki structure as eval 0, plus one ingested page in the chosen page-type directory, plus a generated wiki.html at the wiki root containing the page's title, an inline MiniSearch search index, and a D3 graph data block.",
+      "files": [],
+      "assertions": [
+        "wiki-agent.md exists",
+        "scripts/ contains lint.py, query.py, and render.py",
+        "sources/ directory exists and contains at least one ingested file",
+        "At least one .md file exists under the chosen page-type directory (e.g. use-cases/, papers/)",
+        "wiki.html exists at the wiki root",
+        "wiki.html contains the string 'window.WIKI_DATA = '",
+        "wiki.html contains the string 'minisearch'",
+        "wiki.html contains the string 'd3js.org'",
+        "wiki.html contains the title of the ingested page",
+        "lint_output.txt contains 'No structural issues found'"
+      ]
+    }
+  ]
+}
