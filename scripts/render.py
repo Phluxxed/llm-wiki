@@ -12,22 +12,89 @@ Usage:
 """
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
 try:
-    import yaml  # noqa: F401
+    import yaml
 except ImportError:
     sys.exit("pyyaml required: pip3 install pyyaml")
 
 try:
-    import markdown  # noqa: F401
+    import markdown as md_lib
 except ImportError:
     sys.exit("markdown required: pip3 install markdown")
 
 WIKI_ROOT = Path(__file__).parent.parent
 EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
 EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals", "docs", "tests"}
+
+
+def parse_frontmatter(text: str) -> dict:
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}
+    try:
+        return yaml.safe_load(text[3:end]) or {}
+    except yaml.YAMLError:
+        return {}
+
+
+def page_type(fm: dict) -> str:
+    t = fm.get("type", "")
+    if t in ("entity", "concept"):
+        return t
+    cat = (fm.get("category") or "").lower()
+    if "meta" in cat:
+        return "meta"
+    return "use-case"
+
+
+def split_frontmatter_and_body(text: str) -> tuple[dict, str]:
+    if not text.startswith("---"):
+        return {}, text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}, text
+    fm = parse_frontmatter(text)
+    body = text[end + 4:].lstrip("\n")
+    return fm, body
+
+
+_MD = md_lib.Markdown(extensions=["extra", "sane_lists", "tables", "toc"])
+
+
+def render_markdown(body: str) -> str:
+    _MD.reset()
+    return _MD.convert(body)
+
+
+def collect_pages(wiki_root: Path = WIKI_ROOT) -> dict:
+    pages = {}
+    for path in sorted(wiki_root.rglob("*.md")):
+        rel = path.relative_to(wiki_root)
+        if rel.parts[0] in EXCLUDE_DIRS:
+            continue
+        if path.name in EXCLUDE_FILES:
+            continue
+        text = path.read_text(encoding="utf-8")
+        fm, body = split_frontmatter_and_body(text)
+        if not fm:
+            continue
+        key = str(rel).replace("\\", "/")
+        pages[key] = {
+            "path": key,
+            "title": fm.get("title") or path.stem.replace("-", " ").title(),
+            "type": page_type(fm),
+            "tags": list(fm.get("tags") or []),
+            "fm": fm,
+            "body": body,
+            "rendered_html": render_markdown(body),
+        }
+    return pages
 
 
 def main():
