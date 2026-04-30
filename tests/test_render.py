@@ -93,5 +93,34 @@ class CollectEdgesTest(unittest.TestCase):
         self.assertIn(("paper.md", "entities/openai.md"), edges)
 
 
+class CollectLogTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_parses_entries_in_reverse_chronological_order(self):
+        import render
+        (self.wiki_root / "log.md").write_text(
+            "# Log\n\n"
+            "## [2026-04-28] init | Created wiki\n"
+            "## [2026-04-29] add | Added page foo.md\n"
+            "## [2026-04-30] update | Updated page foo.md\n",
+            encoding="utf-8",
+        )
+        entries = render.collect_log(self.wiki_root)
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(entries[0]["date"], "2026-04-30")
+        self.assertEqual(entries[0]["action"], "update")
+        self.assertEqual(entries[0]["detail"], "Updated page foo.md")
+        self.assertEqual(entries[-1]["date"], "2026-04-28")
+
+    def test_returns_empty_list_when_no_log(self):
+        import render
+        self.assertEqual(render.collect_log(self.wiki_root), [])
+
+
 if __name__ == "__main__":
     unittest.main()

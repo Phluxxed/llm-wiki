@@ -72,6 +72,22 @@ def render_markdown(body: str) -> str:
     return _MD.convert(body)
 
 
+LOG_LINE_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})\]\s*([^|]+?)\s*\|\s*(.+?)\s*$")
+
+
+def collect_log(wiki_root: Path = WIKI_ROOT) -> list[dict]:
+    log_path = wiki_root / "log.md"
+    if not log_path.exists():
+        return []
+    entries = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        m = LOG_LINE_RE.match(line)
+        if m:
+            entries.append({"date": m.group(1), "action": m.group(2), "detail": m.group(3)})
+    entries.sort(key=lambda e: e["date"], reverse=True)
+    return entries
+
+
 def collect_edges(pages: dict) -> list[tuple[str, str]]:
     edges = set()
     link_re = re.compile(r'\[(?:[^\]]+)\]\(\.?/?([^)#\s]+\.md)\)')
