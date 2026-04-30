@@ -294,5 +294,13 @@ class PageViewTest(unittest.TestCase):
         self.assertIn("Mentioned by", html)
 
 
+class SearchViewTest(unittest.TestCase):
+    def test_search_view_includes_minisearch_and_handler(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn("minisearch", html.lower())
+        self.assertIn("function renderSearch", html)
+
+
 if __name__ == "__main__":
     unittest.main()

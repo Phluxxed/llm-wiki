@@ -372,13 +372,61 @@ window.openPage = function(path) { renderPage(path); showView('page'); };
 """
 
 
+HTML_SCRIPT_SEARCH = """
+let _searchIndex = null;
+function ensureSearchIndex() {
+  if (_searchIndex) return _searchIndex;
+  _searchIndex = new MiniSearch({
+    fields: ['title', 'body', 'tags', 'category'],
+    storeFields: ['title', 'category'],
+    searchOptions: { boost: { title: 2 }, fuzzy: 0.2, prefix: true }
+  });
+  _searchIndex.addAll(WIKI_DATA.search);
+  return _searchIndex;
+}
+
+function renderSearch() {
+  const root = document.getElementById('view-search');
+  if (root.dataset.built) return;
+  root.dataset.built = '1';
+  root.innerHTML =
+    '<h2>Search</h2>' +
+    '<input id="search-input" type="text" placeholder="Search title, body, tags, category">' +
+    '<div id="search-results" style="margin-top:14px"></div>';
+  const input = document.getElementById('search-input');
+  const results = document.getElementById('search-results');
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (!q) { results.innerHTML = ''; return; }
+    const idx = ensureSearchIndex();
+    const hits = idx.search(q).slice(0, 30);
+    if (hits.length === 0) { results.innerHTML = '<p class="muted">No matches.</p>'; return; }
+    results.innerHTML = hits.map(h =>
+      '<div class="card" style="cursor:pointer" data-page="' + h.id + '">' +
+        '<strong>' + (WIKI_DATA.pages[h.id]?.title || h.title) + '</strong>' +
+        ' <span class="muted">' + (h.category || '') + '</span>' +
+      '</div>'
+    ).join('');
+    results.querySelectorAll('.card[data-page]').forEach(c => {
+      c.addEventListener('click', () => window.openPage(c.dataset.page));
+    });
+  });
+}
+"""
+
+
 HTML_SCRIPT_VIEW_SWITCH = """
 const buttons = document.querySelectorAll('#sidebar nav button');
 const views = document.querySelectorAll('.view');
 function showView(name) {
   views.forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
   buttons.forEach(b => b.classList.toggle('active', b.dataset.view === name));
-  if (name === 'graph' && window.renderGraph) window.renderGraph();
+  if (name === 'search' && window.renderSearch) window.renderSearch();
+  if (name === 'graph'  && window.renderGraph)  window.renderGraph();
+  if (name === 'risks'  && window.renderRisks)  window.renderRisks();
+  if (name === 'recent' && window.renderRecent) window.renderRecent();
+  if (name === 'open-qs' && window.renderOpenQs) window.renderOpenQs();
+  if (name === 'entities' && window.renderEntities) window.renderEntities();
 }
 buttons.forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
 showView('home');
@@ -427,6 +475,7 @@ def render_html(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wiki</title>
+<script src="https://cdn.jsdelivr.net/npm/minisearch@6/dist/umd/index.min.js"></script>
 <style>{HTML_HEAD_CSS}</style>
 </head>
 <body>
@@ -442,6 +491,7 @@ window.WIKI_DATA = {data_json};
 <script>
 {HTML_SCRIPT_HOME}
 {HTML_SCRIPT_PAGE}
+{HTML_SCRIPT_SEARCH}
 {HTML_SCRIPT_VIEW_SWITCH}
 renderHome();
 </script>
