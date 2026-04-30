@@ -72,6 +72,19 @@ def render_markdown(body: str) -> str:
     return _MD.convert(body)
 
 
+def build_search_index(pages: dict) -> list[dict]:
+    return [
+        {
+            "id": path,
+            "title": page["title"],
+            "category": page["fm"].get("category") or "",
+            "tags": list(page["tags"]),
+            "body": page["body"],
+        }
+        for path, page in pages.items()
+    ]
+
+
 OPEN_Q_RE = re.compile(r"^>\s*\*\*Open question:\*\*\s*(.+?)\s*$", re.MULTILINE)
 
 

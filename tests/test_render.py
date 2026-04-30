@@ -187,5 +187,38 @@ class ExtractOpenQsTest(unittest.TestCase):
         self.assertEqual(qs[1]["question"], "What is the rate limit ceiling?")
 
 
+class BuildSearchIndexTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write_page(self, rel, frontmatter, body):
+        import yaml
+        path = self.wiki_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fm = yaml.safe_dump(frontmatter, sort_keys=False).strip()
+        path.write_text(f"---\n{fm}\n---\n{body}\n", encoding="utf-8")
+
+    def test_returns_one_doc_per_page_with_search_fields(self):
+        import render
+        self.write_page(
+            "p.md",
+            {"title": "Foo", "category": "Demo", "status": "Live", "owner": "x", "tags": ["alpha", "beta"], "created": "2026-04-30", "last_reviewed": "2026-04-30"},
+            "Body text here.",
+        )
+        pages = render.collect_pages(self.wiki_root)
+        docs = render.build_search_index(pages)
+        self.assertEqual(len(docs), 1)
+        d = docs[0]
+        self.assertEqual(d["id"], "p.md")
+        self.assertEqual(d["title"], "Foo")
+        self.assertEqual(d["category"], "Demo")
+        self.assertEqual(d["tags"], ["alpha", "beta"])
+        self.assertIn("Body text here", d["body"])
+
+
 if __name__ == "__main__":
     unittest.main()
