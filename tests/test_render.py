@@ -256,6 +256,16 @@ class RenderHtmlShellTest(unittest.TestCase):
         self.assertEqual(set(data.keys()), {"pages", "edges", "log", "risks", "open_qs", "search"})
 
 
+class SidebarPagesTest(unittest.TestCase):
+    def test_sidebar_has_pages_section_and_builder(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn('id="sidebar-pages"', html)
+        self.assertIn("function buildSidebarPages", html)
+        self.assertIn("function setSidebarActivePage", html)
+        self.assertIn("buildSidebarPages();", html)
+
+
 class HomeViewTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

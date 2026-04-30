@@ -217,13 +217,24 @@ HTML_HEAD_CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: #0f1117; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; line-height: 1.55; }
 a { color: #93c5fd; text-decoration: none; } a:hover { text-decoration: underline; }
-#layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
-#sidebar { background: #0a0d14; border-right: 1px solid #1a2030; padding: 18px 14px; overflow-y: auto; }
+#layout { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+#sidebar { background: #0a0d14; border-right: 1px solid #1a2030; padding: 18px 14px; overflow-y: auto; max-height: 100vh; }
 #sidebar h1 { font-size: 14px; color: #cbd5e1; margin-bottom: 14px; }
-#sidebar nav { display: flex; flex-direction: column; gap: 2px; }
-#sidebar nav button { background: none; border: none; color: #94a3b8; text-align: left; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; }
-#sidebar nav button:hover { background: #11151f; color: #e2e8f0; }
-#sidebar nav button.active { background: #172033; color: #93c5fd; }
+#sidebar > nav { display: flex; flex-direction: column; gap: 2px; }
+#sidebar > nav > button { background: none; border: none; color: #94a3b8; text-align: left; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+#sidebar > nav > button:hover { background: #11151f; color: #e2e8f0; }
+#sidebar > nav > button.active { background: #172033; color: #93c5fd; }
+.sb-divider { border: none; border-top: 1px solid #1a2030; margin: 14px 0 10px; }
+.sb-section-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #475569; margin: 0 8px 6px; font-weight: 600; }
+.sb-cat { margin-bottom: 2px; }
+.sb-cat-header { font-size: 11px; color: #cbd5e1; padding: 4px 8px; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; border-radius: 3px; }
+.sb-cat-header:hover { background: #11151f; }
+.sb-chev { font-size: 9px; color: #64748b; width: 10px; display: inline-block; }
+.sb-cat-body { display: block; }
+.sb-cat.collapsed .sb-cat-body { display: none; }
+.sb-page { background: none; border: none; color: #94a3b8; text-align: left; padding: 4px 8px 4px 22px; border-radius: 3px; cursor: pointer; font-size: 12px; width: 100%; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-page:hover { background: #11151f; color: #e2e8f0; }
+.sb-page.active { background: #172033; color: #93c5fd; }
 #main { padding: 24px 32px; overflow-y: auto; max-height: 100vh; }
 .view { display: none; }
 .view.active { display: block; }
@@ -302,6 +313,9 @@ def _nav_html() -> str:
   <nav>
 {buttons}
   </nav>
+  <hr class="sb-divider">
+  <div class="sb-section-title">Pages</div>
+  <div id="sidebar-pages"></div>
 </nav>"""
 
 
@@ -357,6 +371,75 @@ function renderHome() {
 """
 
 
+HTML_SCRIPT_SIDEBAR_PAGES = """
+function buildSidebarPages() {
+  const root = document.getElementById('sidebar-pages');
+  if (!root) return;
+  const pages = Object.values(WIKI_DATA.pages);
+  if (pages.length === 0) {
+    root.innerHTML = '<div class="muted" style="font-size:11px;padding:6px 8px">No pages yet.</div>';
+    return;
+  }
+  const groups = {};
+  pages.forEach(p => {
+    const cat = p.category || 'Uncategorized';
+    (groups[cat] = groups[cat] || []).push(p);
+  });
+  Object.values(groups).forEach(arr => arr.sort((a, b) => a.title.localeCompare(b.title)));
+  const cats = Object.keys(groups).sort();
+  let html = '';
+  cats.forEach(cat => {
+    html += '<div class="sb-cat">';
+    html += '  <div class="sb-cat-header"><span class="sb-chev">▾</span> ' + cat + '</div>';
+    html += '  <div class="sb-cat-body">';
+    groups[cat].forEach(p => {
+      html += '<button class="sb-page" data-page="' + p.path + '" title="' + p.title + '">' + p.title + '</button>';
+    });
+    html += '  </div>';
+    html += '</div>';
+  });
+  root.innerHTML = html;
+
+  root.querySelectorAll('.sb-cat-header').forEach(h => {
+    h.addEventListener('click', () => {
+      const cat = h.parentElement;
+      cat.classList.toggle('collapsed');
+      const chev = h.querySelector('.sb-chev');
+      chev.textContent = cat.classList.contains('collapsed') ? '▸' : '▾';
+    });
+  });
+
+  root.querySelectorAll('.sb-page').forEach(b => {
+    b.addEventListener('click', () => window.openPage(b.dataset.page));
+  });
+}
+
+function setSidebarActivePage(path) {
+  const root = document.getElementById('sidebar-pages');
+  if (!root) return;
+  root.querySelectorAll('.sb-page').forEach(b => {
+    const isActive = b.dataset.page === path;
+    b.classList.toggle('active', isActive);
+    if (isActive) {
+      const cat = b.closest('.sb-cat');
+      if (cat && cat.classList.contains('collapsed')) {
+        cat.classList.remove('collapsed');
+        const chev = cat.querySelector('.sb-chev');
+        if (chev) chev.textContent = '▾';
+      }
+      b.scrollIntoView({ block: 'nearest' });
+    }
+  });
+}
+
+function clearSidebarActivePage() {
+  const root = document.getElementById('sidebar-pages');
+  if (!root) return;
+  root.querySelectorAll('.sb-page.active').forEach(b => b.classList.remove('active'));
+}
+"""
+
+
 HTML_SCRIPT_PAGE = """
 function edgesFor(path) {
   const out = [], inc = [];
@@ -401,7 +484,11 @@ function renderPage(path) {
   });
 }
 
-window.openPage = function(path) { renderPage(path); showView('page'); };
+window.openPage = function(path) {
+  renderPage(path);
+  showView('page');
+  if (window.setSidebarActivePage) window.setSidebarActivePage(path);
+};
 """
 
 
@@ -856,11 +943,12 @@ function renderEntities() {
 
 
 HTML_SCRIPT_VIEW_SWITCH = """
-const buttons = document.querySelectorAll('#sidebar nav button');
+const buttons = document.querySelectorAll('#sidebar > nav > button');
 const views = document.querySelectorAll('.view');
 function showView(name) {
   views.forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
   buttons.forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  if (name !== 'page' && window.clearSidebarActivePage) window.clearSidebarActivePage();
   if (name === 'search' && window.renderSearch) window.renderSearch();
   if (name === 'graph'  && window.renderGraph)  window.renderGraph();
   if (name === 'risks'  && window.renderRisks)  window.renderRisks();
@@ -938,7 +1026,9 @@ window.WIKI_DATA = {data_json};
 {HTML_SCRIPT_RECENT}
 {HTML_SCRIPT_OPEN_QS}
 {HTML_SCRIPT_ENTITIES}
+{HTML_SCRIPT_SIDEBAR_PAGES}
 {HTML_SCRIPT_VIEW_SWITCH}
+buildSidebarPages();
 renderHome();
 </script>
 </body>
