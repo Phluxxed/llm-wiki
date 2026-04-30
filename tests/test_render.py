@@ -310,6 +310,27 @@ class GraphViewTest(unittest.TestCase):
         self.assertIn("function renderGraph", html)
         self.assertIn('id="graph-svg"', html)
 
+    def test_graph_view_has_full_filter_features(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        # Filter UI features that were on graph.html and must remain.
+        self.assertIn('id="gp-search"', html)
+        self.assertIn('id="gp-type-chips"', html)
+        self.assertIn('id="gp-tag-chips"', html)
+        self.assertIn('id="gp-depth-slider"', html)
+        self.assertIn('id="gp-toggle-labels"', html)
+        self.assertIn('id="gp-toggle-arrows"', html)
+        self.assertIn('id="gp-link-dist"', html)
+        self.assertIn('id="gp-charge-str"', html)
+        self.assertIn('id="graph-panel-toggle"', html)
+        self.assertIn('id="graph-tooltip"', html)
+        # Graph rendering features.
+        self.assertIn('marker id="arrow"', html)
+        self.assertIn('function nodeRadius', html)
+        self.assertIn('function getNeighbours', html)
+        self.assertIn('function highlight', html)
+        self.assertIn('d3.zoom', html)
+
 
 class RisksViewTest(unittest.TestCase):
     def test_risks_view_renders_table(self):
