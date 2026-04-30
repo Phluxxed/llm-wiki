@@ -23,7 +23,7 @@ your-wiki/
 │   └── entity.md          ← template for entity/concept pages
 ├── sources/               ← immutable raw inputs (never edited after saving)
 └── scripts/
-    ├── graph.py           ← generates graph.html — D3.js force-directed graph of all pages
+    ├── render.py          ← generates wiki.html — single-file reader with eight views
     ├── lint.py            ← structural health check
     └── query.py           ← frontmatter queries (filter by status, category, tag, etc.)
 ```
@@ -41,10 +41,10 @@ ln -s ~/llm-wiki ~/.claude/skills/wikime
 
 Each agent has its own skills directory — your agent will know where to look.
 
-Requires `pyyaml` for the scripts:
+Requires `pyyaml` and `markdown` for the scripts:
 
 ```bash
-pip3 install pyyaml
+pip3 install pyyaml markdown
 ```
 
 ## Usage
@@ -67,7 +67,7 @@ The skill asks two questions — what the wiki is for, and what the primary page
 | --- | --- | --- |
 | `scripts/lint.py` | `python3 scripts/lint.py` | Structural health check — missing sections, broken refs, open risks, index consistency |
 | `scripts/query.py` | `python3 scripts/query.py --help` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
-| `scripts/graph.py` | `python3 scripts/graph.py` | Generates `graph.html` — open in browser for an interactive graph of all pages and relationships |
+| `scripts/render.py` | `python3 scripts/render.py` | Generates `wiki.html` — single-file reader (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities). Open in a browser or view as a Claude artifact |
 
 ## Agent compatibility
 
