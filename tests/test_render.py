@@ -155,5 +155,37 @@ class ExtractRisksTest(unittest.TestCase):
         self.assertEqual(statuses, {"⚠️", "🔲"})
 
 
+class ExtractOpenQsTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write_page(self, rel, frontmatter, body):
+        import yaml
+        path = self.wiki_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fm = yaml.safe_dump(frontmatter, sort_keys=False).strip()
+        path.write_text(f"---\n{fm}\n---\n{body}\n", encoding="utf-8")
+
+    def test_extracts_open_question_blockquotes(self):
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("p.md", {**base, "title": "P"}, (
+            "Some prose.\n\n"
+            "> **Open question:** Does X reset on a sliding window?\n\n"
+            "More prose.\n\n"
+            "> **Open question:** What is the rate limit ceiling?\n"
+        ))
+        pages = render.collect_pages(self.wiki_root)
+        qs = render.extract_open_qs(pages)
+        self.assertEqual(len(qs), 2)
+        self.assertEqual(qs[0]["page"], "p.md")
+        self.assertEqual(qs[0]["question"], "Does X reset on a sliding window?")
+        self.assertEqual(qs[1]["question"], "What is the rate limit ceiling?")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -72,6 +72,21 @@ def render_markdown(body: str) -> str:
     return _MD.convert(body)
 
 
+OPEN_Q_RE = re.compile(r"^>\s*\*\*Open question:\*\*\s*(.+?)\s*$", re.MULTILINE)
+
+
+def extract_open_qs(pages: dict) -> list[dict]:
+    out = []
+    for path, page in pages.items():
+        for m in OPEN_Q_RE.finditer(page["body"]):
+            out.append({
+                "page": path,
+                "page_title": page["title"],
+                "question": m.group(1),
+            })
+    return out
+
+
 RISK_OPEN_SYMBOLS = ("⚠️", "🔲")
 
 
