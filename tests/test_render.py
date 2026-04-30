@@ -341,5 +341,37 @@ class EntitiesViewTest(unittest.TestCase):
         self.assertIn("function renderEntities", html)
 
 
+class EndToEndRenderTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write_page(self, rel, frontmatter, body):
+        import yaml
+        path = self.wiki_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fm = yaml.safe_dump(frontmatter, sort_keys=False).strip()
+        path.write_text(f"---\n{fm}\n---\n{body}\n", encoding="utf-8")
+
+    def test_render_pipeline_writes_wiki_html(self):
+        import render
+        self.write_page(
+            "use-cases/foo.md",
+            {"title": "Foo", "category": "Demo", "status": "Live", "owner": "x", "tags": ["alpha"], "created": "2026-04-30", "last_reviewed": "2026-04-30"},
+            "## What This Is\nFoo body.\n\n## Risk Register\n| Risk | Likelihood | Impact | Mitigation | Status |\n| --- | --- | --- | --- | --- |\n| R1 | Low | Med | M1 | ⚠️ Action required |\n",
+        )
+        (self.wiki_root / "log.md").write_text("## [2026-04-30] init | Created wiki\n", encoding="utf-8")
+        out = self.wiki_root / "wiki.html"
+        render.run(self.wiki_root, out)
+        html = out.read_text(encoding="utf-8")
+        self.assertIn("Foo", html)
+        self.assertIn('"alpha"', html)
+        self.assertIn("Created wiki", html)
+        self.assertIn('"⚠️"', html)
+
+
 if __name__ == "__main__":
     unittest.main()

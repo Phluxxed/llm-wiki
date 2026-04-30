@@ -663,11 +663,22 @@ renderHome();
 """
 
 
+def run(wiki_root: Path, output_path: Path) -> None:
+    pages = collect_pages(wiki_root)
+    edges = collect_edges(pages)
+    log = collect_log(wiki_root)
+    risks = extract_risks(pages)
+    open_qs = extract_open_qs(pages)
+    search_docs = build_search_index(pages)
+    html = render_html(pages, edges, log, risks, open_qs, search_docs)
+    output_path.write_text(html, encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default=str(WIKI_ROOT / "wiki.html"))
     args = parser.parse_args()
-    Path(args.output).write_text("<!DOCTYPE html><html><body>Empty wiki.</body></html>", encoding="utf-8")
+    run(WIKI_ROOT, Path(args.output))
     print(f"Wrote {args.output}")
 
 
