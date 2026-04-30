@@ -272,6 +272,58 @@ def _nav_html() -> str:
 </nav>"""
 
 
+HTML_SCRIPT_HOME = """
+function summaryFor(page) {
+  const html = page.rendered_html || '';
+  const m = html.match(/<p>([^<]{1,180})/);
+  return m ? m[1] : '';
+}
+
+function daysAgo(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '';
+  const days = Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return days + ' days ago';
+  if (days < 365) return Math.floor(days / 30) + ' months ago';
+  return Math.floor(days / 365) + ' years ago';
+}
+
+function renderHome() {
+  const root = document.getElementById('view-home');
+  const pages = Object.values(WIKI_DATA.pages);
+  const groups = {};
+  pages.forEach(p => {
+    const cat = p.category || 'Uncategorized';
+    (groups[cat] = groups[cat] || []).push(p);
+  });
+  const sorted = Object.keys(groups).sort();
+  const html = ['<h2>Pages</h2>'];
+  if (pages.length === 0) html.push('<p class="muted">No pages yet.</p>');
+  sorted.forEach(cat => {
+    html.push('<h3 style="margin-top:18px;font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">' + cat + '</h3>');
+    groups[cat].forEach(p => {
+      html.push('<div class="card" style="cursor:pointer" data-page="' + p.path + '">');
+      html.push('  <div><strong>' + p.title + '</strong> ');
+      if (p.status) html.push('<span class="badge">' + p.status + '</span>');
+      html.push('</div>');
+      const summary = summaryFor(p);
+      if (summary) html.push('  <div class="muted" style="margin-top:4px">' + summary + '</div>');
+      const ago = daysAgo(p.last_reviewed);
+      if (ago) html.push('  <div class="muted" style="margin-top:4px">updated ' + ago + '</div>');
+      html.push('</div>');
+    });
+  });
+  root.innerHTML = html.join('\\n');
+  root.querySelectorAll('.card[data-page]').forEach(card => {
+    card.addEventListener('click', () => { window.openPage(card.dataset.page); });
+  });
+}
+"""
+
+
 HTML_SCRIPT_VIEW_SWITCH = """
 const buttons = document.querySelectorAll('#sidebar nav button');
 const views = document.querySelectorAll('.view');
@@ -340,7 +392,10 @@ def render_html(
 window.WIKI_DATA = {data_json};
 </script>
 <script>
+{HTML_SCRIPT_HOME}
 {HTML_SCRIPT_VIEW_SWITCH}
+window.openPage = function(p) {{ /* implemented in Task 10 */ }};
+renderHome();
 </script>
 </body>
 </html>

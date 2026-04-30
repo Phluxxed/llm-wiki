@@ -256,5 +256,34 @@ class RenderHtmlShellTest(unittest.TestCase):
         self.assertEqual(set(data.keys()), {"pages", "edges", "log", "risks", "open_qs", "search"})
 
 
+class HomeViewTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write_page(self, rel, frontmatter, body):
+        import yaml
+        path = self.wiki_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fm = yaml.safe_dump(frontmatter, sort_keys=False).strip()
+        path.write_text(f"---\n{fm}\n---\n{body}\n", encoding="utf-8")
+
+    def test_home_view_includes_render_function_and_data_groups(self):
+        import render
+        self.write_page(
+            "p.md",
+            {"title": "Foo", "category": "Alpha", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-01", "last_reviewed": "2026-04-30"},
+            "## What This Is\nFoo description.",
+        )
+        pages = render.collect_pages(self.wiki_root)
+        html = render.render_html(pages, [], [], [], [], [])
+        self.assertIn("renderHome", html)
+        self.assertIn('"Alpha"', html)
+        self.assertIn('"Foo"', html)
+
+
 if __name__ == "__main__":
     unittest.main()
