@@ -256,6 +256,17 @@ class RenderHtmlShellTest(unittest.TestCase):
         self.assertEqual(set(data.keys()), {"pages", "edges", "log", "risks", "open_qs", "search"})
 
 
+class ProvenanceBadgeTest(unittest.TestCase):
+    def test_provenance_badge_styles_and_labels_present(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn(".badge.prov-source", html)
+        self.assertIn(".badge.prov-synth", html)
+        # Labels emitted by Home, Page, and Search renderers:
+        self.assertIn("'source'", html)
+        self.assertIn("'synthesized'", html)
+
+
 class SidebarPagesTest(unittest.TestCase):
     def test_sidebar_has_pages_section_and_builder(self):
         import render

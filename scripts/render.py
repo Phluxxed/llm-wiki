@@ -242,6 +242,8 @@ h2 { font-size: 18px; color: #cbd5e1; margin-bottom: 16px; font-weight: 600; }
 .muted { color: #64748b; font-size: 12px; }
 .card { background: #11151f; border: 1px solid #1f2937; border-radius: 6px; padding: 14px 16px; margin-bottom: 10px; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: #1e2130; color: #94a3b8; margin-right: 6px; }
+.badge.prov-source { background: #102036; border: 1px solid #1d3357; color: #93c5fd; }
+.badge.prov-synth  { background: #0e2a20; border: 1px solid #14533d; color: #6ee7b7; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #1f2937; font-size: 13px; vertical-align: top; }
 th { color: #94a3b8; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -355,6 +357,9 @@ function renderHome() {
       html.push('<div class="card" style="cursor:pointer" data-page="' + p.path + '">');
       html.push('  <div><strong>' + p.title + '</strong> ');
       if (p.status) html.push('<span class="badge">' + p.status + '</span>');
+      const provClass = p.source ? 'prov-source' : 'prov-synth';
+      const provLabel = p.source ? 'source' : 'synthesized';
+      html.push('<span class="badge ' + provClass + '">' + provLabel + '</span>');
       html.push('</div>');
       const summary = summaryFor(p);
       if (summary) html.push('  <div class="muted" style="margin-top:4px">' + summary + '</div>');
@@ -457,6 +462,9 @@ function renderPage(path) {
   const { out, inc } = edgesFor(path);
   const meta = [];
   if (page.status)        meta.push('<span class="badge">' + page.status + '</span>');
+  const provClass = page.source ? 'prov-source' : 'prov-synth';
+  const provLabel = page.source ? 'source' : 'synthesized';
+  meta.push('<span class="badge ' + provClass + '">' + provLabel + '</span>');
   if (page.owner)         meta.push('<span class="muted">owner: ' + page.owner + '</span>');
   if (page.last_reviewed) meta.push('<span class="muted">reviewed ' + page.last_reviewed + '</span>');
   const tags = (page.tags || []).map(t => '<span class="badge">#' + t + '</span>').join(' ');
@@ -521,12 +529,16 @@ function renderSearch() {
     const idx = ensureSearchIndex();
     const hits = idx.search(q).slice(0, 30);
     if (hits.length === 0) { results.innerHTML = '<p class="muted">No matches.</p>'; return; }
-    results.innerHTML = hits.map(h =>
-      '<div class="card" style="cursor:pointer" data-page="' + h.id + '">' +
-        '<strong>' + (WIKI_DATA.pages[h.id]?.title || h.title) + '</strong>' +
+    results.innerHTML = hits.map(h => {
+      const page = WIKI_DATA.pages[h.id];
+      const provClass = page && page.source ? 'prov-source' : 'prov-synth';
+      const provLabel = page && page.source ? 'source' : 'synthesized';
+      return '<div class="card" style="cursor:pointer" data-page="' + h.id + '">' +
+        '<strong>' + (page?.title || h.title) + '</strong>' +
+        ' <span class="badge ' + provClass + '">' + provLabel + '</span>' +
         ' <span class="muted">' + (h.category || '') + '</span>' +
-      '</div>'
-    ).join('');
+      '</div>';
+    }).join('');
     results.querySelectorAll('.card[data-page]').forEach(c => {
       c.addEventListener('click', () => window.openPage(c.dataset.page));
     });
