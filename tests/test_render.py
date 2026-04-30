@@ -220,5 +220,41 @@ class BuildSearchIndexTest(unittest.TestCase):
         self.assertIn("Body text here", d["body"])
 
 
+class RenderHtmlShellTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_html_contains_required_sections(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn("<!DOCTYPE html>", html)
+        self.assertIn('<nav id="sidebar">', html)
+        self.assertIn('id="view-home"', html)
+        self.assertIn('id="view-page"', html)
+        self.assertIn('id="view-search"', html)
+        self.assertIn('id="view-graph"', html)
+        self.assertIn('id="view-risks"', html)
+        self.assertIn('id="view-recent"', html)
+        self.assertIn('id="view-open-qs"', html)
+        self.assertIn('id="view-entities"', html)
+        self.assertIn("window.WIKI_DATA", html)
+
+    def test_data_block_is_valid_json(self):
+        import json
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        marker = "window.WIKI_DATA = "
+        start = html.find(marker)
+        self.assertGreater(start, -1)
+        end = html.find("</script>", start)
+        block = html[start + len(marker):end].rstrip("; \n")
+        data = json.loads(block)
+        self.assertEqual(set(data.keys()), {"pages", "edges", "log", "risks", "open_qs", "search"})
+
+
 if __name__ == "__main__":
     unittest.main()

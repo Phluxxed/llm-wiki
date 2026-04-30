@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -210,6 +211,140 @@ def collect_pages(wiki_root: Path = WIKI_ROOT) -> dict:
             "rendered_html": render_markdown(body),
         }
     return pages
+
+
+HTML_HEAD_CSS = """
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0f1117; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; line-height: 1.55; }
+a { color: #93c5fd; text-decoration: none; } a:hover { text-decoration: underline; }
+#layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+#sidebar { background: #0a0d14; border-right: 1px solid #1a2030; padding: 18px 14px; overflow-y: auto; }
+#sidebar h1 { font-size: 14px; color: #cbd5e1; margin-bottom: 14px; }
+#sidebar nav { display: flex; flex-direction: column; gap: 2px; }
+#sidebar nav button { background: none; border: none; color: #94a3b8; text-align: left; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+#sidebar nav button:hover { background: #11151f; color: #e2e8f0; }
+#sidebar nav button.active { background: #172033; color: #93c5fd; }
+#main { padding: 24px 32px; overflow-y: auto; max-height: 100vh; }
+.view { display: none; }
+.view.active { display: block; }
+h2 { font-size: 18px; color: #cbd5e1; margin-bottom: 16px; font-weight: 600; }
+.muted { color: #64748b; font-size: 12px; }
+.card { background: #11151f; border: 1px solid #1f2937; border-radius: 6px; padding: 14px 16px; margin-bottom: 10px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: #1e2130; color: #94a3b8; margin-right: 6px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #1f2937; font-size: 13px; vertical-align: top; }
+th { color: #94a3b8; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+input[type="text"] { width: 100%; background: #1e2130; border: 1px solid #2d3748; color: #e2e8f0; padding: 8px 10px; border-radius: 4px; font-size: 13px; outline: none; }
+input[type="text"]:focus { border-color: #60a5fa; }
+.markdown-body h1 { font-size: 22px; margin: 18px 0 10px; color: #e2e8f0; }
+.markdown-body h2 { font-size: 17px; margin: 18px 0 8px; color: #cbd5e1; }
+.markdown-body h3 { font-size: 14px; margin: 14px 0 6px; color: #cbd5e1; }
+.markdown-body p { margin-bottom: 10px; }
+.markdown-body ul, .markdown-body ol { margin: 0 0 10px 24px; }
+.markdown-body code { background: #11151f; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.markdown-body pre { background: #11151f; padding: 10px; border-radius: 4px; overflow-x: auto; margin-bottom: 10px; }
+.markdown-body blockquote { border-left: 3px solid #334155; padding-left: 12px; color: #94a3b8; margin: 10px 0; }
+.markdown-body table { margin: 10px 0; }
+"""
+
+
+HTML_NAV_BUTTONS = [
+    ("home", "Home"),
+    ("search", "Search"),
+    ("graph", "Graph"),
+    ("risks", "Risks"),
+    ("recent", "Recent changes"),
+    ("open-qs", "Open questions"),
+    ("entities", "Entities"),
+]
+
+
+def _nav_html() -> str:
+    buttons = "\n".join(
+        f'      <button data-view="{key}">{label}</button>'
+        for key, label in HTML_NAV_BUTTONS
+    )
+    return f"""<nav id="sidebar">
+  <h1>Wiki</h1>
+  <nav>
+{buttons}
+  </nav>
+</nav>"""
+
+
+HTML_SCRIPT_VIEW_SWITCH = """
+const buttons = document.querySelectorAll('#sidebar nav button');
+const views = document.querySelectorAll('.view');
+function showView(name) {
+  views.forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+  buttons.forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  if (name === 'graph' && window.renderGraph) window.renderGraph();
+}
+buttons.forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
+showView('home');
+"""
+
+
+def render_html(
+    pages: dict,
+    edges: list,
+    log: list,
+    risks: list,
+    open_qs: list,
+    search_docs: list,
+) -> str:
+    data = {
+        "pages": {
+            path: {
+                "path": path,
+                "title": p["title"],
+                "type": p["type"],
+                "category": p["fm"].get("category") or "",
+                "status": p["fm"].get("status") or "",
+                "owner": p["fm"].get("owner") or "",
+                "tags": list(p["tags"]),
+                "created": str(p["fm"].get("created") or ""),
+                "last_reviewed": str(p["fm"].get("last_reviewed") or ""),
+                "source": p["fm"].get("source") or "",
+                "rendered_html": p["rendered_html"],
+            }
+            for path, p in pages.items()
+        },
+        "edges": list(edges),
+        "log": list(log),
+        "risks": list(risks),
+        "open_qs": list(open_qs),
+        "search": list(search_docs),
+    }
+    data_json = json.dumps(data, ensure_ascii=False)
+
+    view_ids = ["home", "page", "search", "graph", "risks", "recent", "open-qs", "entities"]
+    view_divs = "\n".join(f'    <section class="view" id="view-{vid}"></section>' for vid in view_ids)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wiki</title>
+<style>{HTML_HEAD_CSS}</style>
+</head>
+<body>
+<div id="layout">
+{_nav_html()}
+  <main id="main">
+{view_divs}
+  </main>
+</div>
+<script>
+window.WIKI_DATA = {data_json};
+</script>
+<script>
+{HTML_SCRIPT_VIEW_SWITCH}
+</script>
+</body>
+</html>
+"""
 
 
 def main():
