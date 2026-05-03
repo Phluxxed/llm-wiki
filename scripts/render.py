@@ -169,14 +169,41 @@ def collect_log(wiki_root: Path = WIKI_ROOT) -> list[dict]:
     return entries
 
 
+def resolve_link(raw: str, src_file: str, targets: set | dict) -> str | None:
+    """Resolve a markdown link target to a wiki-root-relative key.
+
+    Tries wiki-root-relative interpretation first (`./components/X.md`,
+    `components/X.md`), then falls back to source-relative resolution so
+    sibling `./X.md` and `../other-dir/X.md` links from inside a sub-dir
+    also resolve. Returns the matched key, or None.
+
+    `targets` may be a dict (membership test against keys) or a set.
+    """
+    raw = raw.replace("\\", "/")
+    cleaned = raw[2:] if raw.startswith("./") else raw
+
+    if cleaned in targets:
+        return cleaned
+
+    src_dir_parts = src_file.split("/")[:-1]
+    parts = list(src_dir_parts)
+    for c in cleaned.split("/"):
+        if c == "..":
+            if parts:
+                parts.pop()
+        elif c and c != ".":
+            parts.append(c)
+    resolved = "/".join(parts)
+    return resolved if resolved in targets else None
+
+
 def collect_edges(pages: dict) -> list[tuple[str, str]]:
     edges = set()
-    link_re = re.compile(r'\[(?:[^\]]+)\]\(\.?/?([^)#\s]+\.md)\)')
+    link_re = re.compile(r'\[(?:[^\]]+)\]\(([^)#\s]+\.md)\)')
     for src_file, page in pages.items():
         for raw in link_re.findall(page["body"]):
-            tgt = raw[2:] if raw.startswith("./") else raw
-            tgt = tgt.replace("\\", "/")
-            if tgt in pages and tgt != src_file:
+            tgt = resolve_link(raw, src_file, pages)
+            if tgt and tgt != src_file:
                 edges.add((src_file, tgt))
         mentioned = page["fm"].get("mentioned_in") or []
         for referrer in mentioned:

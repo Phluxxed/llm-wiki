@@ -11,6 +11,7 @@ Checks performed (structural/mechanical — no LLM required):
   - Required YAML frontmatter fields present
   - source frontmatter points to an existing file in sources/
   - Pages without a source field whose body references sources/X (likely missed ingest)
+  - Body markdown links whose target .md file does not exist (broken refs / typos)
   - Risk Register rows with status 🔲 (not yet addressed)
   - Files in sources/ with no corresponding wiki page
   - Wiki pages not listed in index.md
@@ -43,6 +44,7 @@ USE_CASE_MANDATORY_SECTIONS = {"What This Is", "How It Works", "Risk Register", 
 ENTITY_MANDATORY_SECTIONS = {"What It Is", "How We Use It", "Where It Appears"}
 OPEN_RISK_STATUS = "🔲"
 SOURCE_REF_RE = re.compile(r'\bsources/[\w\-./]+\.\w+')
+BODY_LINK_RE = re.compile(r'\[(?:[^\]]+)\]\(([^)#\s]+\.md)\)')
 
 
 # ── parsing ───────────────────────────────────────────────────────────────────
@@ -86,6 +88,48 @@ def collect_source_files() -> set[str]:
     return {f.name for f in sources_dir.iterdir() if f.is_file() and not f.name.startswith(".")}
 
 
+def collect_all_md_paths() -> set[str]:
+    """Wiki-root-relative paths of every .md file in the wiki tree.
+
+    Used as the universe of valid link targets for the broken-body-link check —
+    includes pages, source files, templates, and top-level structural files,
+    so a link to any of them is considered resolvable.
+    """
+    paths = set()
+    for md in WIKI_ROOT.rglob("*.md"):
+        rel = md.relative_to(WIKI_ROOT)
+        if rel.parts and rel.parts[0] == ".git":
+            continue
+        paths.add(str(rel).replace("\\", "/"))
+    return paths
+
+
+def resolve_link(raw: str, src_file: str, targets: set) -> str | None:
+    """Resolve a markdown link to a wiki-root-relative path against `targets`.
+
+    Mirrors render.py's resolver: tries wiki-root-relative interpretation first
+    (`./components/X.md`, `components/X.md`), then falls back to source-relative
+    resolution so sibling `./X.md` and `../other-dir/X.md` from inside a sub-dir
+    also resolve. Returns the matched key, or None.
+    """
+    raw = raw.replace("\\", "/")
+    cleaned = raw[2:] if raw.startswith("./") else raw
+
+    if cleaned in targets:
+        return cleaned
+
+    src_dir_parts = src_file.split("/")[:-1]
+    parts = list(src_dir_parts)
+    for c in cleaned.split("/"):
+        if c == "..":
+            if parts:
+                parts.pop()
+        elif c and c != ".":
+            parts.append(c)
+    resolved = "/".join(parts)
+    return resolved if resolved in targets else None
+
+
 def parse_index_entries() -> set[str]:
     index = WIKI_ROOT / "index.md"
     if not index.exists():
@@ -115,7 +159,7 @@ def parse_risk_open_rows(text: str) -> list[str]:
 
 # ── checks ────────────────────────────────────────────────────────────────────
 
-def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str]) -> list[dict]:
+def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str], all_md_paths: set[str]) -> list[dict]:
     issues = []
     wiki_files = {p["file"] for p in pages}
 
@@ -125,6 +169,15 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
         sections = p["sections"]
         page_type = fm.get("type", "")
         is_entity = page_type in ("entity", "concept")
+
+        # Body markdown links to .md files must resolve to existing files
+        for raw in BODY_LINK_RE.findall(p["text"]):
+            if resolve_link(raw, f, all_md_paths) is None:
+                issues.append({
+                    "file": f,
+                    "check": "broken_body_link",
+                    "detail": f"link to '{raw}' does not resolve to any .md file in the wiki",
+                })
 
         # Frontmatter completeness
         for field in REQUIRED_FRONTMATTER:
@@ -203,6 +256,7 @@ CHECK_LABELS = {
     "frontmatter":        "Frontmatter",
     "source_missing":     "Broken source ref",
     "likely_missing_source": "Likely missing source field",
+    "broken_body_link":   "Broken body link",
     "missing_section":    "Missing section",
     "open_risk":          "Open risk",
     "mentioned_in_missing": "Broken mentioned_in",
@@ -244,7 +298,8 @@ def main():
     pages = collect_pages()
     source_files = collect_source_files()
     index_entries = parse_index_entries()
-    issues = run_checks(pages, source_files, index_entries)
+    all_md_paths = collect_all_md_paths()
+    issues = run_checks(pages, source_files, index_entries, all_md_paths)
 
     if args.json:
         print(json.dumps(issues, indent=2, ensure_ascii=False))

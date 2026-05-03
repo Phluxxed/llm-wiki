@@ -108,6 +108,7 @@ This file is the agent's operating manual. Include all of these:
 - Pages missing YAML frontmatter, or frontmatter missing required fields (`title`, `category`, `status`, `owner`, `tags`, `created`, `last_reviewed`)
 - Pages with `source` pointing to a file that doesn't exist in `sources/`
 - Pages with no `source` frontmatter whose body references `sources/X` (likely an ingest where the agent forgot to set the field)
+- Body markdown links whose target `.md` file does not exist anywhere in the wiki tree (broken refs, typos, links to deleted pages)
 - Risk Register rows with status `🔲 Not yet addressed` — flag explicitly
 - Files in `sources/` with no corresponding wiki page
 - Files not listed in `index.md`

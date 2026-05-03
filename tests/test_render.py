@@ -79,6 +79,51 @@ class CollectEdgesTest(unittest.TestCase):
         edges = render.collect_edges(pages)
         self.assertIn(("a.md", "b.md"), edges)
 
+    def test_sibling_link_from_subdir_creates_edge(self):
+        """A page in components/ linking to [B](./b.md) should create an edge
+        to components/b.md — the most natural markdown form for sibling links."""
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("components/a.md", {**base, "title": "A"}, "Links to [B](./b.md)")
+        self.write_page("components/b.md", {**base, "title": "B"}, "")
+        pages = render.collect_pages(self.wiki_root)
+        edges = render.collect_edges(pages)
+        self.assertIn(("components/a.md", "components/b.md"), edges)
+
+    def test_dotdot_link_creates_edge(self):
+        """A page in entities/ linking to [B](../components/b.md) should
+        resolve correctly via source-relative path resolution."""
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page(
+            "entities/a.md",
+            {**base, "title": "A", "type": "entity"},
+            "Links to [B](../components/b.md)",
+        )
+        self.write_page("components/b.md", {**base, "title": "B"}, "")
+        pages = render.collect_pages(self.wiki_root)
+        edges = render.collect_edges(pages)
+        self.assertIn(("entities/a.md", "components/b.md"), edges)
+
+    def test_wiki_root_relative_link_from_subdir_creates_edge(self):
+        """A page in components/ linking to [B](./components/b.md) — the
+        wiki-root-relative form documented in CONVENTIONS.md — should also work."""
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("components/a.md", {**base, "title": "A"}, "Links to [B](./components/b.md)")
+        self.write_page("components/b.md", {**base, "title": "B"}, "")
+        pages = render.collect_pages(self.wiki_root)
+        edges = render.collect_edges(pages)
+        self.assertIn(("components/a.md", "components/b.md"), edges)
+
+    def test_broken_link_does_not_create_edge(self):
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("components/a.md", {**base, "title": "A"}, "Links to [Ghost](./ghost.md)")
+        pages = render.collect_pages(self.wiki_root)
+        edges = render.collect_edges(pages)
+        self.assertEqual(edges, [])
+
     def test_mentioned_in_creates_reverse_edge(self):
         import render
         base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
