@@ -215,6 +215,30 @@ def collect_edges(pages: dict) -> list[tuple[str, str]]:
     return sorted(edges)
 
 
+_INTERNAL_LINK_RE = re.compile(r'<a\s+href="([^"]+\.md)"')
+
+
+def rewrite_internal_links(html: str, src_file: str, pages: dict) -> str:
+    """Add data-page attributes to <a> links pointing at wiki pages.
+
+    Markdown like [X](./sibling.md) renders as <a href="./sibling.md">X</a>
+    with no SPA hook, so the browser tries to navigate to the file URL.
+    This injects data-page="<resolved-key>" so the existing renderPage
+    click handler intercepts the click and opens the page in-app.
+
+    Links that don't resolve to a wiki page (external URLs, source files,
+    anchors) are left untouched and behave as standard browser links.
+    """
+    def repl(m: re.Match) -> str:
+        href = m.group(1)
+        resolved = resolve_link(href, src_file, pages)
+        if resolved is None:
+            return m.group(0)
+        return f'<a href="{href}" data-page="{resolved}"'
+
+    return _INTERNAL_LINK_RE.sub(repl, html)
+
+
 def collect_pages(wiki_root: Path = WIKI_ROOT) -> dict:
     pages = {}
     for path in sorted(wiki_root.rglob("*.md")):
@@ -237,6 +261,11 @@ def collect_pages(wiki_root: Path = WIKI_ROOT) -> dict:
             "body": body,
             "rendered_html": render_markdown(body),
         }
+    # Post-process: rewrite intra-wiki .md links to include data-page so the
+    # SPA click handler picks them up. Runs after the dict is fully populated
+    # so cross-page links resolve regardless of write order.
+    for key, page in pages.items():
+        page["rendered_html"] = rewrite_internal_links(page["rendered_html"], key, pages)
     return pages
 
 

@@ -138,6 +138,74 @@ class CollectEdgesTest(unittest.TestCase):
         self.assertIn(("paper.md", "entities/openai.md"), edges)
 
 
+class RewriteInternalLinksTest(unittest.TestCase):
+    """rewrite_internal_links should inject data-page attrs on intra-wiki .md links
+    so the SPA click handler in renderPage picks them up. External/non-page links
+    are left untouched."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write_page(self, rel: str, frontmatter: dict, body: str) -> None:
+        import yaml
+        path = self.wiki_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fm = yaml.safe_dump(frontmatter, sort_keys=False).strip()
+        path.write_text(f"---\n{fm}\n---\n{body}\n", encoding="utf-8")
+
+    def test_sibling_link_gets_data_page(self):
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("components/a.md", {**base, "title": "A"}, "See [B](./b.md)")
+        self.write_page("components/b.md", {**base, "title": "B"}, "")
+        pages = render.collect_pages(self.wiki_root)
+        html = pages["components/a.md"]["rendered_html"]
+        self.assertIn('data-page="components/b.md"', html)
+
+    def test_dotdot_link_gets_data_page(self):
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("entities/a.md", {**base, "title": "A", "type": "entity"}, "See [B](../components/b.md)")
+        self.write_page("components/b.md", {**base, "title": "B"}, "")
+        pages = render.collect_pages(self.wiki_root)
+        html = pages["entities/a.md"]["rendered_html"]
+        self.assertIn('data-page="components/b.md"', html)
+
+    def test_wiki_root_relative_link_gets_data_page(self):
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("components/a.md", {**base, "title": "A"}, "See [B](./components/b.md)")
+        self.write_page("components/b.md", {**base, "title": "B"}, "")
+        pages = render.collect_pages(self.wiki_root)
+        html = pages["components/a.md"]["rendered_html"]
+        self.assertIn('data-page="components/b.md"', html)
+
+    def test_unresolved_link_left_untouched(self):
+        """Links that don't resolve to a wiki page (e.g. typo, source file) should
+        keep their original href and have NO data-page attribute injected."""
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("components/a.md", {**base, "title": "A"}, "See [Ghost](./ghost.md)")
+        pages = render.collect_pages(self.wiki_root)
+        html = pages["components/a.md"]["rendered_html"]
+        self.assertIn('href="./ghost.md"', html)
+        self.assertNotIn('data-page', html)
+
+    def test_external_links_left_untouched(self):
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("components/a.md", {**base, "title": "A"},
+                        "See [Web](https://example.com) and [Anchor](#section).")
+        pages = render.collect_pages(self.wiki_root)
+        html = pages["components/a.md"]["rendered_html"]
+        self.assertNotIn('data-page', html)
+        self.assertIn('href="https://example.com"', html)
+
+
 class CollectLogTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
