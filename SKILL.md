@@ -38,7 +38,7 @@ If the file already exists: append the pointer line. If it does not exist: creat
 
 Before creating any files, check whether `wiki-agent.md` already exists in the directory.
 
-- **If it exists**: this is an existing wiki. Do not overwrite anything. **Migration check**: if `scripts/graph.py` or `graph.html` exists, this wiki predates the `render.py` change. Offer the user a one-line migration: replace `scripts/graph.py` with the current `skills/wikime/scripts/render.py`, delete `graph.html`, run `pip3 install --user markdown`, then `python3 scripts/render.py`. After confirming, also update `wiki-agent.md`'s Operations section to add the `render.py` rule. Otherwise tell the user and stop.
+- **If it exists**: this is an existing wiki. Do not overwrite anything. **Migration check**: if `scripts/graph.py` or `graph.html` exists, this wiki predates the `render.py` change. Offer the user a one-line migration: replace `scripts/graph.py` with the current `skills/wikime/scripts/render.py`, delete `graph.html`, install `markdown` into the wiki's `.venv` (see Step 5 for the `uv` commands), then `python3 scripts/render.py`. After confirming, also update `wiki-agent.md`'s Operations section to add the `render.py` rule. Otherwise tell the user and stop.
 - **If it does not exist**: proceed with scaffolding below.
 
 ## Step 4 — Create these files
@@ -60,7 +60,7 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `scripts/query.py` | Copy from skill bundle (`skills/wikime/scripts/query.py`); frontmatter queries — `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
 | `scripts/lint.py` | Copy from skill bundle (`skills/wikime/scripts/lint.py`); structural lint — missing sections, frontmatter, broken refs, open risks, index consistency |
 
-The scripts require `pyyaml` and `markdown`: `pip3 install pyyaml markdown`
+The scripts require `pyyaml` and `markdown`. Install via `uv` into a project-local venv — see Step 5.
 
 ## wiki-agent.md — required sections
 
@@ -138,8 +138,23 @@ YAML frontmatter block (title, type: entity|concept, category: Entities & Concep
 
 ## Step 5 — After scaffolding
 
-- Install dependencies (required by the scripts): `pip3 install --user pyyaml markdown`
-  If that fails (externally-managed environment error), try `pip3 install pyyaml markdown --break-system-packages` or create a venv: `python3 -m venv .venv && source .venv/bin/activate && pip install pyyaml markdown`
+- Install dependencies into a project-local venv with `uv`. **Always use `uv venv` — never install into the system or user Python with `pip install --user`, `--break-system-packages`, or unmanaged global pip.** The venv stays inside the wiki directory so the install is fully scoped to this project.
+
+  ```bash
+  uv venv                                    # creates .venv/ in the wiki dir
+  uv pip install pyyaml markdown             # installs into .venv automatically
+  ```
+
+  Then run the scripts via `.venv/bin/python3` (or `source .venv/bin/activate` once per shell):
+
+  ```bash
+  .venv/bin/python3 scripts/lint.py
+  .venv/bin/python3 scripts/render.py
+  ```
+
+  Add `.venv/` to `.gitignore` when you run `git init`.
+
+  If `uv` is not installed on the system, ask the user before falling back — do not silently install into system or user Python.
 - Ensure `README.md` includes a `## Scripts & Tooling` section with all three commands and what each produces:
   - `python3 scripts/lint.py` → structural health check
   - `python3 scripts/query.py --help` → frontmatter query filters
