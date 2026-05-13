@@ -96,7 +96,9 @@ This file is the agent's operating manual. Include all of these:
 5. **File Naming** — source files: kebab-case with ID if one exists; primary wiki pages: `{page-type-slug}/{id}-{title}.md` or `{page-type-slug}/{title}.md`; entity/concept pages: `entities/{title}.md`; all cross-page links use wiki-root-relative paths (e.g. `./papers/foo.md`, `./entities/openai.md`); `mentioned_in` frontmatter values also use wiki-root-relative paths
 6. **Source File Header Block** — immutability header template (source type, URL, fetched date, do-not-edit warning)
 7. **Risk Register Format** — table with Likelihood/Impact/Mitigation/Status; status reflects design clarity not build status
-8. **Wiki Page Frontmatter** — YAML schema: title, category, status, owner, source, tags, created, last_reviewed
+8. **Wiki Page Frontmatter** — YAML schema: title, category, status, owner, source (optional), cover (optional — chapter notes only, see §8a), tags, created, last_reviewed
+
+   **§8a — Multi-chapter cover pattern.** When a single source is too large for one wiki page (50+ pages with multiple distinct chapters), split into a **cover note + chapter notes**. The cover note is a regular note in `{page-type-slug}/` with the standard frontmatter (no `cover:` field) — its body holds source overview, cross-cutting key findings, methodology summary, and a *Chapters* section linking to chapter notes. Each chapter note in `{page-type-slug}/` carries `cover: ./{page-type-slug}/<cover-note>.md` in frontmatter and a body that deep-dives one chapter. All notes (cover + chapters) **share the same `source:` value**. Naming: `{source-slug}.md` for the cover, `{source-slug}-{chapter-slug}.md` for each chapter (keeps everything sorted together in `ls`). In `index.md`, chapters indent under the cover via 2-space markdown nesting. Only use this pattern for genuinely large sources where a single ~1000+ line page would be unreadable — for shorter sources, keep a single page. Lint enforces: chapter `cover:` target exists, cover and chapter share `source:`, no cover chains (cover can't itself have a cover).
 9. **index.md Format** — one row per page grouped by category; links use wiki-root-relative paths (e.g. `[title](./papers/foo.md)`, `[title](./entities/openai.md)`); focus summaries on what it does not what it is
 10. **log.md Format** — `## [YYYY-MM-DD] action | detail`; grep-able; append-only
 11. **Entity and Concept Pages** — `type: entity | concept` frontmatter field; `mentioned_in: []` backlink list (filenames); mandatory sections: What It Is, How We Use It, Where It Appears; optional: Cross-Cutting Risks, Key References; created automatically during Ingest for any tool/platform/pattern central to how the page works
@@ -115,6 +117,9 @@ This file is the agent's operating manual. Include all of these:
 - `index.md` entries pointing to files that don't exist
 - Entity/concept pages missing mandatory sections (What It Is, How We Use It, Where It Appears)
 - Entity/concept pages with `mentioned_in` entries pointing to files that don't exist
+- Chapter notes (those with a `cover:` field) whose `cover:` target doesn't exist
+- Cover chains — a cover note cannot itself have a `cover:` field (no nested chapter-of-chapter relationships)
+- Cover/chapter `source:` mismatch — a cover note and its chapter notes must share the same `source:` value
 - **Contradiction scan** — read all wiki pages together and flag factual contradictions: conflicting claims about the same tool, service, pattern, credential approach, or behaviour. Report as: "`page-a.md` claims X; `page-b.md` claims Y — conflict on Z." Only flag genuine contradictions, not differences in scope or context.
 - **Source drift** — for any wiki page whose source file contains a fetchable URL, re-fetch it and compare to the saved content in `sources/`. Flag pages where the live source has changed substantially since last ingest. Skip sources with no URL (pasted text, local docs, meeting notes).
 

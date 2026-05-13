@@ -231,6 +231,24 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
                 if ref_cleaned not in wiki_files:
                     issues.append({"file": f, "check": "mentioned_in_missing", "detail": f"mentioned_in: '{ref_norm}' does not exist"})
 
+        # cover: field (chapter notes from a multi-page ingest) — see wiki-agent.md §8a
+        # Cover note must exist, must not itself have a cover: field, and must share the same source: value.
+        cover_ref = fm.get("cover", "")
+        if cover_ref:
+            cover_norm = str(cover_ref).replace("\\", "/")
+            cover_cleaned = cover_norm[2:] if cover_norm.startswith("./") else cover_norm
+            if cover_cleaned not in wiki_files:
+                issues.append({"file": f, "check": "cover_missing", "detail": f"cover: '{cover_norm}' does not exist"})
+            else:
+                # Find the cover page and validate its shape
+                cover_page = next((q for q in pages if q["file"] == cover_cleaned), None)
+                if cover_page is not None:
+                    cover_fm = cover_page["fm"]
+                    if cover_fm.get("cover"):
+                        issues.append({"file": f, "check": "cover_chain", "detail": f"cover target '{cover_norm}' is itself a chapter (has its own cover: field) — cover chains aren't allowed"})
+                    if src and cover_fm.get("source") and Path(str(cover_fm.get("source"))).name != Path(src).name:
+                        issues.append({"file": f, "check": "cover_source_mismatch", "detail": f"cover '{cover_norm}' has source '{cover_fm.get('source')}' but this chapter has source '{src}' — should match"})
+
         # Not in index
         if f not in index_entries:
             issues.append({"file": f, "check": "not_in_index", "detail": f"not listed in index.md"})
@@ -262,6 +280,9 @@ CHECK_LABELS = {
     "missing_section":    "Missing section",
     "open_risk":          "Open risk",
     "mentioned_in_missing": "Broken mentioned_in",
+    "cover_missing":      "Broken cover ref",
+    "cover_chain":        "Cover chain",
+    "cover_source_mismatch": "Cover/chapter source mismatch",
     "not_in_index":       "Not in index",
     "orphan_source":      "Orphan source",
     "index_dead_link":    "Dead index link",

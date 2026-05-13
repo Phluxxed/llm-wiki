@@ -170,5 +170,77 @@ class MentionedInCheckTest(unittest.TestCase):
         self.assertIn("./notes/ghost.md", issues[0]["detail"])
 
 
+class CoverFieldCheckTest(unittest.TestCase):
+    """Chapter notes carry `cover:` pointing at their cover note.
+    Lint enforces: target exists, target isn't itself a chapter, source values match."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+        (self.wiki_root / "sources").mkdir()
+        (self.wiki_root / "sources/BIG.pdf").write_bytes(b"%PDF-fake")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _note_fm(self, **overrides):
+        fm = {"title": "X", "category": "X", "status": "Live", "owner": "x", "tags": [],
+              "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        fm.update(overrides)
+        return fm
+
+    def _run(self, *check_names):
+        lint = reload_lint_with_root(self.wiki_root)
+        pages = lint.collect_pages()
+        sources = lint.collect_source_files()
+        all_md = lint.collect_all_md_paths()
+        return [i for i in lint.run_checks(pages, sources, set(), all_md) if i["check"] in check_names]
+
+    def test_chapter_with_valid_cover_passes(self):
+        write_md(self.wiki_root / "notes/big.md",
+                 self._note_fm(title="Big", source="sources/BIG.pdf"), "")
+        write_md(self.wiki_root / "notes/big-ch1.md",
+                 self._note_fm(title="Ch1", source="sources/BIG.pdf", cover="./notes/big.md"), "")
+        self.assertEqual(self._run("cover_missing", "cover_chain", "cover_source_mismatch"), [])
+
+    def test_chapter_with_bare_cover_path_passes(self):
+        write_md(self.wiki_root / "notes/big.md",
+                 self._note_fm(title="Big", source="sources/BIG.pdf"), "")
+        write_md(self.wiki_root / "notes/big-ch1.md",
+                 self._note_fm(title="Ch1", source="sources/BIG.pdf", cover="notes/big.md"), "")
+        self.assertEqual(self._run("cover_missing", "cover_chain", "cover_source_mismatch"), [])
+
+    def test_missing_cover_target_flagged(self):
+        write_md(self.wiki_root / "notes/big-ch1.md",
+                 self._note_fm(title="Ch1", source="sources/BIG.pdf", cover="./notes/ghost.md"), "")
+        issues = self._run("cover_missing")
+        self.assertEqual(len(issues), 1)
+        self.assertIn("./notes/ghost.md", issues[0]["detail"])
+
+    def test_cover_chain_flagged(self):
+        # A chapter cannot point at another chapter — only at a non-chapter cover note.
+        write_md(self.wiki_root / "notes/big.md",
+                 self._note_fm(title="Big", source="sources/BIG.pdf"), "")
+        write_md(self.wiki_root / "notes/big-ch1.md",
+                 self._note_fm(title="Ch1", source="sources/BIG.pdf", cover="./notes/big.md"), "")
+        write_md(self.wiki_root / "notes/big-ch2.md",
+                 self._note_fm(title="Ch2", source="sources/BIG.pdf", cover="./notes/big-ch1.md"), "")
+        issues = self._run("cover_chain")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["file"], "notes/big-ch2.md")
+
+    def test_cover_source_mismatch_flagged(self):
+        (self.wiki_root / "sources/OTHER.pdf").write_bytes(b"%PDF-fake")
+        write_md(self.wiki_root / "notes/big.md",
+                 self._note_fm(title="Big", source="sources/BIG.pdf"), "")
+        write_md(self.wiki_root / "notes/big-ch1.md",
+                 self._note_fm(title="Ch1", source="sources/OTHER.pdf", cover="./notes/big.md"), "")
+        issues = self._run("cover_source_mismatch")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["file"], "notes/big-ch1.md")
+        self.assertIn("sources/OTHER.pdf", issues[0]["detail"])
+        self.assertIn("sources/BIG.pdf", issues[0]["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()
