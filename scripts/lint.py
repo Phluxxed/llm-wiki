@@ -222,11 +222,13 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
         for risk in open_risks:
             issues.append({"file": f, "check": "open_risk", "detail": f"🔲 {risk}"})
 
-        # mentioned_in entries resolve (values are wiki-root-relative paths, e.g. papers/foo.md)
+        # mentioned_in entries resolve (values are wiki-root-relative paths, e.g.
+        # papers/foo.md or ./papers/foo.md — per wiki-agent.md both forms are valid)
         if is_entity:
             for ref in (fm.get("mentioned_in") or []):
                 ref_norm = str(ref).replace("\\", "/")
-                if ref_norm not in wiki_files:
+                ref_cleaned = ref_norm[2:] if ref_norm.startswith("./") else ref_norm
+                if ref_cleaned not in wiki_files:
                     issues.append({"file": f, "check": "mentioned_in_missing", "detail": f"mentioned_in: '{ref_norm}' does not exist"})
 
         # Not in index

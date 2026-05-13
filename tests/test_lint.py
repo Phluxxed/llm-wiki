@@ -123,5 +123,52 @@ class BrokenBodyLinkCheckTest(unittest.TestCase):
         self.assertIn("componnts", issues[0]["detail"])
 
 
+class MentionedInCheckTest(unittest.TestCase):
+    """Entity pages list `mentioned_in:` paths. Per wiki-agent.md both `./notes/x.md`
+    and bare `notes/x.md` are valid wiki-root-relative forms — both must resolve."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _note_fm(self, **overrides):
+        fm = {"title": "X", "category": "X", "status": "Live", "owner": "x", "tags": [],
+              "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        fm.update(overrides)
+        return fm
+
+    def _entity_fm(self, mentioned_in, **overrides):
+        fm = {"title": "E", "type": "entity", "category": "Entities & Concepts",
+              "status": "Live", "owner": "x", "tags": [], "mentioned_in": mentioned_in,
+              "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        fm.update(overrides)
+        return fm
+
+    def _run(self):
+        lint = reload_lint_with_root(self.wiki_root)
+        pages = lint.collect_pages()
+        all_md = lint.collect_all_md_paths()
+        return [i for i in lint.run_checks(pages, set(), set(), all_md) if i["check"] == "mentioned_in_missing"]
+
+    def test_dot_slash_prefix_resolves(self):
+        write_md(self.wiki_root / "notes/foo.md", self._note_fm(title="Foo"), "")
+        write_md(self.wiki_root / "entities/e.md", self._entity_fm(mentioned_in=["./notes/foo.md"]), "")
+        self.assertEqual(self._run(), [])
+
+    def test_bare_path_resolves(self):
+        write_md(self.wiki_root / "notes/foo.md", self._note_fm(title="Foo"), "")
+        write_md(self.wiki_root / "entities/e.md", self._entity_fm(mentioned_in=["notes/foo.md"]), "")
+        self.assertEqual(self._run(), [])
+
+    def test_missing_target_flagged(self):
+        write_md(self.wiki_root / "entities/e.md", self._entity_fm(mentioned_in=["./notes/ghost.md"]), "")
+        issues = self._run()
+        self.assertEqual(len(issues), 1)
+        self.assertIn("./notes/ghost.md", issues[0]["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()
