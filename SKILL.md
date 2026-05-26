@@ -106,12 +106,15 @@ This file is the agent's operating manual. Include all of these:
 
    **§8a — Multi-chapter cover pattern.** When a single source is too large for one wiki page (50+ pages with multiple distinct chapters), split into a **cover note + chapter notes**. The cover note is a regular page in its primary directory with the standard frontmatter (no `cover:` field) — its body holds source overview, cross-cutting key findings, methodology summary, and a *Chapters* section linking to chapter notes. Each chapter note in the same primary directory carries `cover: ./{slug}/<cover-note>.md` in frontmatter and a body that deep-dives one chapter. All notes (cover + chapters) **share the same `source:` value** and belong to the same primary type/directory. Naming: `{source-slug}.md` for the cover, `{source-slug}-{chapter-slug}.md` for each chapter (keeps everything sorted together in `ls`). In `index.md`, chapters indent under the cover via 2-space markdown nesting. Only use this pattern for genuinely large sources where a single ~1000+ line page would be unreadable — for shorter sources, keep a single page. Lint enforces: chapter `cover:` target exists, cover and chapter share `source:`, no cover chains (cover can't itself have a cover).
 
-   **§8b — Type field semantics.** The `type:` frontmatter field signals which lint rules apply:
-   - `type:` **absent or empty** → pages are treated as the wiki's default primary type. Lint enforces the canonical structural sections (What This Is, How It Works, Risk Register, Prerequisites).
-   - `type: entity` or `type: concept` → entity-page rules apply (mandatory: What It Is, How We Use It, Where It Appears).
-   - `type: <any other value>` (e.g. `article`, `policy`, `control`, `meta`) → free-form. Lint skips section-presence enforcement; the page's template defines its structure.
+   **§8b — Type field semantics.** The `type:` frontmatter field is a colour/filter/grouping signal for the graph and sidebar — **not** a lint-exemption knob. Every primary page must answer the four load-bearing questions (What This Is / How It Works / Risk Register / Prerequisites), regardless of which custom type it declares. Type-specific content (a policy's Statement, a control's Implementation) sits as h3 nested under the h2 mandatory sections.
 
-   In a multi-primary-type wiki, set `type:` on every primary page so the graph view can colour and filter them distinctly. If you want strict section enforcement on a specific custom type, lift that type's sections into the template and rely on the template (not lint) for that discipline.
+   Lint behaviour by type:
+   - `type:` **absent or empty** → strict primary section checks.
+   - `type: entity` or `type: concept` → entity-page rules apply (mandatory: What It Is, How We Use It, Where It Appears).
+   - `type: meta` (or `category:` containing "meta") → free-form, no enforcement. Meta is for changelogs, archive indices, and other legitimately unstructured pages.
+   - `type: <anything else>` (`policy`, `control`, `article`, …) → strict primary section checks, same as no-type.
+
+   In a multi-primary-type wiki, set `type:` on every primary page so the graph view colours and filters them distinctly. Lint then enforces the same baseline shape on all of them.
 9. **index.md Format** — one row per page; for multi-primary-type wikis, use one top-level section per primary type (e.g. `## Policies`, `## Controls`, `## Articles`, `## Entities & Concepts`), with sub-grouping by category inside each section. Links use wiki-root-relative paths (e.g. `[title](./policies/data-retention.md)`, `[title](./entities/openai.md)`). Focus summaries on what it does, not what it is.
 10. **log.md Format** — `## [YYYY-MM-DD] action | detail`; grep-able; append-only
 11. **Entity and Concept Pages** — `type: entity | concept` frontmatter field; `mentioned_in: []` backlink list (filenames); mandatory sections: What It Is, How We Use It, Where It Appears; optional: Cross-Cutting Risks, Key References; created automatically during Ingest for any tool/platform/pattern central to how the page works
@@ -119,7 +122,7 @@ This file is the agent's operating manual. Include all of these:
 
 ### Lint checks — include all of these in the schema file's Lint section
 
-- Pages missing any mandatory section. Enforcement depends on the `type:` field — see §8b. In short: untyped pages get strict default-primary checks; `entity`/`concept` get entity checks; any other explicit `type:` value (article, policy, control, meta, …) is free-form.
+- Pages missing any mandatory section. Enforcement depends on the `type:` field — see §8b. In short: every primary page (no `type:` or any custom value) gets strict primary checks; `entity`/`concept` get entity checks; only `type: meta` is free-form.
 - Pages missing YAML frontmatter, or frontmatter missing required fields (`title`, `category`, `status`, `owner`, `tags`, `created`, `last_reviewed`)
 - Pages with `source` pointing to a file that doesn't exist in `sources/`
 - Pages with no `source` frontmatter whose body references `sources/X` (likely an ingest where the agent forgot to set the field)
@@ -142,20 +145,24 @@ Report all findings as a markdown checklist. Do not auto-fix — report and let 
 
 ## Templates — required sections
 
-Create **one template per primary type** in `_templates/{slug}.md`. Each template starts with the same YAML frontmatter block (title, category, status, owner, source, type [for non-default types, see §8b], tags, created, last_reviewed), then defines the sections that fit that type.
+Create **one template per primary type** in `_templates/{slug}.md`. Each template starts with the same YAML frontmatter block (title, category, status, owner, source, type [see §8b], tags, created, last_reviewed), then includes the four mandatory h2 sections (What This Is, How It Works, Risk Register, Prerequisites) with type-specific content nested as h3 underneath.
 
-For the **default primary template** (used when the wiki has one untyped primary, or for the type that doesn't set a `type:` value):
+**Universal h2 structure (mandatory across all primary types, lint-enforced):**
 
-- **Mandatory**: What This Is, How It Works, Risk Register, Prerequisites
-- **Optional** (commented out): add domain-appropriate sections based on the wiki's topic
+- **What This Is** — definition, scope, who/what it applies to
+- **How It Works** — the mechanism (organise with type-specific h3s underneath)
+- **Risk Register** — table; for articles or non-operational pages, use a single `N/A — explanatory content` row rather than omitting the section
+- **Prerequisites** — what must be true first
 
-For **custom-typed templates** (any template whose pages set `type:` to something other than entity/concept) — lint won't enforce sections, so the template's job is to make the right shape obvious. Suggested patterns:
+**Type-specific h3s suggested (template-only, not lint-enforced):**
 
-- **Policy** template — Purpose, Scope, Policy Statement, Roles & Responsibilities, Enforcement, Exceptions, Related Controls
-- **Control** template — What It Does, Implementation, Owner, Evidence / Audit Trail, Testing Cadence, Related Policies
-- **Article** template — Summary, Body (free-form), Related Pages, References
+- **Policy** template — under "How It Works": Policy Statement, Roles & Responsibilities, Enforcement, Exceptions
+- **Control** template — under "How It Works": Implementation, Owner, Evidence / Audit Trail, Testing Cadence
+- **Article** template — under "How It Works": free-form h3s suited to the topic (Origin, Structure, Practical Implications, etc.)
 
-These are starting points — adapt to the wiki's domain. The point is each primary type gets a shape that fits the kind of artefact it represents, not a one-size-fits-all skeleton.
+Additional h2s (Related Policies, Related Controls, References, etc.) sit alongside the four mandatory ones — add them where useful, no constraint on order.
+
+These are starting points — adapt to the wiki's domain. The point is each primary type gets a shape that fits the kind of artefact it represents, *while still answering the four universal questions*.
 
 ## Entity Template — required sections
 

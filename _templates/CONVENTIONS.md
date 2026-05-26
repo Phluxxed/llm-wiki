@@ -95,11 +95,13 @@ The render script aggregates these into the Open questions tab of `wiki.html`. U
 
 ### Mandatory Sections by Type
 
+The `type:` field is a colour/filter/grouping signal — not a lint-exemption knob. Every primary page must answer the four load-bearing questions; type-specific content sits as h3 nested underneath.
+
 | `type:` field | Mandatory sections (enforced by lint) |
 | --- | --- |
-| (absent) | What This Is, How It Works, Risk Register, Prerequisites |
+| (absent) or any custom value (`policy`, `control`, `article`, …) | What This Is, How It Works, Risk Register, Prerequisites |
 | `entity` / `concept` | What It Is, How We Use It, Where It Appears |
-| any other value (`article`, `policy`, `control`, `meta`, …) | none — free-form, the template defines the structure |
+| `meta` (or `category:` containing "meta") | none — free-form; for changelogs, archive indices, and other legitimately unstructured pages |
 
 Optional sections (include only if relevant): add domain-appropriate sections based on this wiki's topic and primary type.
 

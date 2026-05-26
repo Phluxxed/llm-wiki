@@ -245,12 +245,16 @@ class CoverFieldCheckTest(unittest.TestCase):
 class TypeAwareSectionChecksTest(unittest.TestCase):
     """Section-presence enforcement is keyed on the `type:` frontmatter field.
 
-    - No `type:` set                  → strict primary checks (PRIMARY_MANDATORY_SECTIONS)
+    The `type:` field is a colour/filter/grouping signal — not a lint-exemption
+    knob. Strict primary checks apply to every primary page regardless of which
+    custom type it declares; the only opt-outs are entity/concept (which use
+    entity checks) and meta (which is free-form by design — changelogs, archive
+    indices, etc.).
+
+    - No `type:` set                   → strict primary checks (PRIMARY_MANDATORY_SECTIONS)
+    - `type:` set to anything that isn't entity/concept/meta → strict primary checks too
     - `type: entity` / `type: concept` → entity checks
     - `type: meta` or `category: meta` → free-form, no section enforcement
-    - `type: <anything else>` (article, policy, control, …) → free-form,
-        no section enforcement (the type's own template defines the structure;
-        lint stays out of the way for custom primary types).
     """
 
     def setUp(self):
@@ -288,18 +292,38 @@ class TypeAwareSectionChecksTest(unittest.TestCase):
         write_md(self.wiki_root / "policies/foo.md", self._base_fm(title="Foo"), body)
         self.assertEqual(self._run(), [])
 
-    def test_explicit_article_type_skips_section_checks(self):
-        # Article-style page with no canonical sections — no missing_section issues.
+    def test_explicit_article_type_enforces_primary_sections(self):
+        # Article-typed page with no canonical sections — should flag all four.
+        # `type:` is a colour/filter signal, not a lint exemption.
         write_md(self.wiki_root / "articles/foo.md",
                  self._base_fm(title="Foo", type="article"),
-                 "Some free-form article body.")
-        self.assertEqual(self._run(), [])
+                 "Some article body without canonical sections.")
+        issues = self._run()
+        self.assertEqual(len(issues), 4)
 
-    def test_explicit_policy_type_skips_section_checks(self):
-        # Wikis can define their own primary types — lint stays out of the way.
+    def test_explicit_policy_type_enforces_primary_sections(self):
+        # Policy-typed page must still have the four mandatory sections —
+        # type-specific content (Statement, Enforcement, etc.) sits as h3 nested
+        # under the h2 mandatory sections, not in lieu of them.
         write_md(self.wiki_root / "policies/foo.md",
                  self._base_fm(title="Foo", type="policy"),
                  "Policy body without canonical sections.")
+        issues = self._run()
+        self.assertEqual(len(issues), 4)
+
+    def test_explicit_policy_type_with_h3_nested_sections_passes(self):
+        # Policy with h2 mandatory sections + h3 policy-specific subsections.
+        # Lint matches h1-h3 with substring matching, so this is valid.
+        body = (
+            "## What This Is\nPurpose and scope.\n\n"
+            "## How It Works\n### Policy Statement\nNumbered statements.\n"
+            "### Enforcement\nHow it's monitored.\n\n"
+            "## Risk Register\n| Risk | Likelihood | Impact | Mitigation | Status |\n"
+            "| --- | --- | --- | --- | --- |\n\n"
+            "## Prerequisites\nWhat must be in place.\n"
+        )
+        write_md(self.wiki_root / "policies/foo.md",
+                 self._base_fm(title="Foo", type="policy"), body)
         self.assertEqual(self._run(), [])
 
     def test_entity_type_still_uses_entity_sections(self):

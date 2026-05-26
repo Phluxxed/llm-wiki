@@ -212,16 +212,20 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
         # Mandatory sections. Behaviour by type:
         #   entity/concept → entity sections enforced
         #   meta (or category contains "meta") → free-form, no enforcement
-        #   any other explicit type (article, policy, control, …) → free-form,
-        #     no enforcement — the type's own template defines its structure
-        #   no `type:` field at all → strict default-primary sections enforced
+        #     (meta is for changelogs, archive indices, etc. — legitimately
+        #     unstructured)
+        #   anything else (no `type:` set, OR `type: policy/control/article/…`)
+        #     → strict primary sections enforced. The `type:` field is a
+        #     colour/filter/grouping signal, not a lint exemption — primary
+        #     pages of any custom type should still answer the four load-bearing
+        #     questions (What This Is / How It Works / Risk Register /
+        #     Prerequisites), with type-specific content nested as h3 below.
         is_meta = "meta" in str(fm.get("category", "")).lower() or page_type == "meta"
-        is_custom_typed = bool(page_type) and not is_entity and not is_meta
         if is_entity:
             for section in ENTITY_MANDATORY_SECTIONS:
                 if not any(section.lower() in s.lower() for s in sections):
                     issues.append({"file": f, "check": "missing_section", "detail": f"entity page missing section: {section}"})
-        elif not is_meta and not is_custom_typed:
+        elif not is_meta:
             for section in PRIMARY_MANDATORY_SECTIONS:
                 if not any(section.lower() in s.lower() for s in sections):
                     issues.append({"file": f, "check": "missing_section", "detail": f"primary page missing section: {section}"})
