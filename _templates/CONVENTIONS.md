@@ -1,32 +1,53 @@
 # {WIKI_NAME} — Conventions
 
+## Primary Page Types
+
+This wiki has the following primary page types. Each gets its own directory, its own template, and its own section in `index.md`.
+
+{PRIMARY_TYPES_TABLE}
+
+> Example row format:
+> | Slug | Type name | What it captures |
+> | --- | --- | --- |
+> | `policies/` | Policy | Formal policy documents with statement, scope, and enforcement |
+> | `controls/` | Control | Operational controls implementing one or more policies |
+> | `articles/` | Article | Explanatory or background content; less formal than policies/controls |
+
 ## File Naming
 
-| Page type | Location | Filename pattern | Example |
+| Page kind | Location | Filename pattern | Example |
 | --- | --- | --- | --- |
-| Primary ({PAGE_TYPE}) | `{PAGE_TYPE_SLUG}/` | `{kebab-case-title}.md` or `{TICKET-ID}-{kebab-case-title}.md` | `{PAGE_TYPE_SLUG}/my-{PAGE_TYPE_SLUG}.md` |
+| Primary page | `{slug}/` (one of the primary directories above) | `{kebab-case-title}.md` or `{ID}-{kebab-case-title}.md` | `policies/data-retention.md` |
 | Entity / concept | `entities/` | `{kebab-case-title}.md` | `entities/openai.md` |
 
-Links between pages use wiki-root-relative paths: `[title](./{PAGE_TYPE_SLUG}/my-page.md)` or `[title](./entities/openai.md)`. Use this format in both inline links and `mentioned_in` frontmatter values.
+Links between pages use wiki-root-relative paths: `[title](./policies/data-retention.md)` or `[title](./entities/openai.md)`. Use this format in both inline links and `mentioned_in` frontmatter values.
 
 ## Folder Structure
 
 ```
 {REPO_NAME}/
 ├── CONVENTIONS.md             ← this file
-├── index.md                   ← one-liner index of all wiki pages
+├── index.md                   ← one-liner index of all wiki pages, grouped by primary type
 ├── log.md                     ← append-only change history
-├── {PAGE_TYPE_SLUG}/          ← primary wiki pages (e.g. papers/, use-cases/)
-│   └── {wiki-page-files}.md
+├── {slug-1}/                  ← primary type #1 (e.g. policies/)
+│   └── {pages}.md
+├── {slug-2}/                  ← primary type #2 (e.g. controls/)
+│   └── {pages}.md
+├── {slug-N}/                  ← additional primary types as needed
+│   └── {pages}.md
 ├── entities/                  ← entity and concept pages
 │   └── {entity-files}.md
 ├── _templates/
-│   ├── {PAGE_TYPE_SLUG}.md    ← template for new {PAGE_TYPE}
+│   ├── {slug-1}.md            ← template for new primary type #1
+│   ├── {slug-2}.md            ← template for new primary type #2
+│   ├── …                      ← one template per primary type
 │   └── entity.md              ← template for entity/concept pages
 ├── sources/                   ← immutable raw inputs (never edited after saving)
 │   └── {source-files}         ← raw inputs: docs, threads, notes, exports, etc.
 └── scripts/
 ```
+
+> For a single-primary-type wiki, this collapses to one `{slug}/` directory and one `_templates/{slug}.md`.
 
 ## Sources Layer
 
@@ -46,18 +67,18 @@ Not every wiki page needs a source file — authored pages are fine without one.
 When adding a new source:
 
 1. Save it to `sources/` with a descriptive filename
-2. Derive the wiki page using `_templates/{PAGE_TYPE_SLUG}.md`
+2. Decide which primary type the derived page belongs to and use that template
 3. Set `source: sources/filename.md` in the wiki page frontmatter
 
-## Template
+## Templates
 
-Copy `_templates/{PAGE_TYPE_SLUG}.md` as the starting point for every new {PAGE_TYPE_SINGULAR}.
+Copy the matching `_templates/{slug}.md` as the starting point for a new page of that type. Each primary template defines the structural sections suited to its type — policies, controls, and articles each have different shapes.
 
 ## Keeping the Wiki Healthy
 
 When adding or significantly updating a page:
 
-1. Update `index.md` — add or revise the one-liner for that page
+1. Update `index.md` — add or revise the one-liner for that page under the right primary-type section
 2. Append a row to `log.md` — `## [YYYY-MM-DD] action | detail`
 3. Add a `Related` link in the new page if it connects to an existing one
 4. Re-run `python3 scripts/render.py` to refresh `wiki.html` so the reader reflects the change
@@ -72,9 +93,15 @@ When a page raises something unresolved, mark it with a blockquote:
 
 The render script aggregates these into the Open questions tab of `wiki.html`. Use one blockquote per question.
 
-Mandatory sections (always include): **What This Is**, **How It Works**, **Risk Register**, **Prerequisites**
+### Mandatory Sections by Type
 
-Optional sections (include only if relevant): add domain-appropriate sections based on this wiki's topic and page type
+| `type:` field | Mandatory sections (enforced by lint) |
+| --- | --- |
+| (absent) | What This Is, How It Works, Risk Register, Prerequisites |
+| `entity` / `concept` | What It Is, How We Use It, Where It Appears |
+| any other value (`article`, `policy`, `control`, `meta`, …) | none — free-form, the template defines the structure |
+
+Optional sections (include only if relevant): add domain-appropriate sections based on this wiki's topic and primary type.
 
 ## Risk Register Status Legend
 
@@ -92,4 +119,4 @@ Optional sections (include only if relevant): add domain-appropriate sections ba
 | `scripts/query.py` | `python3 scripts/query.py --status Draft` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
 | `scripts/render.py` | `python3 scripts/render.py` | Generates `wiki.html` — single-file reader with Home / Page / Search / Graph / Risks / Recent changes / Open questions / Entities views |
 
-Requires: `pip3 install pyyaml markdown`
+Requires: `pip3 install pyyaml markdown` (or `uv pip install pyyaml markdown` into a project-local `.venv/`)

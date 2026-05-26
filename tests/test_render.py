@@ -528,5 +528,62 @@ class EndToEndRenderTest(unittest.TestCase):
         self.assertIn('"⚠️"', html)
 
 
+class PageTypeTest(unittest.TestCase):
+    """page_type() honours explicit `type:` values for any string, not just
+    entity/concept. This is what makes multi-primary-type wikis possible —
+    a wiki with policies/, controls/, articles/ can give each a distinct
+    `type:` and they all flow through to the graph view as separate node
+    classes. Pages without a `type:` field default to "primary"."""
+
+    def test_passes_through_explicit_article_type(self):
+        import render
+        self.assertEqual(render.page_type({"type": "article"}), "article")
+
+    def test_passes_through_explicit_policy_type(self):
+        import render
+        self.assertEqual(render.page_type({"type": "policy"}), "policy")
+
+    def test_entity_type_preserved(self):
+        import render
+        self.assertEqual(render.page_type({"type": "entity"}), "entity")
+        self.assertEqual(render.page_type({"type": "concept"}), "concept")
+
+    def test_meta_type_preserved(self):
+        import render
+        self.assertEqual(render.page_type({"type": "meta"}), "meta")
+
+    def test_meta_category_returns_meta(self):
+        # Existing behaviour: category containing "meta" → meta type label.
+        import render
+        self.assertEqual(render.page_type({"category": "Meta — Wiki"}), "meta")
+
+    def test_no_type_field_returns_primary(self):
+        import render
+        self.assertEqual(render.page_type({}), "primary")
+        self.assertEqual(render.page_type({"title": "X"}), "primary")
+
+    def test_empty_string_type_returns_primary(self):
+        import render
+        self.assertEqual(render.page_type({"type": ""}), "primary")
+
+
+class GraphTypeRenderingTest(unittest.TestCase):
+    """The graph JS must default to 'primary' (not 'use-case') for nodes
+    without an explicit type, and the colour map must include 'primary'."""
+
+    def test_graph_js_default_type_is_primary(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        # The fallback node type in the graph initialiser.
+        self.assertIn("'primary'", html)
+        self.assertNotIn("'use-case'", html)
+
+    def test_colour_map_includes_primary(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        # Colour map should map 'primary' to a colour value.
+        self.assertRegex(html, r"'primary':\s*'#[0-9a-fA-F]{3,6}'")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,12 +13,16 @@ Scaffolds a persistent, LLM-maintained wiki. Two questions first, then create al
 
 In a single message, ask:
 1. **What is this wiki for?** (one sentence — domain, topic, team)
-2. **What is the primary page type?** Suggest based on domain:
+2. **What is the primary page type — or types?** A wiki can have one primary type or several (one directory + template per type). Suggest based on domain:
    - Use cases, integrations, automations → `use cases`
    - Research, papers, literature → `papers`
    - ML training runs → `experiments`
    - Ops / SRE → `runbooks`
    - Architecture / product decisions → `ADRs`
+   - Governance / compliance → often a mix: `policies` + `controls` + `articles`
+   - Product → often a mix: `decisions` (ADRs) + `specs`
+
+   Multiple primary types are first-class: each gets its own directory (`policies/`, `controls/`, `articles/`, …) and its own template, but they share `entities/`, `sources/`, `_templates/`, the index, the log, and the lint/render tooling.
 
 Wait for answers. Do not scaffold until you have both.
 
@@ -47,13 +51,13 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | --- | --- |
 | `wiki-agent.md` | Agent operating manual — see Schema sections below. This is the wiki's source of truth; all agent instructions live here. |
 | `{your schema file}` | Pointer file for your platform — see Step 2. Append if exists; create if not. |
-| `CONVENTIONS.md` | Copy from skill bundle (`skills/wikime/_templates/CONVENTIONS.md`); fill in `{WIKI_NAME}`, `{REPO_NAME}`, `{PAGE_TYPE}`, `{PAGE_TYPE_SINGULAR}`, `{PAGE_TYPE_SLUG}` placeholders |
+| `CONVENTIONS.md` | Copy from skill bundle (`skills/wikime/_templates/CONVENTIONS.md`); fill in `{WIKI_NAME}`, `{REPO_NAME}`, and the `{PRIMARY_TYPES}` table (one row per primary type — name, slug, one-line description) |
 | `README.md` | Quick start, operations cheat sheet, directory structure, useful commands, Scripts & Tooling section |
-| `index.md` | Empty catalog with a commented example showing exact format |
+| `index.md` | Empty catalog with a commented example showing exact format. For multi-primary-type wikis, use one section per primary type. |
 | `log.md` | Seeded: `## [YYYY-MM-DD] init | Created wiki: {files listed}` |
-| `_templates/{page-type}.md` | Page template — see Template sections below |
+| `_templates/{slug}.md` | Page template — **one per primary type** (e.g. `_templates/policy.md`, `_templates/control.md`, `_templates/article.md`). See Template sections below. |
 | `_templates/entity.md` | Entity/concept template — see Entity Template section below |
-| `{page-type-slug}/` | Empty directory for primary wiki pages (e.g. `papers/`, `use-cases/`, `experiments/`) |
+| `{slug}/` | Empty directory for primary wiki pages — **one per primary type** (e.g. `papers/`, `policies/`, `controls/`, `articles/`). |
 | `entities/` | Empty directory for entity and concept pages |
 | `sources/` | Empty directory for immutable raw inputs |
 | `scripts/render.py` | Copy from skill bundle (`skills/wikime/scripts/render.py`); generates `wiki.html` — single-file reader artifact with eight views (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities) |
@@ -66,9 +70,9 @@ The scripts require `pyyaml` and `markdown`. Install via `uv` into a project-loc
 
 This file is the agent's operating manual. Include all of these:
 
-1. **Directory structure** — annotated tree showing `{page-type-slug}/`, `entities/`, `sources/`, `_templates/`, `scripts/` and the root control files
-2. **This Wiki's Page Type** — name the chosen type; note it's a wiki-level choice, not universal
-3. **Absolute Rules** — never edit `sources/`; always update `index.md`; always append to `log.md`; every derived page needs `source` in frontmatter; primary pages go in `{page-type-slug}/`; entity/concept pages go in `entities/`
+1. **Directory structure** — annotated tree showing all primary directories (one per primary type, e.g. `policies/`, `controls/`, `articles/` — or just one like `papers/` for a single-type wiki), plus `entities/`, `sources/`, `_templates/`, `scripts/` and the root control files
+2. **This Wiki's Page Types** — list each primary type, its slug/directory, and a one-line description; note that the choice of types is a per-wiki decision, not universal
+3. **Absolute Rules** — never edit `sources/`; always update `index.md`; always append to `log.md`; every derived page needs `source` in frontmatter; primary pages go in their respective primary directory (the slug matches the type); entity/concept pages go in `entities/`
 4. **Operations** — Ingest (ask user: quick or deep before extracting; then follow the completeness protocol below), Query (read index.md first; file substantive answers back as new pages), Update, Lint (structural checks + contradiction scan across all pages + source drift check for pages with fetchable source URLs)
 
    **Saving sources — by type:**
@@ -95,20 +99,27 @@ This file is the agent's operating manual. Include all of these:
    - Note explicitly in the page what was not extracted, so a future deep ingest knows what to add.
 
    After creating the wiki page, scan for entities/concepts and create/update entity pages automatically.
-5. **File Naming** — source files: kebab-case with ID if one exists; primary wiki pages: `{page-type-slug}/{id}-{title}.md` or `{page-type-slug}/{title}.md`; entity/concept pages: `entities/{title}.md`; all cross-page links use wiki-root-relative paths (e.g. `./papers/foo.md`, `./entities/openai.md`); `mentioned_in` frontmatter values also use wiki-root-relative paths
+5. **File Naming** — source files: kebab-case with ID if one exists; primary wiki pages: `{slug}/{id}-{title}.md` or `{slug}/{title}.md` where `{slug}` is the primary directory for that type (each primary type has its own); entity/concept pages: `entities/{title}.md`; all cross-page links use wiki-root-relative paths (e.g. `./policies/data-retention.md`, `./entities/openai.md`); `mentioned_in` frontmatter values also use wiki-root-relative paths
 6. **Source File Header Block** — immutability header template (source type, URL, fetched date, do-not-edit warning)
 7. **Risk Register Format** — table with Likelihood/Impact/Mitigation/Status; status reflects design clarity not build status
-8. **Wiki Page Frontmatter** — YAML schema: title, category, status, owner, source (optional), cover (optional — chapter notes only, see §8a), tags, created, last_reviewed
+8. **Wiki Page Frontmatter** — YAML schema: title, category, status, owner, source (optional), cover (optional — chapter notes only, see §8a), type (optional — see §8b), tags, created, last_reviewed
 
-   **§8a — Multi-chapter cover pattern.** When a single source is too large for one wiki page (50+ pages with multiple distinct chapters), split into a **cover note + chapter notes**. The cover note is a regular note in `{page-type-slug}/` with the standard frontmatter (no `cover:` field) — its body holds source overview, cross-cutting key findings, methodology summary, and a *Chapters* section linking to chapter notes. Each chapter note in `{page-type-slug}/` carries `cover: ./{page-type-slug}/<cover-note>.md` in frontmatter and a body that deep-dives one chapter. All notes (cover + chapters) **share the same `source:` value**. Naming: `{source-slug}.md` for the cover, `{source-slug}-{chapter-slug}.md` for each chapter (keeps everything sorted together in `ls`). In `index.md`, chapters indent under the cover via 2-space markdown nesting. Only use this pattern for genuinely large sources where a single ~1000+ line page would be unreadable — for shorter sources, keep a single page. Lint enforces: chapter `cover:` target exists, cover and chapter share `source:`, no cover chains (cover can't itself have a cover).
-9. **index.md Format** — one row per page grouped by category; links use wiki-root-relative paths (e.g. `[title](./papers/foo.md)`, `[title](./entities/openai.md)`); focus summaries on what it does not what it is
+   **§8a — Multi-chapter cover pattern.** When a single source is too large for one wiki page (50+ pages with multiple distinct chapters), split into a **cover note + chapter notes**. The cover note is a regular page in its primary directory with the standard frontmatter (no `cover:` field) — its body holds source overview, cross-cutting key findings, methodology summary, and a *Chapters* section linking to chapter notes. Each chapter note in the same primary directory carries `cover: ./{slug}/<cover-note>.md` in frontmatter and a body that deep-dives one chapter. All notes (cover + chapters) **share the same `source:` value** and belong to the same primary type/directory. Naming: `{source-slug}.md` for the cover, `{source-slug}-{chapter-slug}.md` for each chapter (keeps everything sorted together in `ls`). In `index.md`, chapters indent under the cover via 2-space markdown nesting. Only use this pattern for genuinely large sources where a single ~1000+ line page would be unreadable — for shorter sources, keep a single page. Lint enforces: chapter `cover:` target exists, cover and chapter share `source:`, no cover chains (cover can't itself have a cover).
+
+   **§8b — Type field semantics.** The `type:` frontmatter field signals which lint rules apply:
+   - `type:` **absent or empty** → pages are treated as the wiki's default primary type. Lint enforces the canonical structural sections (What This Is, How It Works, Risk Register, Prerequisites).
+   - `type: entity` or `type: concept` → entity-page rules apply (mandatory: What It Is, How We Use It, Where It Appears).
+   - `type: <any other value>` (e.g. `article`, `policy`, `control`, `meta`) → free-form. Lint skips section-presence enforcement; the page's template defines its structure.
+
+   In a multi-primary-type wiki, set `type:` on every primary page so the graph view can colour and filter them distinctly. If you want strict section enforcement on a specific custom type, lift that type's sections into the template and rely on the template (not lint) for that discipline.
+9. **index.md Format** — one row per page; for multi-primary-type wikis, use one top-level section per primary type (e.g. `## Policies`, `## Controls`, `## Articles`, `## Entities & Concepts`), with sub-grouping by category inside each section. Links use wiki-root-relative paths (e.g. `[title](./policies/data-retention.md)`, `[title](./entities/openai.md)`). Focus summaries on what it does, not what it is.
 10. **log.md Format** — `## [YYYY-MM-DD] action | detail`; grep-able; append-only
 11. **Entity and Concept Pages** — `type: entity | concept` frontmatter field; `mentioned_in: []` backlink list (filenames); mandatory sections: What It Is, How We Use It, Where It Appears; optional: Cross-Cutting Risks, Key References; created automatically during Ingest for any tool/platform/pattern central to how the page works
 12. **Open Questions** — when a page contains an unresolved thread, mark it with the blockquote convention `> **Open question:** <text>`. The render script aggregates these into the Open questions view in `wiki.html`. Use one blockquote per question; one line each. Do not add `Open question:` headers — only the blockquote pattern is recognised.
 
 ### Lint checks — include all of these in the schema file's Lint section
 
-- Pages missing any mandatory section
+- Pages missing any mandatory section. Enforcement depends on the `type:` field — see §8b. In short: untyped pages get strict default-primary checks; `entity`/`concept` get entity checks; any other explicit `type:` value (article, policy, control, meta, …) is free-form.
 - Pages missing YAML frontmatter, or frontmatter missing required fields (`title`, `category`, `status`, `owner`, `tags`, `created`, `last_reviewed`)
 - Pages with `source` pointing to a file that doesn't exist in `sources/`
 - Pages with no `source` frontmatter whose body references `sources/X` (likely an ingest where the agent forgot to set the field)
@@ -127,14 +138,24 @@ This file is the agent's operating manual. Include all of these:
 
 Report all findings as a markdown checklist. Do not auto-fix — report and let the user decide.
 
-**Parameterise**: use the domain and page type from Step 1 throughout. Do NOT carry over domain-specific categories from any existing wiki — replace category examples with generic placeholders like `Category A | Category B`.
+**Parameterise**: use the domain and primary types from Step 1 throughout. Do NOT carry over domain-specific categories from any existing wiki — replace category examples with generic placeholders like `Category A | Category B`. If the wiki has multiple primary types, every place this manual references "the primary directory" or "the primary template" expands to one-per-type (one directory, one template, one index section, one `type:` value).
 
-## Template — required sections
+## Templates — required sections
 
-YAML frontmatter block (title, category, status, owner, source, tags, created, last_reviewed), then:
+Create **one template per primary type** in `_templates/{slug}.md`. Each template starts with the same YAML frontmatter block (title, category, status, owner, source, type [for non-default types, see §8b], tags, created, last_reviewed), then defines the sections that fit that type.
+
+For the **default primary template** (used when the wiki has one untyped primary, or for the type that doesn't set a `type:` value):
 
 - **Mandatory**: What This Is, How It Works, Risk Register, Prerequisites
-- **Optional** (commented out): add domain-appropriate sections based on the wiki's topic and page type
+- **Optional** (commented out): add domain-appropriate sections based on the wiki's topic
+
+For **custom-typed templates** (any template whose pages set `type:` to something other than entity/concept) — lint won't enforce sections, so the template's job is to make the right shape obvious. Suggested patterns:
+
+- **Policy** template — Purpose, Scope, Policy Statement, Roles & Responsibilities, Enforcement, Exceptions, Related Controls
+- **Control** template — What It Does, Implementation, Owner, Evidence / Audit Trail, Testing Cadence, Related Policies
+- **Article** template — Summary, Body (free-form), Related Pages, References
+
+These are starting points — adapt to the wiki's domain. The point is each primary type gets a shape that fits the kind of artefact it represents, not a one-size-fits-all skeleton.
 
 ## Entity Template — required sections
 

@@ -45,13 +45,22 @@ def parse_frontmatter(text: str) -> dict:
 
 
 def page_type(fm: dict) -> str:
-    t = fm.get("type", "")
-    if t in ("entity", "concept"):
+    """Resolve the type label used for grouping, colouring, and filtering.
+
+    - Explicit `type:` field is honoured for any non-empty value (entity,
+      concept, meta, or any custom value like article/policy/control —
+      this is what makes multi-primary-type wikis work).
+    - If no `type:` is set, the page is "primary" by default. Pages with
+      `category:` containing "meta" still resolve to "meta" for back-compat
+      with the old category-only meta convention.
+    """
+    t = (fm.get("type") or "").strip()
+    if t:
         return t
     cat = (fm.get("category") or "").lower()
     if "meta" in cat:
         return "meta"
-    return "use-case"
+    return "primary"
 
 
 def split_frontmatter_and_body(text: str) -> tuple[dict, str]:
@@ -664,7 +673,7 @@ function initGraph() {
   const nodes = pageList.map(p => ({
     id: idMap[p],
     label: WIKI_DATA.pages[p].title,
-    type: WIKI_DATA.pages[p].type || 'use-case',
+    type: WIKI_DATA.pages[p].type || 'primary',
     file: p,
     tags: WIKI_DATA.pages[p].tags || [],
     orphan: inbound[p] === 0,
@@ -675,11 +684,14 @@ function initGraph() {
   links.forEach(l => { deg[l.source]++; deg[l.target]++; });
 
   function nodeRadius(d) {
-    const base = d.type === 'use-case' ? 12 : 9;
+    const base = d.type === 'primary' ? 12 : 9;
     return base + Math.sqrt(deg[d.id]) * 2.5;
   }
 
-  const colour = { 'use-case': '#60a5fa', entity: '#a78bfa', concept: '#a78bfa', meta: '#34d399' };
+  // Multi-primary-type wikis can declare custom `type:` values (e.g. article,
+  // policy, control). A small palette covers the common cases; anything else
+  // falls through to the neutral grey via `colour[d.type] || '#94a3b8'`.
+  const colour = { 'primary': '#60a5fa', entity: '#a78bfa', concept: '#a78bfa', meta: '#34d399', article: '#fbbf24', policy: '#f472b6', control: '#22d3ee' };
 
   const svgEl = d3.select('#graph-svg');
   const canvas = svgEl.append('g');

@@ -7,7 +7,7 @@ Usage:
     python3 scripts/lint.py --json   # machine-readable output for LLM consumption
 
 Checks performed (structural/mechanical — no LLM required):
-  - Mandatory sections present in use-case and entity pages
+  - Mandatory sections present in default-primary pages (no `type:` field) and entity pages
   - Required YAML frontmatter fields present
   - source frontmatter points to an existing file in sources/
   - Pages without a source field whose body references sources/X (likely missed ingest)
@@ -40,7 +40,10 @@ EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVEN
 EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals"}
 
 REQUIRED_FRONTMATTER = {"title", "category", "status", "owner", "tags", "created", "last_reviewed"}
-USE_CASE_MANDATORY_SECTIONS = {"What This Is", "How It Works", "Risk Register", "Prerequisites"}
+# Applied to primary pages that don't declare a `type:` field. Pages with an
+# explicit non-entity/concept `type:` (e.g. article, policy, control) are
+# treated as free-form — their template defines the structure, lint stays out.
+PRIMARY_MANDATORY_SECTIONS = {"What This Is", "How It Works", "Risk Register", "Prerequisites"}
 ENTITY_MANDATORY_SECTIONS = {"What It Is", "How We Use It", "Where It Appears"}
 OPEN_RISK_STATUS = "🔲"
 SOURCE_REF_RE = re.compile(r'\bsources/[\w\-./]+\.\w+')
@@ -206,16 +209,22 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
                     "detail": f"body references {refs_preview} but no source field — should this be set?",
                 })
 
-        # Mandatory sections (skip meta pages — free-form structure)
-        is_meta = "meta" in str(fm.get("category", "")).lower() or fm.get("type") == "meta"
+        # Mandatory sections. Behaviour by type:
+        #   entity/concept → entity sections enforced
+        #   meta (or category contains "meta") → free-form, no enforcement
+        #   any other explicit type (article, policy, control, …) → free-form,
+        #     no enforcement — the type's own template defines its structure
+        #   no `type:` field at all → strict default-primary sections enforced
+        is_meta = "meta" in str(fm.get("category", "")).lower() or page_type == "meta"
+        is_custom_typed = bool(page_type) and not is_entity and not is_meta
         if is_entity:
             for section in ENTITY_MANDATORY_SECTIONS:
                 if not any(section.lower() in s.lower() for s in sections):
                     issues.append({"file": f, "check": "missing_section", "detail": f"entity page missing section: {section}"})
-        elif not is_meta:
-            for section in USE_CASE_MANDATORY_SECTIONS:
+        elif not is_meta and not is_custom_typed:
+            for section in PRIMARY_MANDATORY_SECTIONS:
                 if not any(section.lower() in s.lower() for s in sections):
-                    issues.append({"file": f, "check": "missing_section", "detail": f"use-case page missing section: {section}"})
+                    issues.append({"file": f, "check": "missing_section", "detail": f"primary page missing section: {section}"})
 
         # Open risk register rows
         open_risks = parse_risk_open_rows(p["text"])

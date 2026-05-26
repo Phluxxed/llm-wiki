@@ -242,5 +242,82 @@ class CoverFieldCheckTest(unittest.TestCase):
         self.assertIn("sources/BIG.pdf", issues[0]["detail"])
 
 
+class TypeAwareSectionChecksTest(unittest.TestCase):
+    """Section-presence enforcement is keyed on the `type:` frontmatter field.
+
+    - No `type:` set                  → strict primary checks (PRIMARY_MANDATORY_SECTIONS)
+    - `type: entity` / `type: concept` → entity checks
+    - `type: meta` or `category: meta` → free-form, no section enforcement
+    - `type: <anything else>` (article, policy, control, …) → free-form,
+        no section enforcement (the type's own template defines the structure;
+        lint stays out of the way for custom primary types).
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _base_fm(self, **overrides):
+        fm = {"title": "X", "category": "X", "status": "Live", "owner": "x", "tags": [],
+              "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        fm.update(overrides)
+        return fm
+
+    def _run(self):
+        lint = reload_lint_with_root(self.wiki_root)
+        pages = lint.collect_pages()
+        all_md = lint.collect_all_md_paths()
+        return [i for i in lint.run_checks(pages, set(), set(), all_md) if i["check"] == "missing_section"]
+
+    def test_no_type_field_enforces_primary_sections(self):
+        # Untyped primary page with no mandatory sections — should flag all four.
+        write_md(self.wiki_root / "policies/foo.md", self._base_fm(title="Foo"), "Some body text.")
+        issues = self._run()
+        details = {i["detail"] for i in issues}
+        self.assertEqual(len(issues), 4)
+        self.assertTrue(any("What This Is" in d for d in details))
+        self.assertTrue(any("How It Works" in d for d in details))
+        self.assertTrue(any("Risk Register" in d for d in details))
+        self.assertTrue(any("Prerequisites" in d for d in details))
+
+    def test_no_type_field_with_all_sections_passes(self):
+        body = "## What This Is\n## How It Works\n## Risk Register\n## Prerequisites\n"
+        write_md(self.wiki_root / "policies/foo.md", self._base_fm(title="Foo"), body)
+        self.assertEqual(self._run(), [])
+
+    def test_explicit_article_type_skips_section_checks(self):
+        # Article-style page with no canonical sections — no missing_section issues.
+        write_md(self.wiki_root / "articles/foo.md",
+                 self._base_fm(title="Foo", type="article"),
+                 "Some free-form article body.")
+        self.assertEqual(self._run(), [])
+
+    def test_explicit_policy_type_skips_section_checks(self):
+        # Wikis can define their own primary types — lint stays out of the way.
+        write_md(self.wiki_root / "policies/foo.md",
+                 self._base_fm(title="Foo", type="policy"),
+                 "Policy body without canonical sections.")
+        self.assertEqual(self._run(), [])
+
+    def test_entity_type_still_uses_entity_sections(self):
+        write_md(self.wiki_root / "entities/openai.md",
+                 self._base_fm(title="OpenAI", type="entity"),
+                 "Body with no mandatory sections.")
+        issues = self._run()
+        details = {i["detail"] for i in issues}
+        self.assertTrue(any("What It Is" in d for d in details))
+        self.assertTrue(any("How We Use It" in d for d in details))
+        self.assertTrue(any("Where It Appears" in d for d in details))
+
+    def test_meta_type_still_skipped(self):
+        write_md(self.wiki_root / "notes/changelog.md",
+                 self._base_fm(title="Changelog", type="meta"),
+                 "Body with no mandatory sections.")
+        self.assertEqual(self._run(), [])
+
+
 if __name__ == "__main__":
     unittest.main()
