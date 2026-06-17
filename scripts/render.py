@@ -29,7 +29,7 @@ except ImportError:
 
 WIKI_ROOT = Path(__file__).parent.parent
 EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
-EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals", "docs", "tests"}
+EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals", ".eval", "docs", "tests"}
 
 
 def parse_frontmatter(text: str) -> dict:

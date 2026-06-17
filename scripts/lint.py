@@ -39,7 +39,7 @@ except ImportError:
 
 WIKI_ROOT = Path(__file__).parent.parent
 EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
-EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals"}
+EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals", ".eval"}
 
 REQUIRED_FRONTMATTER = {"title", "category", "status", "owner", "tags", "created", "last_reviewed",
                         "type", "description", "timestamp"}
@@ -375,7 +375,7 @@ def print_report(issues: list[dict]) -> None:
     open_risks = sum(1 for i in issues if i["check"] == "open_risk")
     structural = total - open_risks
     print(f"\n---\n{total} issue(s): {structural} structural, {open_risks} open risk row(s)")
-    print("\n⚠️  Contradiction scan and source drift require LLM — run those separately.")
+    print("\n⚠️  Contradiction scan and source drift require LLM — run `python3 scripts/eval.py` (LLM-as-judge quality eval).")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────

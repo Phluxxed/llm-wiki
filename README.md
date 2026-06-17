@@ -25,7 +25,8 @@ your-wiki/
 └── scripts/
     ├── render.py          ← generates wiki.html — single-file reader with eight views
     ├── lint.py            ← structural health check
-    └── query.py           ← frontmatter queries (filter by status, category, tag, etc.)
+    ├── query.py           ← frontmatter queries (filter by status, category, tag, etc.)
+    └── eval.py            ← LLM-as-judge quality eval (grounding, contradictions, redundancy) with regression gating
 ```
 
 ## Installation
@@ -46,6 +47,8 @@ Requires `pyyaml` and `markdown` for the scripts:
 ```bash
 pip3 install pyyaml markdown
 ```
+
+`scripts/eval.py`'s **claude** judge additionally needs `claude-agent-sdk` (`pip3 install claude-agent-sdk`); skip it if you run the eval with `--judge codex` or `--judge none`.
 
 ## Usage
 
@@ -68,6 +71,7 @@ The skill asks two questions — what the wiki is for, and what the primary page
 | `scripts/lint.py` | `python3 scripts/lint.py` | Structural health check — missing sections, broken refs, open risks, index consistency |
 | `scripts/query.py` | `python3 scripts/query.py --help` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
 | `scripts/render.py` | `python3 scripts/render.py` | Generates `wiki.html` — single-file reader (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities). Open in a browser or view as a Claude artifact |
+| `scripts/eval.py` | `python3 scripts/eval.py --gate` | LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating (exit code). Auto-detects your agent CLI (`claude`/`codex`) as a keyless judge; run records in `.eval/` |
 
 ## Agent compatibility
 

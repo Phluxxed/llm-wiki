@@ -134,5 +134,6 @@ Plus: the root `index.md` declares `okf_version: "0.1"`, and every non-reserved 
 | `scripts/lint.py` | `python3 scripts/lint.py` | Structural health check — missing sections, broken refs, open risks, index consistency |
 | `scripts/query.py` | `python3 scripts/query.py --status Draft` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
 | `scripts/render.py` | `python3 scripts/render.py` | Generates `wiki.html` — single-file reader with Home / Page / Search / Graph / Risks / Recent changes / Open questions / Entities views |
+| `scripts/eval.py` | `python3 scripts/eval.py --gate` | LLM-as-judge quality eval — grounding, contradictions, redundancy, disambiguation; thresholds + regression gating. Auto-detects your agent CLI as the judge (keyless); run records in `.eval/` |
 
-Requires: `pip3 install pyyaml markdown` (or `uv pip install pyyaml markdown` into a project-local `.venv/`)
+Requires: `pip3 install pyyaml markdown` (or `uv pip install pyyaml markdown` into a project-local `.venv/`). The eval's **claude** judge also needs `claude-agent-sdk` (skip if you use `--judge codex` or `--judge none`).
