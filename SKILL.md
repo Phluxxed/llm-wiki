@@ -1,5 +1,6 @@
 ---
 name: wikime
+version: 1.0.0
 description: Use when user runs /wikime or asks to scaffold a new wiki, knowledge base, or LLM-maintained document store in an empty or fresh directory
 ---
 
@@ -8,6 +9,10 @@ description: Use when user runs /wikime or asks to scaffold a new wiki, knowledg
 ## Overview
 
 Scaffolds a persistent, LLM-maintained wiki. Two questions first, then create all files in one pass.
+
+Wikis produced by this skill are **conformant [Open Knowledge Format (OKF) v0.1](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles** — a directory of markdown files with YAML frontmatter — as a *strict superset*: every page is valid OKF, but the lint enforces more than OKF requires (mandatory sections, full frontmatter, broken-ref checks). This means a wiki this skill produces can be read and written by any OKF-aware tooling with no bespoke integration, while staying stricter and more curated than bulk-generated OKF.
+
+This skill is **versioned with semver** (see `version:` above): major = a breaking change to the generated-wiki schema, minor = additive, patch = fixes. `1.0.0` is the first OKF-conformant release; older wikis (no `type`/`description`/`timestamp` on every page) predate it — see the migration check in Step 3.
 
 ## Step 1 — Ask before touching any files
 
@@ -42,7 +47,9 @@ If the file already exists: append the pointer line. If it does not exist: creat
 
 Before creating any files, check whether `wiki-agent.md` already exists in the directory.
 
-- **If it exists**: this is an existing wiki. Do not overwrite anything. **Migration check**: if `scripts/graph.py` or `graph.html` exists, this wiki predates the `render.py` change. Offer the user a one-line migration: replace `scripts/graph.py` with the current `skills/wikime/scripts/render.py`, delete `graph.html`, install `markdown` into the wiki's `.venv` (see Step 5 for the `uv` commands), then `python3 scripts/render.py`. After confirming, also update `wiki-agent.md`'s Operations section to add the `render.py` rule. Otherwise tell the user and stop.
+- **If it exists**: this is an existing wiki. Do not overwrite anything. Run the migration checks below, then tell the user and stop.
+  - **render.py migration**: if `scripts/graph.py` or `graph.html` exists, this wiki predates the `render.py` change. Offer the user a one-line migration: replace `scripts/graph.py` with the current `skills/wikime/scripts/render.py`, delete `graph.html`, install `markdown` into the wiki's `.venv` (see Step 5 for the `uv` commands), then `python3 scripts/render.py`. After confirming, also update `wiki-agent.md`'s Operations section to add the `render.py` rule.
+  - **OKF conformance migration (pre-1.0.0 wikis)**: run `python3 scripts/lint.py` (after copying in the current `scripts/lint.py`). If pages are flagged for missing `type`, `description`, or `timestamp`, or `index.md` lacks `okf_version`, this wiki predates the OKF-conformance release. Offer the user a backfill: set each page's `type` from its primary directory slug (`policies/` → `type: policy`; entity/concept pages keep `type: entity|concept`); add `okf_version: "0.1"` to the top of `index.md`; and for `description`/`timestamp`, propose values (description from the page's lead sentence, timestamp from `last_reviewed` or the file's git mtime) for the user to confirm rather than inventing silently. Re-run lint after backfilling. Do not edit pages without the user's go-ahead.
 - **If it does not exist**: proceed with scaffolding below.
 
 ## Step 4 — Create these files
@@ -53,7 +60,7 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `{your schema file}` | Pointer file for your platform — see Step 2. Append if exists; create if not. |
 | `CONVENTIONS.md` | Copy from skill bundle (`skills/wikime/_templates/CONVENTIONS.md`); fill in `{WIKI_NAME}`, `{REPO_NAME}`, and the `{PRIMARY_TYPES}` table (one row per primary type — name, slug, one-line description) |
 | `README.md` | Quick start, operations cheat sheet, directory structure, useful commands, Scripts & Tooling section |
-| `index.md` | Empty catalog with a commented example showing exact format. For multi-primary-type wikis, use one section per primary type. |
+| `index.md` | Catalog. Starts with a root `okf_version: "0.1"` frontmatter block (see §9), then an empty catalog with a commented example showing exact format. For multi-primary-type wikis, use one section per primary type. |
 | `log.md` | Seeded: `## [YYYY-MM-DD] init | Created wiki: {files listed}` |
 | `_templates/{slug}.md` | Page template — **one per primary type** (e.g. `_templates/policy.md`, `_templates/control.md`, `_templates/article.md`). See Template sections below. |
 | `_templates/entity.md` | Entity/concept template — see Entity Template section below |
@@ -109,20 +116,24 @@ This file is the agent's operating manual. Include all of these:
 5. **File Naming** — source files: kebab-case with ID if one exists; primary wiki pages: `{slug}/{id}-{title}.md` or `{slug}/{title}.md` where `{slug}` is the primary directory for that type (each primary type has its own); entity/concept pages: `entities/{title}.md`; all cross-page links use wiki-root-relative paths (e.g. `./policies/data-retention.md`, `./entities/openai.md`); `mentioned_in` frontmatter values also use wiki-root-relative paths
 6. **Source File Header Block** — immutability header template (source type, URL, fetched date, do-not-edit warning)
 7. **Risk Register Format** — table with Likelihood/Impact/Mitigation/Status; status reflects design clarity not build status
-8. **Wiki Page Frontmatter** — YAML schema: title, category, status, owner, source (optional), cover (optional — chapter notes only, see §8a), type (optional — see §8b), tags, created, last_reviewed
+8. **Wiki Page Frontmatter** — YAML schema. **Required (lint-enforced):** title, category, status, owner, tags, created, last_reviewed, **type** (see §8b), **description** (one-line summary), **timestamp** (ISO 8601 datetime of last meaningful change — distinct from `created` and `last_reviewed`). **Optional:** source (set when the page derives from a `sources/` file), cover (chapter notes only, see §8a).
+
+   The last three are the **OKF v0.1 conformance fields** (strict superset): `type` is OKF's one required routing field, `description` its recommended summary, `timestamp` its last-modified marker. `type` is **auto-defaulted from the page's primary directory slug** (a page in `policies/` gets `type: policy`, `papers/` → `type: paper`); entity/concept pages use `type: entity|concept`, meta pages `type: meta`. Because it's always set from the directory, authors rarely write it by hand — but it is required and lint flags its absence.
 
    **§8a — Multi-chapter cover pattern.** When a single source is too large for one wiki page (50+ pages with multiple distinct chapters), split into a **cover note + chapter notes**. The cover note is a regular page in its primary directory with the standard frontmatter (no `cover:` field) — its body holds source overview, cross-cutting key findings, methodology summary, and a *Chapters* section linking to chapter notes. Each chapter note in the same primary directory carries `cover: ./{slug}/<cover-note>.md` in frontmatter and a body that deep-dives one chapter. All notes (cover + chapters) **share the same `source:` value** and belong to the same primary type/directory. Naming: `{source-slug}.md` for the cover, `{source-slug}-{chapter-slug}.md` for each chapter (keeps everything sorted together in `ls`). In `index.md`, chapters indent under the cover via 2-space markdown nesting. Only use this pattern for genuinely large sources where a single ~1000+ line page would be unreadable — for shorter sources, keep a single page. Lint enforces: chapter `cover:` target exists, cover and chapter share `source:`, no cover chains (cover can't itself have a cover).
 
-   **§8b — Type field semantics.** The `type:` frontmatter field is a colour/filter/grouping signal for the graph and sidebar — **not** a lint-exemption knob. Every primary page must answer the four load-bearing questions (What This Is / How It Works / Risk Register / Prerequisites), regardless of which custom type it declares. Type-specific content (a policy's Statement, a control's Implementation) sits as h3 nested under the h2 mandatory sections.
+   **§8b — Type field semantics.** The `type:` frontmatter field is **required** (it's OKF's one mandatory field) and doubles as a colour/filter/grouping signal for the graph and sidebar — but it is **not** a lint-exemption knob. Every primary page must answer the four load-bearing questions (What This Is / How It Works / Risk Register / Prerequisites), regardless of which custom type it declares. Type-specific content (a policy's Statement, a control's Implementation) sits as h3 nested under the h2 mandatory sections. `type` is auto-defaulted from the primary directory slug (see §8), so it's set on every page without manual effort.
 
-   Lint behaviour by type:
-   - `type:` **absent or empty** → strict primary section checks.
+   Lint behaviour: `type` absent or empty is a **frontmatter error** (it's required). Section enforcement then routes by the field's *value*:
    - `type: entity` or `type: concept` → entity-page rules apply (mandatory: What It Is, How We Use It, Where It Appears).
-   - `type: meta` (or `category:` containing "meta") → free-form, no enforcement. Meta is for changelogs, archive indices, and other legitimately unstructured pages.
-   - `type: <anything else>` (`policy`, `control`, `article`, …) → strict primary section checks, same as no-type.
+   - `type: meta` (or `category:` containing "meta") → free-form, no section enforcement. Meta is for changelogs, archive indices, and other legitimately unstructured pages.
+   - `type: <anything else>` (`policy`, `control`, `article`, the slug-derived default, …) → strict primary section checks. (As a safety net, a page that somehow has no `type` is also routed to strict primary checks — but it will still be flagged for the missing required field.)
 
    In a multi-primary-type wiki, set `type:` on every primary page so the graph view colours and filters them distinctly. Lint then enforces the same baseline shape on all of them.
-9. **index.md Format** — one row per page; for multi-primary-type wikis, use one top-level section per primary type (e.g. `## Policies`, `## Controls`, `## Articles`, `## Entities & Concepts`), with sub-grouping by category inside each section. Links use wiki-root-relative paths (e.g. `[title](./policies/data-retention.md)`, `[title](./entities/openai.md)`). Focus summaries on what it does, not what it is.
+9. **index.md Format** — the bundle's progressive-disclosure catalog, conformant with OKF §6. Structure:
+   - A **root frontmatter block declaring the OKF version** — `---` / `okf_version: "0.1"` / `---` — at the very top. This is the *only* place OKF permits frontmatter in an index file; lint flags its absence.
+   - Then one top-level section per primary type (e.g. `## Policies`, `## Controls`, `## Articles`, `## Entities & Concepts`), with sub-grouping by category inside each section.
+   - Each entry is a **bullet link with a trailing description**: `* [title](./policies/data-retention.md) - what it does` (OKF §6 form). Links use wiki-root-relative paths. Focus summaries on what it does, not what it is.
 10. **log.md Format** — `## [YYYY-MM-DD] action | detail`; grep-able; append-only
 11. **Entity and Concept Pages** — `type: entity | concept` frontmatter field; `mentioned_in: []` backlink list (filenames); mandatory sections: What It Is, How We Use It, Where It Appears; optional: Cross-Cutting Risks, Key References; created automatically during Ingest for any tool/platform/pattern central to how the page works
 12. **Open Questions** — when a page contains an unresolved thread, mark it with the blockquote convention `> **Open question:** <text>`. The render script aggregates these into the Open questions view in `wiki.html`. Use one blockquote per question; one line each. Do not add `Open question:` headers — only the blockquote pattern is recognised.
@@ -130,7 +141,9 @@ This file is the agent's operating manual. Include all of these:
 ### Lint checks — include all of these in the schema file's Lint section
 
 - Pages missing any mandatory section. Enforcement depends on the `type:` field — see §8b. In short: every primary page (no `type:` or any custom value) gets strict primary checks; `entity`/`concept` get entity checks; only `type: meta` is free-form.
-- Pages missing YAML frontmatter, or frontmatter missing required fields (`title`, `category`, `status`, `owner`, `tags`, `created`, `last_reviewed`)
+- Pages missing YAML frontmatter, or frontmatter missing required fields (`title`, `category`, `status`, `owner`, `tags`, `created`, `last_reviewed`, `type`, `description`, `timestamp`)
+- **OKF conformance** (§9.1): any non-reserved `.md` file with no parseable frontmatter (these are silently skipped by the page collector, so they get a dedicated scan)
+- **OKF conformance** (§11): root `index.md` missing the `okf_version` declaration
 - Pages with `source` pointing to a file that doesn't exist in `sources/`
 - Pages with no `source` frontmatter whose body references `sources/X` (likely an ingest where the agent forgot to set the field)
 - Body markdown links whose target `.md` file does not exist anywhere in the wiki tree (broken refs, typos, links to deleted pages)
@@ -152,7 +165,7 @@ Report all findings as a markdown checklist. Do not auto-fix — report and let 
 
 ## Templates — required sections
 
-Create **one template per primary type** in `_templates/{slug}.md`. Each template starts with the same YAML frontmatter block (title, category, status, owner, source, type [see §8b], tags, created, last_reviewed), then includes the four mandatory h2 sections (What This Is, How It Works, Risk Register, Prerequisites) with type-specific content nested as h3 underneath.
+Create **one template per primary type** in `_templates/{slug}.md`. Each template starts with the same YAML frontmatter block (title, category, status, owner, source, **type** [defaulted to the directory slug — see §8b], **description**, **timestamp**, tags, created, last_reviewed), then includes the four mandatory h2 sections (What This Is, How It Works, Risk Register, Prerequisites) with type-specific content nested as h3 underneath. Pre-fill `type:` in each template with that type's slug value (e.g. `type: policy` in `_templates/policy.md`) so new pages are OKF-conformant by default.
 
 **Universal h2 structure (mandatory across all primary types, lint-enforced):**
 
@@ -173,7 +186,7 @@ These are starting points — adapt to the wiki's domain. The point is each prim
 
 ## Entity Template — required sections
 
-YAML frontmatter block (title, type: entity|concept, category: Entities & Concepts, status, owner, tags, mentioned_in: [], created, last_reviewed), then:
+YAML frontmatter block (title, type: entity|concept, category: Entities & Concepts, status, owner, description, timestamp, tags, mentioned_in: [], created, last_reviewed), then:
 
 - **Mandatory**: What It Is, How We Use It, Where It Appears (table: wiki page → role)
 - **Optional** (commented out): Cross-Cutting Risks, Key References

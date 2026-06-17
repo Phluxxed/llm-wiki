@@ -95,15 +95,29 @@ The render script aggregates these into the Open questions tab of `wiki.html`. U
 
 ### Mandatory Sections by Type
 
-The `type:` field is a colour/filter/grouping signal — not a lint-exemption knob. Every primary page must answer the four load-bearing questions; type-specific content sits as h3 nested underneath.
+The `type:` field is **required** (it's OKF's one mandatory field) and doubles as a colour/filter/grouping signal — but it is not a lint-exemption knob. It's auto-defaulted from the page's primary directory slug (`policies/` → `type: policy`), so it's set on every page without manual effort. Every primary page must still answer the four load-bearing questions; type-specific content sits as h3 nested underneath. Section enforcement routes by the field's *value*:
 
-| `type:` field | Mandatory sections (enforced by lint) |
+| `type:` value | Mandatory sections (enforced by lint) |
 | --- | --- |
-| (absent) or any custom value (`policy`, `control`, `article`, …) | What This Is, How It Works, Risk Register, Prerequisites |
+| any primary value (the slug default, `policy`, `control`, `article`, …) | What This Is, How It Works, Risk Register, Prerequisites |
 | `entity` / `concept` | What It Is, How We Use It, Where It Appears |
 | `meta` (or `category:` containing "meta") | none — free-form; for changelogs, archive indices, and other legitimately unstructured pages |
 
 Optional sections (include only if relevant): add domain-appropriate sections based on this wiki's topic and primary type.
+
+## OKF Conformance
+
+This wiki is a conformant **[Open Knowledge Format (OKF) v0.1](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)** bundle — a directory of markdown files with YAML frontmatter — held to a *strict superset* of the spec: every page is valid OKF, but lint enforces more than OKF requires. In practice this means any OKF-aware tool can read and write this wiki without bespoke integration.
+
+What conformance adds to every page's frontmatter, on top of the existing fields:
+
+| Field | Meaning | Notes |
+| --- | --- | --- |
+| `type` | OKF's required routing field; also our colour/filter signal | Auto-defaulted from the primary directory slug |
+| `description` | One-line summary | Used by index entries, search snippets, previews |
+| `timestamp` | ISO 8601 datetime of last meaningful change | Distinct from `created` (creation) and `last_reviewed` (last human review) |
+
+Plus: the root `index.md` declares `okf_version: "0.1"`, and every non-reserved `.md` file has a parseable frontmatter block. Lint checks all of this.
 
 ## Risk Register Status Legend
 

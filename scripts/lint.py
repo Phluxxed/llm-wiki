@@ -8,7 +8,9 @@ Usage:
 
 Checks performed (structural/mechanical — no LLM required):
   - Mandatory sections present in default-primary pages (no `type:` field) and entity pages
-  - Required YAML frontmatter fields present
+  - Required YAML frontmatter fields present (incl. OKF: type, description, timestamp)
+  - OKF v0.1: non-reserved .md files have parseable frontmatter (§9.1)
+  - OKF v0.1: root index.md declares okf_version (§11)
   - source frontmatter points to an existing file in sources/
   - Pages without a source field whose body references sources/X (likely missed ingest)
   - Body markdown links whose target .md file does not exist (broken refs / typos)
@@ -39,10 +41,15 @@ WIKI_ROOT = Path(__file__).parent.parent
 EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
 EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals"}
 
-REQUIRED_FRONTMATTER = {"title", "category", "status", "owner", "tags", "created", "last_reviewed"}
-# Applied to primary pages that don't declare a `type:` field. Pages with an
-# explicit non-entity/concept `type:` (e.g. article, policy, control) are
-# treated as free-form — their template defines the structure, lint stays out.
+REQUIRED_FRONTMATTER = {"title", "category", "status", "owner", "tags", "created", "last_reviewed",
+                        "type", "description", "timestamp"}
+# `type`, `description`, `timestamp` make a wiki page a conformant OKF v0.1 concept
+# (strict superset): `type` is OKF's one required routing field (and our colour
+# signal), `description` a one-line summary, `timestamp` the ISO 8601 last
+# meaningful change — distinct from `created` (creation) and `last_reviewed`.
+# Enforced on every primary page regardless of its `type:` value (the slug
+# default, or article/policy/control/…). `type:` is a colour/filter signal, not
+# a lint exemption — only entity/concept and meta pages route elsewhere (§8b).
 PRIMARY_MANDATORY_SECTIONS = {"What This Is", "How It Works", "Risk Register", "Prerequisites"}
 ENTITY_MANDATORY_SECTIONS = {"What It Is", "How We Use It", "Where It Appears"}
 OPEN_RISK_STATUS = "🔲"
@@ -140,6 +147,51 @@ def parse_index_entries() -> set[str]:
     text = index.read_text(encoding="utf-8")
     text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
     return set(re.findall(r'\]\(\./([^)]+\.md)\)', text))
+
+
+def collect_unparseable_md() -> list[str]:
+    """Non-reserved .md files (concept docs) that lack a parseable frontmatter block.
+
+    OKF §9.1 requires every non-reserved .md to have parseable YAML frontmatter.
+    collect_pages() silently skips frontmatter-less files, so they would never be
+    flagged otherwise — this scan catches them.
+    """
+    bad = []
+    for md in sorted(WIKI_ROOT.rglob("*.md")):
+        rel = md.relative_to(WIKI_ROOT)
+        if rel.parts[0] in EXCLUDE_DIRS:
+            continue
+        if md.name in EXCLUDE_FILES:
+            continue
+        if not parse_frontmatter(md.read_text(encoding="utf-8")):
+            bad.append(str(rel).replace("\\", "/"))
+    return bad
+
+
+def check_okf_conformance() -> list[dict]:
+    """OKF v0.1 conformance checks that operate outside the collect_pages() set.
+
+    §9.1 — every non-reserved .md has parseable frontmatter (with a non-empty
+    `type`; the non-empty/required part is covered by REQUIRED_FRONTMATTER once
+    the page is parseable and reaches run_checks).
+    §11  — the root index.md should declare okf_version.
+    """
+    issues = []
+    for f in collect_unparseable_md():
+        issues.append({
+            "file": f,
+            "check": "okf_no_frontmatter",
+            "detail": "no parseable YAML frontmatter (OKF §9.1 — concept docs need frontmatter with a non-empty `type`)",
+        })
+    index = WIKI_ROOT / "index.md"
+    if index.exists():
+        if not parse_frontmatter(index.read_text(encoding="utf-8")).get("okf_version"):
+            issues.append({
+                "file": "index.md",
+                "check": "okf_version_missing",
+                "detail": 'root index.md should declare okf_version (OKF §11), e.g. okf_version: "0.1"',
+            })
+    return issues
 
 
 def parse_risk_open_rows(text: str) -> list[str]:
@@ -299,6 +351,8 @@ CHECK_LABELS = {
     "not_in_index":       "Not in index",
     "orphan_source":      "Orphan source",
     "index_dead_link":    "Dead index link",
+    "okf_no_frontmatter": "OKF: missing frontmatter",
+    "okf_version_missing": "OKF: index missing okf_version",
 }
 
 
@@ -336,6 +390,7 @@ def main():
     index_entries = parse_index_entries()
     all_md_paths = collect_all_md_paths()
     issues = run_checks(pages, source_files, index_entries, all_md_paths)
+    issues += check_okf_conformance()
 
     if args.json:
         print(json.dumps(issues, indent=2, ensure_ascii=False))

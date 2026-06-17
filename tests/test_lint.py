@@ -343,5 +343,115 @@ class TypeAwareSectionChecksTest(unittest.TestCase):
         self.assertEqual(self._run(), [])
 
 
+class RequiredFrontmatterTest(unittest.TestCase):
+    """OKF conformance (strict superset): `type`, `description`, and `timestamp`
+    are required frontmatter fields in addition to the existing seven.
+
+    - `type` satisfies OKF's one required routing field (and stays our colour signal)
+    - `description` is a one-line summary (OKF-recommended; required for us)
+    - `timestamp` is ISO 8601 last-meaningful-change, distinct from created/last_reviewed
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _conformant_fm(self, **overrides):
+        fm = {"title": "X", "category": "X", "status": "Live", "owner": "x", "tags": [],
+              "created": "2026-06-17", "last_reviewed": "2026-06-17",
+              "type": "policy", "description": "One-line summary.",
+              "timestamp": "2026-06-17T00:00:00Z"}
+        fm.update(overrides)
+        return fm
+
+    def _run(self):
+        lint = reload_lint_with_root(self.wiki_root)
+        pages = lint.collect_pages()
+        all_md = lint.collect_all_md_paths()
+        return [i for i in lint.run_checks(pages, set(), set(), all_md) if i["check"] == "frontmatter"]
+
+    def _details(self):
+        return {i["detail"] for i in self._run()}
+
+    def test_missing_type_flagged(self):
+        fm = self._conformant_fm(); del fm["type"]
+        write_md(self.wiki_root / "policies/foo.md", fm, "")
+        self.assertTrue(any("type" in d for d in self._details()))
+
+    def test_missing_description_flagged(self):
+        fm = self._conformant_fm(); del fm["description"]
+        write_md(self.wiki_root / "policies/foo.md", fm, "")
+        self.assertTrue(any("description" in d for d in self._details()))
+
+    def test_missing_timestamp_flagged(self):
+        fm = self._conformant_fm(); del fm["timestamp"]
+        write_md(self.wiki_root / "policies/foo.md", fm, "")
+        self.assertTrue(any("timestamp" in d for d in self._details()))
+
+    def test_empty_type_flagged(self):
+        write_md(self.wiki_root / "policies/foo.md", self._conformant_fm(type=""), "")
+        self.assertTrue(any("type" in d for d in self._details()))
+
+    def test_conformant_page_has_no_frontmatter_issues(self):
+        write_md(self.wiki_root / "policies/foo.md", self._conformant_fm(), "")
+        self.assertEqual(self._run(), [])
+
+
+class OKFConformanceTest(unittest.TestCase):
+    """OKF v0.1 §9 conformance checks that operate outside collect_pages():
+
+    - §9.1: every non-reserved .md must have parseable frontmatter. collect_pages()
+      silently skips frontmatter-less files, so they need their own scan.
+    - §11: the root index.md should declare okf_version.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _run(self, *check_names):
+        lint = reload_lint_with_root(self.wiki_root)
+        issues = lint.check_okf_conformance()
+        return [i for i in issues if not check_names or i["check"] in check_names]
+
+    def test_md_without_frontmatter_flagged(self):
+        (self.wiki_root / "policies").mkdir(parents=True)
+        (self.wiki_root / "policies/raw.md").write_text("# Just a heading\nNo frontmatter.\n", encoding="utf-8")
+        issues = self._run("okf_no_frontmatter")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["file"], "policies/raw.md")
+
+    def test_reserved_and_excluded_files_not_flagged(self):
+        # index.md / log.md are reserved (no frontmatter expected); README is excluded.
+        (self.wiki_root / "log.md").write_text("# Log\n", encoding="utf-8")
+        (self.wiki_root / "README.md").write_text("# Readme\n", encoding="utf-8")
+        self.assertEqual(self._run("okf_no_frontmatter"), [])
+
+    def test_root_index_missing_okf_version_flagged(self):
+        (self.wiki_root / "index.md").write_text("# Index\n\n* [Foo](./policies/foo.md) - x\n", encoding="utf-8")
+        issues = self._run("okf_version_missing")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["file"], "index.md")
+
+    def test_root_index_with_okf_version_clean(self):
+        (self.wiki_root / "index.md").write_text(
+            '---\nokf_version: "0.1"\n---\n# Index\n\n* [Foo](./policies/foo.md) - x\n', encoding="utf-8")
+        self.assertEqual(self._run("okf_version_missing"), [])
+
+    def test_conformant_tree_clean(self):
+        (self.wiki_root / "index.md").write_text('---\nokf_version: "0.1"\n---\n# Index\n', encoding="utf-8")
+        write_md(self.wiki_root / "policies/foo.md",
+                 {"title": "Foo", "category": "X", "status": "Live", "owner": "x", "tags": [],
+                  "created": "2026-06-17", "last_reviewed": "2026-06-17", "type": "policy",
+                  "description": "d", "timestamp": "2026-06-17T00:00:00Z"}, "body")
+        self.assertEqual(self._run(), [])
+
+
 if __name__ == "__main__":
     unittest.main()
