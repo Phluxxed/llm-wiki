@@ -280,11 +280,24 @@ def collect_pages(wiki_root: Path = WIKI_ROOT) -> dict:
 
 HTML_HEAD_CSS = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #0f1117; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif; line-height: 1.55; }
+:root {
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-display: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+body { background: #0f1117; color: #e2e8f0; font-family: var(--font-body); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+/* Editorial serif for display/titles/section heads; mono for instrumentation. */
+.masthead h1, .view-title, .article-title, .ph-title,
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { font-family: var(--font-display); }
+.kicker, .article-meta, .toc, .toc-title, .view-count, .badge, .ttag,
+.sb-section-title, .sb-brand-text, .rail-block-title, .cat-label, .home-section-title,
+.stat .l, .sb-mark + .sb-brand-text { font-family: var(--font-mono); }
 a { color: #93c5fd; text-decoration: none; } a:hover { text-decoration: underline; }
 #layout { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
 #sidebar { background: #0a0d14; border-right: 1px solid #1a2030; padding: 18px 14px; overflow-y: auto; max-height: 100vh; }
-#sidebar h1 { font-size: 14px; color: #cbd5e1; margin-bottom: 14px; }
+.sb-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 16px; padding: 0 4px; }
+.sb-mark { width: 10px; height: 10px; border-radius: 3px; background: linear-gradient(135deg, #fbbf24, #fb7185); flex-shrink: 0; }
+.sb-brand-text { font-size: 12.5px; font-weight: 650; color: #e2e8f0; line-height: 1.25; }
 #sidebar > nav { display: flex; flex-direction: column; gap: 2px; }
 #sidebar > nav > button { background: none; border: none; color: #94a3b8; text-align: left; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; }
 #sidebar > nav > button:hover { background: #11151f; color: #e2e8f0; }
@@ -304,25 +317,134 @@ a { color: #93c5fd; text-decoration: none; } a:hover { text-decoration: underlin
 .view { display: none; }
 .view.active { display: block; }
 h2 { font-size: 18px; color: #cbd5e1; margin-bottom: 16px; font-weight: 600; }
-.muted { color: #64748b; font-size: 12px; }
-.card { background: #11151f; border: 1px solid #1f2937; border-radius: 6px; padding: 14px 16px; margin-bottom: 10px; }
+.muted { color: #94a3b8; font-size: 12px; }
+.card { background: #11151f; border: 1px solid #1f2937; border-radius: 7px; padding: 14px 16px; margin-bottom: 10px; transition: border-color 0.12s, background 0.12s; }
+.card[data-page]:hover, .card[style*="cursor"]:hover { border-color: #2d3a4f; background: #131825; }
+/* Unified view header */
+.view-header { margin-bottom: 22px; }
+.view-title { font-size: 27px; font-weight: 560; color: #f5f8fc; letter-spacing: -0.005em; }
+.view-count { font-size: 15px; color: #475569; font-weight: 500; margin-left: 3px; }
+.view-sub { color: #94a3b8; font-size: 13px; margin-top: 5px; max-width: 660px; line-height: 1.5; }
+/* Unified entrance fade (graph excluded — it's a live canvas) */
+@keyframes viewIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.view.active { animation: viewIn 0.22s ease both; }
+#view-graph.active { animation: none; }
+@media (prefers-reduced-motion: reduce) { .view.active { animation: none; } }
+/* Open-question cards + risk page cell */
+.oq-list { display: flex; flex-direction: column; gap: 10px; }
+.oq-card { max-width: 820px; }
+.oq-q { font-size: 14px; line-height: 1.55; color: #d7dee8; }
+.oq-src { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 12px; color: #93c5fd; }
+.cell-page { min-width: 180px; }
+.cell-page .tdot { margin-right: 7px; vertical-align: middle; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: #1e2130; color: #94a3b8; margin-right: 6px; }
 .badge.prov-source { background: #102036; border: 1px solid #1d3357; color: #93c5fd; }
 .badge.prov-synth  { background: #0e2a20; border: 1px solid #14533d; color: #6ee7b7; }
 table { width: 100%; border-collapse: collapse; }
-th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #1f2937; font-size: 13px; vertical-align: top; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #1f2937; font-size: 13px; vertical-align: top; line-height: 1.5; }
 th { color: #94a3b8; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+tbody tr:nth-child(even) { background: #0c1019; }
+.lvl { display: inline-block; min-width: 22px; text-align: center; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.lvl-h { background: #3a1518; color: #fca5a5; }
+.lvl-m { background: #382c10; color: #fcd34d; }
+.lvl-l { background: #102619; color: #6ee7b7; }
+.recent-detail { line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.recent-detail.expandable { cursor: pointer; }
+.recent-detail.expanded { display: block; -webkit-line-clamp: unset; }
+.recent-detail-more { font-size: 11px; color: #60a5fa; cursor: pointer; margin-top: 4px; user-select: none; }
+.recent-detail code { background: #1b2230; border: 1px solid #2a3344; padding: 0 4px; border-radius: 3px; font-size: 0.9em; }
 input[type="text"] { width: 100%; background: #1e2130; border: 1px solid #2d3748; color: #e2e8f0; padding: 8px 10px; border-radius: 4px; font-size: 13px; outline: none; }
 input[type="text"]:focus { border-color: #60a5fa; }
-.markdown-body h1 { font-size: 22px; margin: 18px 0 10px; color: #e2e8f0; }
-.markdown-body h2 { font-size: 17px; margin: 18px 0 8px; color: #cbd5e1; }
-.markdown-body h3 { font-size: 14px; margin: 14px 0 6px; color: #cbd5e1; }
-.markdown-body p { margin-bottom: 10px; }
-.markdown-body ul, .markdown-body ol { margin: 0 0 10px 24px; }
-.markdown-body code { background: #11151f; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
-.markdown-body pre { background: #11151f; padding: 10px; border-radius: 4px; overflow-x: auto; margin-bottom: 10px; }
-.markdown-body blockquote { border-left: 3px solid #334155; padding-left: 12px; color: #94a3b8; margin: 10px 0; }
-.markdown-body table { margin: 10px 0; }
+/* ── Reading column ───────────────────────────────────────────────────── */
+.markdown-body { font-size: 15.5px; line-height: 1.7; color: #d7dee8; }
+.markdown-body > h1:first-child { display: none; }  /* title already shown in page header */
+.markdown-body h1 { font-size: 30px; font-weight: 560; margin: 28px 0 12px; color: #f1f5f9; line-height: 1.2; }
+.markdown-body h2 { font-size: 24px; font-weight: 560; margin: 34px 0 13px; padding-bottom: 8px; border-bottom: 1px solid #1c2433; color: #f1f5f9; line-height: 1.25; letter-spacing: -0.005em; }
+.markdown-body h3 { font-size: 18px; font-weight: 600; margin: 24px 0 8px; color: #dbe3ee; }
+.markdown-body p { margin-bottom: 14px; }
+.markdown-body li { margin-bottom: 5px; }
+.markdown-body ul, .markdown-body ol { margin: 0 0 14px 24px; }
+.markdown-body strong { font-weight: 600; color: #f1f5f9; }
+.markdown-body a { border-bottom: 1px solid rgba(147,197,253,0.25); }
+.markdown-body a:hover { border-bottom-color: #93c5fd; text-decoration: none; }
+.markdown-body code { background: #1b2230; border: 1px solid #2a3344; padding: 1px 5px; border-radius: 4px; font-size: 0.88em; color: #cbd5e1; }
+.markdown-body pre { background: #0b0e16; border: 1px solid #1f2937; padding: 14px 16px; border-radius: 6px; overflow-x: auto; margin-bottom: 14px; }
+.markdown-body pre code { background: none; border: none; padding: 0; color: #cbd5e1; }
+.markdown-body blockquote { border-left: 3px solid #3b82f6; background: #0d1520; padding: 10px 16px; color: #cbd5e1; margin: 14px 0; border-radius: 0 5px 5px 0; }
+.markdown-body table { margin: 14px 0; }
+#view-page aside { font-size: 13px; }
+#view-page aside ul li { margin-bottom: 9px; line-height: 1.45; }
+#view-page aside a { font-size: 12.5px; }
+
+/* ── Type colour language ─────────────────────────────────────────────── */
+.tdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.ttag { display: inline-block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 8px; border: 1px solid; border-radius: 10px; vertical-align: middle; }
+
+/* ── Home ─────────────────────────────────────────────────────────────── */
+.masthead { margin-bottom: 26px; }
+.masthead h1 { font-size: 34px; color: #f5f8fc; font-weight: 560; letter-spacing: -0.01em; margin-bottom: 8px; }
+.masthead .tagline { color: #94a3b8; font-size: 13px; max-width: 620px; line-height: 1.5; }
+.stats { display: flex; gap: 26px; margin: 18px 0 6px; flex-wrap: wrap; }
+.stat { display: flex; align-items: baseline; gap: 7px; }
+.stat .n { font-family: var(--font-display); font-size: 28px; font-weight: 500; color: #f5f8fc; }
+.stat .l { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+.home-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 600; margin: 30px 0 12px; display: flex; align-items: center; gap: 8px; }
+.home-section-title::after { content: ""; flex: 1; height: 1px; background: #1a2030; }
+.cat-label { font-size: 12px; color: #7c8aa0; font-weight: 600; margin: 22px 0 10px; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+.tcard { background: #11151f; border: 1px solid #1f2937; border-radius: 7px; padding: 13px 15px; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+.tcard:hover { border-color: #2d3a4f; background: #131825; }
+.tcard .tcard-title { display: flex; align-items: center; gap: 8px; font-weight: 600; color: #e2e8f0; font-size: 14px; line-height: 1.35; }
+.tcard .tcard-summary { color: #94a3b8; font-size: 12.5px; line-height: 1.5; margin-top: 6px; }
+.tcard .tcard-meta { color: #64748b; font-size: 11px; margin-top: 8px; display: flex; gap: 10px; align-items: center; }
+.position-hero { background: linear-gradient(180deg, #1a1217 0%, #11151f 60%); border: 1px solid #3a2230; border-left: 3px solid #fb7185; border-radius: 8px; padding: 18px 20px; cursor: pointer; transition: border-color 0.12s; }
+.position-hero:hover { border-left-color: #fda4af; }
+.position-hero .ph-title { font-size: 17px; font-weight: 650; color: #f1f5f9; line-height: 1.35; }
+.position-hero .ph-summary { color: #cbd5e1; font-size: 13.5px; line-height: 1.6; margin-top: 8px; max-width: 760px; }
+.position-hero .ph-meta { margin-top: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.search-result-summary { color: #94a3b8; font-size: 12.5px; line-height: 1.45; margin-top: 5px; }
+.entity-gloss { color: #94a3b8; font-size: 12px; line-height: 1.4; margin-top: 3px; }
+.cites-row { margin-top: 10px; font-size: 12px; }
+.cites-row .cites-label { color: #64748b; margin-right: 6px; }
+
+/* ── Reading page ─────────────────────────────────────────────────────── */
+/* Desk layout: full-width header, then [contents · wide reading · evidence].
+   The reading column is fluid so it fills a widescreen rather than capping narrow. */
+.article-shell { --accent: #60a5fa; }
+.article-header { padding-bottom: 24px; border-bottom: 1px solid #1a2230; margin-bottom: 30px; }
+.article-cols { display: grid; grid-template-columns: 184px minmax(0, 1fr) 244px; gap: 48px; align-items: start; }
+.kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent, #60a5fa); margin-bottom: 18px; }
+.article-title { font-size: 44px; line-height: 1.08; font-weight: 560; letter-spacing: -0.012em; color: #f5f8fc; max-width: 1100px; }
+.article-lead { font-family: var(--font-display); font-style: italic; font-size: 21px; line-height: 1.5; color: #b6c2d2; margin-top: 18px; font-weight: 400; max-width: 860px; }
+.article-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #5b6675; }
+.article-meta .meta-sep { color: #2d3748; }
+.article-meta .badge { letter-spacing: 0.06em; }
+.article-tags { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* wide reading column with A's numbered section dividers */
+.article-reading { min-width: 0; max-width: 1060px; font-size: 16.5px; counter-reset: sec; }
+.article-reading h2 { counter-increment: sec; border-top: 1px solid #1c2433; border-bottom: none; padding: 36px 0 0; margin: 44px 0 16px; }
+.article-reading h2::before { content: counter(sec, decimal-leading-zero); display: block; font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: 0.1em; color: var(--accent, #60a5fa); margin-bottom: 12px; }
+.article-reading > h2:first-of-type { border-top: none; padding-top: 0; margin-top: 8px; }
+.article-reading h2, .article-reading h3 { scroll-margin-top: 24px; }
+
+/* contents (left) + evidence (right) rails */
+.article-contents { position: sticky; top: 8px; max-height: calc(100vh - 70px); overflow-y: auto; }
+.article-evidence { position: sticky; top: 8px; max-height: calc(100vh - 70px); overflow-y: auto; min-width: 0; }
+.toc-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.16em; color: #475569; font-weight: 600; margin-bottom: 12px; }
+.toc-link { display: block; font-size: 11.5px; line-height: 1.4; color: #66748a; padding: 5px 0 5px 14px; border-left: 1px solid #1f2937; text-decoration: none; transition: color 0.12s ease, border-color 0.12s ease; }
+.toc-link:hover { color: #cbd5e1; text-decoration: none; border-left-color: #3a4658; }
+.toc-link.toc-h3 { padding-left: 27px; font-size: 11px; color: #56627a; }
+.toc-link.active { color: var(--accent, #93c5fd); border-left-color: var(--accent, #93c5fd); border-left-width: 2px; padding-left: 13px; }
+.toc-link.toc-h3.active { padding-left: 26px; }
+.rail-block { margin-bottom: 22px; }
+.rail-block-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: #475569; font-weight: 600; margin-bottom: 9px; }
+.conn-count { color: #334155; }
+.rail-list { list-style: none; padding: 0; margin: 0; }
+.rail-list li { margin-bottom: 9px; line-height: 1.4; }
+.rail-list a { font-size: 12px; }
+.rail-qs li { font-size: 12px; color: #93a0b2; line-height: 1.45; }
+.rail-source { font-size: 11px; color: #66748a; word-break: break-word; font-family: var(--font-mono); }
 
 /* ── Graph view ───────────────────────────────────────────────────────── */
 #view-graph.active { display: block; position: relative; height: calc(100vh - 48px); padding: 0; margin: -24px -32px; }
@@ -361,6 +483,7 @@ input[type="text"]:focus { border-color: #60a5fa; }
 
 HTML_NAV_BUTTONS = [
     ("home", "Home"),
+    ("positions", "Positions"),
     ("search", "Search"),
     ("graph", "Graph"),
     ("risks", "Risks"),
@@ -376,7 +499,7 @@ def _nav_html() -> str:
         for key, label in HTML_NAV_BUTTONS
     )
     return f"""<nav id="sidebar">
-  <h1>Wiki</h1>
+  <div class="sb-brand"><span class="sb-mark"></span><span class="sb-brand-text">Wiki</span></div>
   <nav>
 {buttons}
   </nav>
@@ -386,13 +509,57 @@ def _nav_html() -> str:
 </nav>"""
 
 
-HTML_SCRIPT_HOME = """
-function summaryFor(page) {
-  const html = page.rendered_html || '';
-  const m = html.match(/<p>([^<]{1,180})/);
-  return m ? m[1] : '';
+HTML_SCRIPT_UTIL = """
+function escHtml(s) {
+  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+// Lightweight inline-markdown renderer for snippet fields (risk text, open
+// questions, log details) that arrive as raw markdown. Block markdown is not
+// handled — these are single-line fragments.
+function inlineMd(s) {
+  s = escHtml(s);
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  s = s.replace(/\\*\\*\\*([^*]+)\\*\\*\\*/g, '<strong><em>$1</em></strong>');
+  s = s.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\\*([^*\\n]+)\\*/g, '$1<em>$2</em>');
+  s = s.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return s;
+}
+function levelCell(v) {
+  const k = (v || '').trim().toUpperCase();
+  const cls = k === 'H' ? 'lvl-h' : k === 'M' ? 'lvl-m' : k === 'L' ? 'lvl-l' : '';
+  return cls ? '<span class="lvl ' + cls + '">' + k + '</span>' : escHtml(v);
 }
 
+// Shared type-colour language — carried from the graph into every view so
+// articles / positions / entities read as distinct kinds at a glance.
+const TYPE_META = {
+  article:  { color: '#fbbf24', label: 'Article' },
+  position: { color: '#fb7185', label: 'Position' },
+  entity:   { color: '#a78bfa', label: 'Entity' },
+  concept:  { color: '#a78bfa', label: 'Concept' },
+  meta:     { color: '#34d399', label: 'Meta' },
+  primary:  { color: '#60a5fa', label: 'Page' },
+};
+function typeMeta(t) { return TYPE_META[t] || TYPE_META.primary; }
+function typeDot(t) { return '<span class="tdot" style="background:' + typeMeta(t).color + '"></span>'; }
+function typeTag(t) {
+  const m = typeMeta(t);
+  return '<span class="ttag" style="color:' + m.color + ';border-color:' + m.color + '55">' + m.label + '</span>';
+}
+
+// Consistent header for every view — title + count + one-line description.
+function viewHeader(title, subtitle, count) {
+  return '<header class="view-header">' +
+    '<h2 class="view-title">' + escHtml(title) +
+      (count != null ? ' <span class="view-count">' + count + '</span>' : '') + '</h2>' +
+    (subtitle ? '<p class="view-sub">' + escHtml(subtitle) + '</p>' : '') +
+  '</header>';
+}
+"""
+
+
+HTML_SCRIPT_HOME = """
 function daysAgo(dateStr) {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -405,37 +572,74 @@ function daysAgo(dateStr) {
   return Math.floor(days / 365) + ' years ago';
 }
 
+function isArticle(p) { const t = p.type || ''; return t === 'article' || t === 'primary' || t === ''; }
+function statBox(n, label) { return '<div class="stat"><span class="n">' + n + '</span><span class="l">' + label + '</span></div>'; }
+function provBadge(p) {
+  const c = p.source ? 'prov-source' : 'prov-synth';
+  return '<span class="badge ' + c + '">' + (p.source ? 'source' : 'synthesized') + '</span>';
+}
+function agoSpan(p) { const a = daysAgo(p.last_reviewed); return a ? '<span>updated ' + a + '</span>' : ''; }
+
 function renderHome() {
   const root = document.getElementById('view-home');
   const pages = Object.values(WIKI_DATA.pages);
-  const groups = {};
-  pages.forEach(p => {
-    const cat = p.category || 'Uncategorized';
-    (groups[cat] = groups[cat] || []).push(p);
-  });
-  const sorted = Object.keys(groups).sort();
-  const html = ['<h2>Pages</h2>'];
-  if (pages.length === 0) html.push('<p class="muted">No pages yet.</p>');
-  sorted.forEach(cat => {
-    html.push('<h3 style="margin-top:18px;font-size:13px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;">' + cat + '</h3>');
-    groups[cat].forEach(p => {
-      html.push('<div class="card" style="cursor:pointer" data-page="' + p.path + '">');
-      html.push('  <div><strong>' + p.title + '</strong> ');
-      if (p.status) html.push('<span class="badge">' + p.status + '</span>');
-      const provClass = p.source ? 'prov-source' : 'prov-synth';
-      const provLabel = p.source ? 'source' : 'synthesized';
-      html.push('<span class="badge ' + provClass + '">' + provLabel + '</span>');
-      html.push('</div>');
-      const summary = summaryFor(p);
-      if (summary) html.push('  <div class="muted" style="margin-top:4px">' + summary + '</div>');
-      const ago = daysAgo(p.last_reviewed);
-      if (ago) html.push('  <div class="muted" style="margin-top:4px">updated ' + ago + '</div>');
-      html.push('</div>');
+  const positions = pages.filter(p => p.type === 'position');
+  const articles  = pages.filter(isArticle);
+  const entities  = pages.filter(p => p.type === 'entity' || p.type === 'concept');
+  const nQ = (WIKI_DATA.open_qs || []).length;
+  const nR = (WIKI_DATA.risks || []).length;
+
+  const html = [];
+  html.push(
+    '<div class="masthead">' +
+      '<h1>Wiki</h1>' +
+      '<div class="stats">' +
+        statBox(articles.length, 'Articles') +
+        statBox(positions.length, 'Positions') +
+        statBox(entities.length, 'Entities') +
+        statBox(nQ, 'Open questions') +
+        statBox(nR, 'Open risks') +
+      '</div>' +
+    '</div>'
+  );
+
+  if (positions.length) {
+    html.push('<div class="home-section-title">Positions</div>');
+    positions.forEach(p => {
+      html.push(
+        '<div class="position-hero" data-page="' + p.path + '">' +
+          '<div class="ph-title">' + escHtml(p.title) + '</div>' +
+          (p.summary ? '<div class="ph-summary">' + escHtml(p.summary) + '</div>' : '') +
+          '<div class="ph-meta">' + typeTag(p.type) +
+            (p.status ? '<span class="badge">' + escHtml(p.status) + '</span>' : '') +
+            provBadge(p) + agoSpan(p) +
+          '</div>' +
+        '</div>'
+      );
     });
+  }
+
+  html.push('<div class="home-section-title">Pages</div>');
+  const groups = {};
+  articles.forEach(p => { const c = p.category || 'Uncategorized'; (groups[c] = groups[c] || []).push(p); });
+  Object.keys(groups).sort().forEach(cat => {
+    html.push('<div class="cat-label">' + escHtml(cat) + '</div>');
+    html.push('<div class="card-grid">');
+    groups[cat].sort((a, b) => a.title.localeCompare(b.title)).forEach(p => {
+      html.push(
+        '<div class="tcard" data-page="' + p.path + '">' +
+          '<div class="tcard-title">' + typeDot(p.type) + '<span>' + escHtml(p.title) + '</span></div>' +
+          (p.summary ? '<div class="tcard-summary">' + escHtml(p.summary) + '</div>' : '') +
+          '<div class="tcard-meta">' + provBadge(p) + agoSpan(p) + '</div>' +
+        '</div>'
+      );
+    });
+    html.push('</div>');
   });
-  root.innerHTML = html.join('\\n');
-  root.querySelectorAll('.card[data-page]').forEach(card => {
-    card.addEventListener('click', () => { window.openPage(card.dataset.page); });
+
+  root.innerHTML = html.join('');
+  root.querySelectorAll('[data-page]').forEach(el => {
+    el.addEventListener('click', () => window.openPage(el.dataset.page));
   });
 }
 """
@@ -520,41 +724,112 @@ function edgesFor(path) {
   return { out, inc };
 }
 
+function slugify(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'section';
+}
+
 function renderPage(path) {
   const page = WIKI_DATA.pages[path];
   const root = document.getElementById('view-page');
   if (!page) { root.innerHTML = '<p class="muted">Page not found.</p>'; return; }
   const { out, inc } = edgesFor(path);
+  const tm = typeMeta(page.type);
+
+  const words = (page.rendered_html || '').replace(/<[^>]+>/g, ' ').split(/\\s+/).filter(Boolean).length;
+  const readMin = Math.max(1, Math.round(words / 200));
   const meta = [];
-  if (page.status)        meta.push('<span class="badge">' + page.status + '</span>');
+  if (page.owner)         meta.push('owner ' + escHtml(page.owner));
+  if (page.last_reviewed) meta.push('reviewed ' + escHtml(page.last_reviewed));
+  meta.push(readMin + ' min read');
+  const metaHtml = meta.join('<span class="meta-sep">·</span>');
   const provClass = page.source ? 'prov-source' : 'prov-synth';
   const provLabel = page.source ? 'source' : 'synthesized';
-  meta.push('<span class="badge ' + provClass + '">' + provLabel + '</span>');
-  if (page.owner)         meta.push('<span class="muted">owner: ' + page.owner + '</span>');
-  if (page.last_reviewed) meta.push('<span class="muted">reviewed ' + page.last_reviewed + '</span>');
-  const tags = (page.tags || []).map(t => '<span class="badge">#' + t + '</span>').join(' ');
-  const linkList = (paths, title) => {
-    if (!paths.length) return '';
-    const items = paths.map(p => '<li><a href="#" data-page="' + p + '">' + (WIKI_DATA.pages[p] ? WIKI_DATA.pages[p].title : p) + '</a></li>').join('');
-    return '<div style="margin-top:18px"><div class="muted" style="margin-bottom:6px">' + title + '</div><ul style="list-style:none;padding:0">' + items + '</ul></div>';
-  };
+  const tags = (page.tags || []).map(t => '<span class="badge">#' + escHtml(t) + '</span>').join(' ');
+
+  const railLinks = paths => paths.length
+    ? '<ul class="rail-list">' + paths.map(p => '<li><a href="#" data-page="' + p + '">' + escHtml(WIKI_DATA.pages[p] ? WIKI_DATA.pages[p].title : p) + '</a></li>').join('') + '</ul>'
+    : '';
+  const railBlock = (label, inner, count) => inner
+    ? '<div class="rail-block"><div class="rail-block-title">' + label + (count != null ? ' <span class="conn-count">' + count + '</span>' : '') + '</div>' + inner + '</div>'
+    : '';
+  const pageQs = (WIKI_DATA.open_qs || []).filter(q => q.page === path);
+  const qsHtml = pageQs.length ? '<ul class="rail-list rail-qs">' + pageQs.map(q => '<li>' + inlineMd(q.question) + '</li>').join('') + '</ul>' : '';
+  const evidence =
+    railBlock('Source', page.source ? '<div class="rail-source">' + escHtml(page.source) + '</div>' : '') +
+    railBlock('Open questions', qsHtml, pageQs.length) +
+    railBlock('Grounded in', railLinks(out), out.length) +
+    railBlock('Referenced by', railLinks(inc), inc.length);
+
   root.innerHTML =
-    '<div style="display:grid;grid-template-columns:1fr 220px;gap:32px">' +
-      '<div>' +
-        '<h2>' + page.title + '</h2>' +
-        '<div style="margin-bottom:12px">' + meta.join(' ') + '</div>' +
-        (tags ? '<div style="margin-bottom:18px">' + tags + '</div>' : '') +
-        '<div class="markdown-body">' + (page.rendered_html || '') + '</div>' +
+    '<div class="article-shell" style="--accent:' + tm.color + '">' +
+      '<header class="article-header">' +
+        '<div class="kicker"><span class="tdot" style="background:' + tm.color + '"></span>' + tm.label + (page.status ? ' · ' + escHtml(page.status) : '') + '</div>' +
+        '<h1 class="article-title">' + escHtml(page.title) + '</h1>' +
+        (page.summary ? '<p class="article-lead">' + escHtml(page.summary) + '</p>' : '') +
+        '<div class="article-meta">' + metaHtml + '<span class="meta-sep">·</span><span class="badge ' + provClass + '">' + provLabel + '</span></div>' +
+        (tags ? '<div class="article-tags">' + tags + '</div>' : '') +
+      '</header>' +
+      '<div class="article-cols">' +
+        '<nav class="toc article-contents" id="toc" aria-label="On this page"></nav>' +
+        '<div class="markdown-body article-reading" id="article-body">' + (page.rendered_html || '') + '</div>' +
+        '<aside class="article-evidence">' + evidence + '</aside>' +
       '</div>' +
-      '<aside>' +
-        linkList(out, 'Mentions') +
-        linkList(inc, 'Mentioned by') +
-        (page.source ? '<div style="margin-top:18px"><div class="muted" style="margin-bottom:6px">Source</div><div class="muted">' + page.source + '</div></div>' : '') +
-      '</aside>' +
     '</div>';
+
   root.querySelectorAll('a[data-page]').forEach(a => {
     a.addEventListener('click', e => { e.preventDefault(); window.openPage(a.dataset.page); });
   });
+  buildToc();
+}
+
+function buildToc() {
+  const body = document.getElementById('article-body');
+  const toc  = document.getElementById('toc');
+  const main = document.getElementById('main');
+  if (!body || !toc || !main) return;
+
+  const seen = {};
+  const items = [...body.querySelectorAll('h2, h3')].map(h => {
+    let id = slugify(h.textContent);
+    if (seen[id] != null) { seen[id] += 1; id = id + '-' + seen[id]; } else { seen[id] = 0; }
+    h.id = id;
+    return { id, text: h.textContent, level: h.tagName === 'H3' ? 3 : 2 };
+  });
+
+  if (items.length < 2) {
+    toc.style.display = 'none';
+  } else {
+    toc.style.display = '';
+    toc.innerHTML = '<div class="toc-title">On this page</div>' +
+      items.map(it => '<a href="#' + it.id + '" class="toc-link' + (it.level === 3 ? ' toc-h3' : '') +
+        '" data-id="' + it.id + '">' + escHtml(it.text) + '</a>').join('');
+  }
+
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const links = [...toc.querySelectorAll('a')];
+  links.forEach(a => a.addEventListener('click', e => {
+    e.preventDefault();
+    const el = document.getElementById(a.dataset.id);
+    if (el) el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  }));
+
+  function onScroll() {
+    if (!items.length) return;
+    const mt = main.getBoundingClientRect().top;
+    let activeId = items[0].id;
+    for (const it of items) {
+      const el = document.getElementById(it.id);
+      if (el && el.getBoundingClientRect().top - mt < 120) activeId = it.id; else break;
+    }
+    links.forEach(l => {
+      const on = l.dataset.id === activeId;
+      l.classList.toggle('active', on);
+      if (on) l.setAttribute('aria-current', 'true'); else l.removeAttribute('aria-current');
+    });
+  }
+  main.scrollTop = 0;
+  main.onscroll = onScroll;
+  requestAnimationFrame(onScroll);  // wait until the view is visible so heading rects are real
 }
 
 window.openPage = function(path) {
@@ -583,7 +858,7 @@ function renderSearch() {
   if (root.dataset.built) return;
   root.dataset.built = '1';
   root.innerHTML =
-    '<h2>Search</h2>' +
+    viewHeader('Search', 'Full-text across titles, bodies, tags and categories.') +
     '<input id="search-input" type="text" placeholder="Search title, body, tags, category">' +
     '<div id="search-results" style="margin-top:14px"></div>';
   const input = document.getElementById('search-input');
@@ -599,9 +874,11 @@ function renderSearch() {
       const provClass = page && page.source ? 'prov-source' : 'prov-synth';
       const provLabel = page && page.source ? 'source' : 'synthesized';
       return '<div class="card" style="cursor:pointer" data-page="' + h.id + '">' +
-        '<strong>' + (page?.title || h.title) + '</strong>' +
-        ' <span class="badge ' + provClass + '">' + provLabel + '</span>' +
-        ' <span class="muted">' + (h.category || '') + '</span>' +
+        '<div class="tcard-title">' + typeDot(page ? page.type : '') +
+          '<span>' + escHtml(page?.title || h.title) + '</span> ' +
+          '<span class="badge ' + provClass + '">' + provLabel + '</span></div>' +
+        (page && page.summary ? '<div class="search-result-summary">' + escHtml(page.summary) + '</div>' : '') +
+        (h.category ? '<div class="muted" style="margin-top:4px">' + escHtml(h.category) + '</div>' : '') +
       '</div>';
     }).join('');
     results.querySelectorAll('.card[data-page]').forEach(c => {
@@ -635,7 +912,7 @@ function renderGraph() {
         '<div id="gp-selected"><div class="gp-section-title">Selected</div><div id="gp-selected-body"></div></div>' +
         '<div id="gp-depth-section"><div class="gp-section-title">Selection depth</div><div class="gp-slider-row"><span>Hops</span><span class="gp-slider-val" id="gp-depth-val">1</span></div><input type="range" id="gp-depth-slider" min="1" max="4" value="1"></div>' +
         '<div class="gp-section"><div class="gp-section-title">Display</div>' +
-          '<div class="gp-toggle-row">Labels <label class="gp-toggle"><input type="checkbox" id="gp-toggle-labels" checked><span class="gp-toggle-track"></span></label></div>' +
+          '<div class="gp-toggle-row">All labels <label class="gp-toggle"><input type="checkbox" id="gp-toggle-labels"><span class="gp-toggle-track"></span></label></div>' +
           '<div class="gp-toggle-row">Arrows <label class="gp-toggle"><input type="checkbox" id="gp-toggle-arrows" checked><span class="gp-toggle-track"></span></label></div>' +
         '</div>' +
         '<div class="gp-section"><div class="gp-section-title">Forces</div>' +
@@ -646,7 +923,8 @@ function renderGraph() {
         '</div>' +
         '<div class="gp-section"><div class="gp-section-title">Legend</div>' +
           '<div style="display:flex;flex-direction:column;gap:7px">' +
-            '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#64748b"><span style="width:12px;height:12px;border-radius:50%;background:#60a5fa;flex-shrink:0;display:inline-block"></span> Use case</div>' +
+            '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#64748b"><span style="width:11px;height:11px;border-radius:50%;background:#fbbf24;flex-shrink:0;display:inline-block"></span> Article</div>' +
+            '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#64748b"><span style="width:11px;height:11px;border-radius:50%;background:#fb7185;flex-shrink:0;display:inline-block"></span> Position</div>' +
             '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#64748b"><span style="width:10px;height:10px;border-radius:50%;background:#a78bfa;flex-shrink:0;display:inline-block"></span> Entity / concept</div>' +
             '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#64748b"><span style="width:10px;height:10px;border-radius:50%;background:#34d399;flex-shrink:0;display:inline-block"></span> Meta</div>' +
             '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#64748b"><span style="width:10px;height:10px;border-radius:50%;background:transparent;border:1.5px dashed #f87171;flex-shrink:0;display:inline-block"></span> Orphan</div>' +
@@ -682,6 +960,10 @@ function initGraph() {
 
   const deg = new Array(nodes.length).fill(0);
   links.forEach(l => { deg[l.source]++; deg[l.target]++; });
+  // calm default: label only the ~15 highest-degree hubs until "All labels" is on
+  const _sortedDeg = [...deg].sort((a, b) => b - a);
+  const LABEL_DEG = _sortedDeg[Math.min(14, _sortedDeg.length - 1)] || 0;
+  const autoLabel = d => deg[d.id] >= LABEL_DEG;
 
   function nodeRadius(d) {
     const base = d.type === 'primary' ? 12 : 9;
@@ -691,7 +973,7 @@ function initGraph() {
   // Multi-primary-type wikis can declare custom `type:` values (e.g. article,
   // policy, control). A small palette covers the common cases; anything else
   // falls through to the neutral grey via `colour[d.type] || '#94a3b8'`.
-  const colour = { 'primary': '#60a5fa', entity: '#a78bfa', concept: '#a78bfa', meta: '#34d399', article: '#fbbf24', policy: '#f472b6', control: '#22d3ee' };
+  const colour = { 'primary': '#60a5fa', entity: '#a78bfa', concept: '#a78bfa', meta: '#34d399', article: '#fbbf24', position: '#fb7185', policy: '#f472b6', control: '#22d3ee' };
 
   const svgEl = d3.select('#graph-svg');
   const canvas = svgEl.append('g');
@@ -736,7 +1018,7 @@ function initGraph() {
 
   let selected    = null;
   let depth       = 1;
-  let showLabels  = true;
+  let showLabels  = false;  // false = auto (hubs only); toggle shows every label
   let showArrows  = true;
   let activeTypes = new Set(nodes.map(n => n.type));
   let activeTags  = new Set();
@@ -772,7 +1054,7 @@ function initGraph() {
   function applyFilters() {
     nodeEl .attr('opacity',       n => isVisible(n) ? 1 : 0)
            .style('pointer-events', n => isVisible(n) ? null : 'none');
-    labelEl.attr('opacity',       n => isVisible(n) && showLabels ? 1 : 0);
+    labelEl.attr('opacity',       n => isVisible(n) && (showLabels || autoLabel(n)) ? 1 : 0);
     linkEl .attr('stroke-opacity', l => isVisible(l.source) && isVisible(l.target) ? 0.6 : 0)
            .attr('stroke', '#334155').attr('stroke-width', 1.5)
            .attr('marker-end', showArrows ? 'url(#arrow)' : null);
@@ -801,7 +1083,11 @@ function initGraph() {
       });
 
     nodeEl .attr('opacity', n => { if (!isVisible(n)) return 0; return neighbours.has(n.id) ? 1 : 0.1; });
-    labelEl.attr('opacity', n => { if (!isVisible(n) || !showLabels) return 0; return neighbours.has(n.id) ? 1 : 0.06; });
+    labelEl.attr('opacity', n => {
+      if (!isVisible(n)) return 0;
+      if (neighbours.has(n.id)) return 1;            // always label the selected neighbourhood
+      return (showLabels || autoLabel(n)) ? 0.06 : 0;
+    });
 
     document.getElementById('gp-depth-section').style.display = 'block';
     const sel = document.getElementById('gp-selected');
@@ -925,6 +1211,8 @@ function initGraph() {
   document.getElementById('graph-panel-toggle').addEventListener('click', () => {
     document.getElementById('graph-panel').classList.toggle('hidden');
   });
+
+  applyFilters();  // apply the calm-label default (hubs only) on first paint
 }
 """
 
@@ -935,15 +1223,15 @@ function renderRisks() {
   const risks = WIKI_DATA.risks || [];
   const rows = risks.map(r =>
     '<tr>' +
-      '<td><a href="#" data-page="' + r.page + '">' + r.page_title + '</a></td>' +
-      '<td>' + r.risk + '</td>' +
-      '<td>' + r.likelihood + '</td>' +
-      '<td>' + r.impact + '</td>' +
-      '<td>' + r.status + '</td>' +
+      '<td class="cell-page">' + typeDot((WIKI_DATA.pages[r.page] || {}).type) + '<a href="#" data-page="' + r.page + '">' + escHtml(r.page_title) + '</a></td>' +
+      '<td>' + inlineMd(r.risk) + '</td>' +
+      '<td>' + levelCell(r.likelihood) + '</td>' +
+      '<td>' + levelCell(r.impact) + '</td>' +
+      '<td style="white-space:nowrap">' + escHtml(r.status) + '</td>' +
     '</tr>'
   ).join('');
   root.innerHTML =
-    '<h2>Open risks (' + risks.length + ')</h2>' +
+    viewHeader('Open risks', 'Open risk-register rows across every page, with likelihood and impact.', risks.length) +
     (risks.length === 0
       ? '<p class="muted">No open risks.</p>'
       : '<table><thead><tr><th>Page</th><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>');
@@ -960,16 +1248,30 @@ function renderRecent() {
   const log = WIKI_DATA.log || [];
   const rows = log.map(e =>
     '<tr>' +
-      '<td class="muted" style="white-space:nowrap">' + e.date + '</td>' +
-      '<td><span class="badge">' + e.action + '</span></td>' +
-      '<td>' + e.detail + '</td>' +
+      '<td class="muted" style="white-space:nowrap;vertical-align:top">' + e.date + '</td>' +
+      '<td style="vertical-align:top"><span class="badge">' + e.action + '</span></td>' +
+      '<td><div class="recent-detail">' + inlineMd(e.detail) + '</div></td>' +
     '</tr>'
   ).join('');
   root.innerHTML =
-    '<h2>Recent changes</h2>' +
+    viewHeader('Recent changes', 'Every ingest and edit, newest first.') +
     (log.length === 0
       ? '<p class="muted">No log entries.</p>'
       : '<table><tbody>' + rows + '</tbody></table>');
+  root.querySelectorAll('.recent-detail').forEach(d => {
+    if (d.scrollHeight <= d.clientHeight + 4) return;  // fits in the clamp, no toggle needed
+    d.classList.add('expandable');
+    const more = document.createElement('div');
+    more.className = 'recent-detail-more';
+    more.textContent = 'Show more ▾';
+    const toggle = () => {
+      const open = d.classList.toggle('expanded');
+      more.textContent = open ? 'Show less ▴' : 'Show more ▾';
+    };
+    d.addEventListener('click', toggle);
+    more.addEventListener('click', toggle);
+    d.parentNode.appendChild(more);
+  });
 }
 """
 
@@ -979,18 +1281,16 @@ function renderOpenQs() {
   const root = document.getElementById('view-open-qs');
   const qs = WIKI_DATA.open_qs || [];
   const rows = qs.map(q =>
-    '<div class="card">' +
-      '<div>' + q.question + '</div>' +
-      '<div class="muted" style="margin-top:6px">' +
-        '<a href="#" data-page="' + q.page + '">' + q.page_title + '</a>' +
-      '</div>' +
+    '<div class="tcard oq-card" data-page="' + q.page + '">' +
+      '<div class="oq-q">' + inlineMd(q.question) + '</div>' +
+      '<div class="oq-src">' + typeDot((WIKI_DATA.pages[q.page] || {}).type) + '<span>' + escHtml(q.page_title) + '</span></div>' +
     '</div>'
   ).join('');
   root.innerHTML =
-    '<h2>Open questions (' + qs.length + ')</h2>' +
-    (qs.length === 0 ? '<p class="muted">No open questions.</p>' : rows);
-  root.querySelectorAll('a[data-page]').forEach(a => {
-    a.addEventListener('click', e => { e.preventDefault(); window.openPage(a.dataset.page); });
+    viewHeader('Open questions', 'Unresolved threads flagged across the wiki.', qs.length) +
+    (qs.length === 0 ? '<p class="muted">No open questions.</p>' : '<div class="oq-list">' + rows + '</div>');
+  root.querySelectorAll('[data-page]').forEach(el => {
+    el.addEventListener('click', () => window.openPage(el.dataset.page));
   });
 }
 """
@@ -1005,18 +1305,55 @@ function renderEntities() {
   entities.sort((a, b) => (inbound[b.path] || 0) - (inbound[a.path] || 0));
   const rows = entities.map(e =>
     '<tr>' +
-      '<td><a href="#" data-page="' + e.path + '">' + e.title + '</a></td>' +
-      '<td><span class="badge">' + (e.type || 'entity') + '</span></td>' +
-      '<td class="muted">' + (inbound[e.path] || 0) + ' mentions</td>' +
+      '<td><a href="#" data-page="' + e.path + '">' + escHtml(e.title) + '</a>' +
+        (e.summary ? '<div class="entity-gloss">' + escHtml(e.summary) + '</div>' : '') + '</td>' +
+      '<td style="white-space:nowrap"><span class="tdot" style="background:' + typeMeta(e.type).color + ';margin-right:6px"></span>' + (e.type || 'entity') + '</td>' +
+      '<td class="muted" style="white-space:nowrap">' + (inbound[e.path] || 0) + ' mentions</td>' +
     '</tr>'
   ).join('');
   root.innerHTML =
-    '<h2>Entities (' + entities.length + ')</h2>' +
+    viewHeader('Entities', 'Tools, vendors, roles and concepts — ranked by how often they are referenced.', entities.length) +
     (entities.length === 0
       ? '<p class="muted">No entity pages yet.</p>'
       : '<table><tbody>' + rows + '</tbody></table>');
   root.querySelectorAll('a[data-page]').forEach(a => {
     a.addEventListener('click', e => { e.preventDefault(); window.openPage(a.dataset.page); });
+  });
+}
+"""
+
+
+HTML_SCRIPT_POSITIONS = """
+function renderPositions() {
+  const root = document.getElementById('view-positions');
+  const positions = Object.values(WIKI_DATA.pages).filter(p => p.type === 'position');
+  if (positions.length === 0) {
+    root.innerHTML = viewHeader('Positions', 'Stances or decisions taken, each grounded in the underlying pages.') + '<p class="muted">No positions yet — add a page with <code>type: position</code> to record a stance.</p>';
+    return;
+  }
+  const cards = positions.map(p => {
+    const out = [];
+    WIKI_DATA.edges.forEach(([s, t]) => { if (s === p.path && WIKI_DATA.pages[t]) out.push(t); });
+    const cites = out.length
+      ? '<div class="cites-row"><span class="cites-label">Grounded in:</span> ' +
+        out.map(t => '<a href="#" data-page="' + t + '">' + escHtml(WIKI_DATA.pages[t].title) + '</a>')
+           .join('<span class="cites-label"> · </span>') + '</div>'
+      : '';
+    return '<div class="position-hero" data-page="' + p.path + '" style="margin-bottom:16px">' +
+        '<div class="ph-title">' + escHtml(p.title) + '</div>' +
+        (p.summary ? '<div class="ph-summary">' + escHtml(p.summary) + '</div>' : '') +
+        '<div class="ph-meta">' + typeTag(p.type) +
+          (p.status ? '<span class="badge">' + escHtml(p.status) + '</span>' : '') +
+          provBadge(p) + agoSpan(p) + '</div>' +
+        cites +
+      '</div>';
+  }).join('');
+  root.innerHTML = viewHeader('Positions', 'Stances or decisions taken, each grounded in the underlying pages.', positions.length) + cards;
+  root.querySelectorAll('a[data-page]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); window.openPage(a.dataset.page); });
+  });
+  root.querySelectorAll('.position-hero[data-page]').forEach(c => {
+    c.addEventListener('click', () => window.openPage(c.dataset.page));
   });
 }
 """
@@ -1029,6 +1366,7 @@ function showView(name) {
   views.forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
   buttons.forEach(b => b.classList.toggle('active', b.dataset.view === name));
   if (name !== 'page' && window.clearSidebarActivePage) window.clearSidebarActivePage();
+  if (name === 'positions' && window.renderPositions) window.renderPositions();
   if (name === 'search' && window.renderSearch) window.renderSearch();
   if (name === 'graph'  && window.renderGraph)  window.renderGraph();
   if (name === 'risks'  && window.renderRisks)  window.renderRisks();
@@ -1062,6 +1400,7 @@ def render_html(
                 "created": str(p["fm"].get("created") or ""),
                 "last_reviewed": str(p["fm"].get("last_reviewed") or ""),
                 "source": p["fm"].get("source") or "",
+                "summary": p["fm"].get("description") or "",
                 "rendered_html": p["rendered_html"],
             }
             for path, p in pages.items()
@@ -1074,7 +1413,7 @@ def render_html(
     }
     data_json = json.dumps(data, ensure_ascii=False)
 
-    view_ids = ["home", "page", "search", "graph", "risks", "recent", "open-qs", "entities"]
+    view_ids = ["home", "positions", "page", "search", "graph", "risks", "recent", "open-qs", "entities"]
     view_divs = "\n".join(f'    <section class="view" id="view-{vid}"></section>' for vid in view_ids)
 
     return f"""<!DOCTYPE html>
@@ -1083,6 +1422,9 @@ def render_html(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wiki</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/minisearch@6/dist/umd/index.min.js"></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <style>{HTML_HEAD_CSS}</style>
@@ -1098,6 +1440,7 @@ def render_html(
 window.WIKI_DATA = {data_json};
 </script>
 <script>
+{HTML_SCRIPT_UTIL}
 {HTML_SCRIPT_HOME}
 {HTML_SCRIPT_PAGE}
 {HTML_SCRIPT_SEARCH}
@@ -1106,6 +1449,7 @@ window.WIKI_DATA = {data_json};
 {HTML_SCRIPT_RECENT}
 {HTML_SCRIPT_OPEN_QS}
 {HTML_SCRIPT_ENTITIES}
+{HTML_SCRIPT_POSITIONS}
 {HTML_SCRIPT_SIDEBAR_PAGES}
 {HTML_SCRIPT_VIEW_SWITCH}
 buildSidebarPages();

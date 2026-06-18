@@ -333,6 +333,56 @@ class BuildSearchIndexTest(unittest.TestCase):
         self.assertIn("Body text here", d["body"])
 
 
+class PageSummaryTest(unittest.TestCase):
+    """The card/lead summary comes from the OKF `description` frontmatter field."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write_page(self, rel, frontmatter, body):
+        import yaml
+        path = self.wiki_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fm = yaml.safe_dump(frontmatter, sort_keys=False).strip()
+        path.write_text(f"---\n{fm}\n---\n{body}\n", encoding="utf-8")
+
+    def _data(self):
+        import json
+        import render
+        pages = render.collect_pages(self.wiki_root)
+        html = render.render_html(pages, [], [], [], [], [])
+        marker = "window.WIKI_DATA = "
+        start = html.find(marker)
+        end = html.find("</script>", start)
+        return json.loads(html[start + len(marker):end].rstrip("; \n"))
+
+    def test_summary_uses_description_field(self):
+        self.write_page(
+            "p.md",
+            {"title": "Foo", "category": "Demo", "status": "Live", "owner": "x",
+             "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30",
+             "type": "article", "description": "A one-line summary of Foo.",
+             "timestamp": "2026-04-30T00:00:00Z"},
+            "## What This Is\n\nLong body prose that should not become the summary.",
+        )
+        data = self._data()
+        self.assertEqual(data["pages"]["p.md"]["summary"], "A one-line summary of Foo.")
+
+    def test_summary_empty_when_no_description(self):
+        self.write_page(
+            "p.md",
+            {"title": "Foo", "category": "Demo", "status": "Live", "owner": "x",
+             "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"},
+            "## What This Is\n\nBody prose.",
+        )
+        data = self._data()
+        self.assertEqual(data["pages"]["p.md"]["summary"], "")
+
+
 class RenderHtmlShellTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -347,6 +397,7 @@ class RenderHtmlShellTest(unittest.TestCase):
         self.assertIn("<!DOCTYPE html>", html)
         self.assertIn('<nav id="sidebar">', html)
         self.assertIn('id="view-home"', html)
+        self.assertIn('id="view-positions"', html)
         self.assertIn('id="view-page"', html)
         self.assertIn('id="view-search"', html)
         self.assertIn('id="view-graph"', html)
@@ -424,8 +475,8 @@ class PageViewTest(unittest.TestCase):
         import render
         html = render.render_html({}, [], [], [], [], [])
         self.assertIn("function renderPage", html)
-        self.assertIn("Mentions", html)
-        self.assertIn("Mentioned by", html)
+        self.assertIn("Grounded in", html)
+        self.assertIn("Referenced by", html)
 
 
 class SearchViewTest(unittest.TestCase):
