@@ -151,6 +151,18 @@ A *live* connection — an LLM querying a wiki on demand rather than reading the
 
 ## Repo watcher — track the whole of `knowledge-catalog`, not just the spec
 
+> **Status (2026-06-18): scheduled-agent plan dropped; went with feed + pinned snapshot.**
+> The scheduled-cloud-agent shape below was considered and rejected for now:
+> - **Cloud agent** — needs the Claude GitHub App on `Phluxxed/llm-wiki` to write back state, and produces an unattended digest no one is guaranteed to read.
+> - **SessionStart-in-repo hook** — only fires when you're already working in `llm-wiki`, which is backwards for a watcher (you'd hear about a breaking upstream change only when you next happen to be in here, mid-other-task).
+>
+> Chosen instead, for a single maintainer at weekly-ish cadence:
+> 1. Subscribe to the upstream commit Atom feed (`https://github.com/GoogleCloudPlatform/knowledge-catalog/commits/main.atom`) in a feed reader; scan it on your own schedule and apply the relevance lens by eye.
+> 2. When something looks load-bearing (format/eval change), open Claude in this repo and have it read the diffs against this steal-list properly — the heavyweight "classify against our conformance/eval" work stays a manually-triggered, in-session task.
+> 3. **Pinned SPEC snapshot — done:** [`docs/okf/SPEC-0.1.md`](okf/SPEC-0.1.md) is a byte-identical mirror of `okf/SPEC.md` @ `ba17dd5` (commit `3a8b631`), so format changes upstream show up as a clean reviewable diff. Re-fetch with the same path/ref scheme to diff.
+>
+> Revisit the scheduled-agent option post-GCP, or if more than one person starts maintaining this and ambient awareness becomes worth the machinery.
+
 We want to know about **any** meaningful change to Google's repo — new commits, new agents, eval changes, format changes — and have it read through one lens: *is there anything useful or breaking for us in here?* A spec-only diff is too narrow; the spec is one file, and the enrichment/eval/tooling code is where most of the action will be.
 
 This is an LLM-judgment task, not a textual diff — "read the commit, understand what changed, flag relevance" — so the right vehicle is a **scheduled cloud agent**, not a dumb script.
