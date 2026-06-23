@@ -8,6 +8,7 @@ from mcp.types import CallToolResult, TextContent
 from llm_wiki_mcp.errors import WikiMcpError
 from llm_wiki_mcp.registry import doctor, list_wikis, register_wiki, unregister_wiki
 from llm_wiki_mcp.wiki_runtime import (
+    agent_manual,
     around,
     backlinks,
     context_pack,
@@ -50,6 +51,21 @@ def create_server() -> FastMCP:
     def wiki_doctor(alias: str) -> CallToolResult:
         """Validate that a registered wiki exists and has context tooling."""
         return _handle_wiki_error(lambda: doctor(alias))
+
+    @mcp.tool()
+    def wiki_agent_manual(
+        alias: str,
+        include_conventions: bool = True,
+        max_chars: int = 120_000,
+    ) -> CallToolResult:
+        """Return the selected wiki's operating manual before any file mutation."""
+        return _handle_wiki_error(
+            lambda: agent_manual(
+                alias,
+                include_conventions=include_conventions,
+                max_chars=max_chars,
+            )
+        )
 
     @mcp.tool()
     def wiki_overview(alias: str) -> CallToolResult:

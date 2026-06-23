@@ -9,12 +9,43 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from llm_wiki_mcp.errors import WikiMcpError
-from llm_wiki_mcp.registry import get_wiki
+from llm_wiki_mcp.registry import doctor, get_wiki
 
 
+MAX_MANUAL_CHARS = 120_000
 MAX_PAGE_CHARS = 40_000
 MAX_SOURCE_CHARS = 40_000
 MAX_CONTEXT_TOKENS = 50_000
+
+
+def agent_manual(alias: str, include_conventions: bool = True, max_chars: int = MAX_MANUAL_CHARS) -> dict[str, Any]:
+    record = get_wiki(alias)
+    wiki_root = Path(record["path"]).expanduser().resolve()
+    limit = _bounded_int(max_chars, default=MAX_MANUAL_CHARS, upper=MAX_MANUAL_CHARS)
+    manual = _read_control_file(wiki_root, "wiki-agent.md", max_chars=limit, required=True)
+    conventions = None
+    if include_conventions:
+        conventions = _read_control_file(wiki_root, "CONVENTIONS.md", max_chars=limit, required=False)
+
+    return {
+        "kind": "wiki_agent_manual",
+        "alias": record["alias"],
+        "path": str(wiki_root),
+        "operating_manual_path": "wiki-agent.md",
+        "operating_manual": manual["content"],
+        "operating_manual_truncated": manual["truncated"],
+        "conventions_path": "CONVENTIONS.md" if conventions is not None else None,
+        "conventions": conventions["content"] if conventions is not None else None,
+        "conventions_truncated": conventions["truncated"] if conventions is not None else False,
+        "must_follow": [
+            "Read and obey operating_manual before mutating this wiki",
+            "Do not edit sources/",
+            "Update index.md when adding or moving pages",
+            "Append log.md for wiki changes",
+            "Run lint/render after ingest or structural changes",
+        ],
+        "doctor": doctor(alias),
+    }
 
 
 def overview(alias: str) -> dict[str, Any]:
@@ -190,6 +221,37 @@ def _load_query(alias: str) -> ModuleType:
 
     query.WIKI_ROOT = wiki_root
     return query
+
+
+def _read_control_file(wiki_root: Path, filename: str, max_chars: int, required: bool) -> dict[str, Any] | None:
+    path = (wiki_root / filename).resolve()
+    if path.parent != wiki_root:
+        raise WikiMcpError(
+            "INVALID_INPUT",
+            "Control file must be at wiki root",
+            {"file": filename},
+        )
+    if not path.is_file():
+        if required:
+            raise WikiMcpError(
+                "CONTROL_FILE_MISSING",
+                "Wiki control file is missing",
+                {"file": filename, "path": str(path)},
+            )
+        return None
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise WikiMcpError(
+            "CONTROL_FILE_NOT_TEXT",
+            "Wiki control file is not UTF-8 text",
+            {"file": filename},
+        ) from exc
+
+    truncated = len(content) > max_chars
+    if truncated:
+        content = content[:max_chars].rstrip() + "\n\n[truncated]"
+    return {"content": content, "truncated": truncated}
 
 
 def _load_module(name: str, path: Path) -> ModuleType:

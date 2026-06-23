@@ -12,13 +12,14 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from llm_wiki_mcp.errors import WikiMcpError
 from llm_wiki_mcp.registry import register_wiki
 from llm_wiki_mcp.wiki_runtime import (
+    agent_manual,
+    context_pack,
     get_page,
     get_source_excerpt,
     graph_health,
     links,
     overview,
     query_pages,
-    context_pack,
 )
 from tests.wiki_fixture import base_fm, create_wiki_root, write_md
 
@@ -102,3 +103,21 @@ class WikiRuntimeTest(unittest.TestCase):
             pack["gaps"][0],
             {"page": "notes/escape.md", "gap": "source_missing:../secret.md"},
         )
+
+    def test_agent_manual_returns_wiki_operating_contract(self):
+        (self.wiki / "wiki-agent.md").write_text(
+            "# Wiki Agent\n\nDo not edit sources/.\nAlways update index.md.\n",
+            encoding="utf-8",
+        )
+        (self.wiki / "CONVENTIONS.md").write_text("# Conventions\n", encoding="utf-8")
+
+        manual = agent_manual("brain")
+
+        self.assertEqual(manual["kind"], "wiki_agent_manual")
+        self.assertEqual(manual["alias"], "brain")
+        self.assertEqual(manual["path"], str(self.wiki.resolve()))
+        self.assertIn("Do not edit sources/", manual["operating_manual"])
+        self.assertEqual(manual["operating_manual_path"], "wiki-agent.md")
+        self.assertEqual(manual["conventions"], "# Conventions\n")
+        self.assertIn("Read and obey operating_manual before mutating this wiki", manual["must_follow"])
+        self.assertTrue(manual["doctor"]["is_wiki"])

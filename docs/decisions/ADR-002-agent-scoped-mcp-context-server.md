@@ -21,7 +21,8 @@ personal Codex runtime must not see work wiki registrations created for Claude.
 ## Decision
 
 Add a local stdio MCP server named `llm-wiki` with tools for registry,
-navigation, graph health, page reads, source excerpts, and context packs.
+wiki operating manuals, navigation, graph health, page reads, source excerpts,
+and context packs.
 
 The server is read/context only for wiki content. It may write the current
 agent's registry file under `LLM_WIKI_HOME`, but it does not write wiki pages,
@@ -35,6 +36,8 @@ fails closed when it is absent.
 - Existing wiki folders need no format migration to be served.
 - `/wikime` remains the setup and migration workflow.
 - Agents can attach aliases and retrieve context from anywhere.
+- Agents outside the wiki can load `wiki-agent.md` through `wiki_agent_manual`
+  before doing normal file edits.
 - Work/personal separation depends on MCP client config using separate homes,
   such as `~/.codex/llm-wiki` and `~/.claude/llm-wiki`.
 - Mutation stays in ordinary file edits governed by `wiki-agent.md`, avoiding a

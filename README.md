@@ -110,6 +110,7 @@ author pages, mutate sources, or replace `/wikime`.
 | `wiki_list` | List wikis registered in the current agent's registry. |
 | `wiki_register` / `wiki_unregister` | Attach or detach an alias in the current agent registry only. |
 | `wiki_doctor` | Check a registered wiki's required files and graph/context scripts. |
+| `wiki_agent_manual` | Load `wiki-agent.md` and the selected wiki's operating contract before file mutation. |
 | `wiki_overview` / `wiki_graph_health` | Return first-pass structure, hubs, orphans, risks, questions, and graph health. |
 | `wiki_query` | Query page frontmatter by status, category, type, tag, stale days, or open risks. |
 | `wiki_links` / `wiki_backlinks` / `wiki_around` | Navigate the deterministic wiki graph. |

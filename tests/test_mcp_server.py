@@ -32,6 +32,8 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(result["registered"]["alias"], "brain")
         self.assertEqual(result["listed"]["wikis"][0]["alias"], "brain")
         self.assertEqual(result["overview"]["kind"], "agent_overview")
+        self.assertEqual(result["manual"]["kind"], "wiki_agent_manual")
+        self.assertIn("Wiki Agent", result["manual"]["operating_manual"])
         self.assertEqual(result["links"]["links"][0]["page"], "b.md")
 
     def test_stdio_server_returns_structured_error_without_home(self):
@@ -64,6 +66,7 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
             )
             listed = await session.call_tool("wiki_list", arguments={})
             overview = await session.call_tool("wiki_overview", arguments={"alias": "brain"})
+            manual = await session.call_tool("wiki_agent_manual", arguments={"alias": "brain"})
             links = await session.call_tool(
                 "wiki_links",
                 arguments={"alias": "brain", "page": "a.md"},
@@ -74,6 +77,7 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
         "registered": registered.structuredContent,
         "listed": listed.structuredContent,
         "overview": overview.structuredContent,
+        "manual": manual.structuredContent,
         "links": links.structuredContent,
     }
 
