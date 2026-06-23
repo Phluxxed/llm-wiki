@@ -16,3 +16,4 @@ Use an ADR when a decision changes architecture, public behavior, dependency pos
 | ADR | Status | Date | Decision |
 |---|---|---:|---|
 | [ADR-001](./ADR-001-agent-graph-layer-adapter.md) | Accepted | 2026-06-19 | Build the agent graph layer as an adapter over plain markdown. |
+| [ADR-002](./ADR-002-agent-scoped-mcp-context-server.md) | Accepted | 2026-06-23 | Serve wiki context over local, agent-scoped MCP. |

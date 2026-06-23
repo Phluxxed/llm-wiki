@@ -485,10 +485,23 @@ def _page_block(path: str, page: dict, max_chars: int = 4000) -> str:
     return f"### {path} - {page['title']}\n\n{body or '[empty body]'}"
 
 
-def _source_excerpt(wiki_root: Path, source: str, max_chars: int = 1600) -> str | None:
+def _source_path(wiki_root: Path, source: str) -> Path | None:
     if not source:
         return None
-    path = wiki_root / source
+    normalized = str(source).replace("\\", "/")
+    if normalized.startswith("/") or not normalized.startswith("sources/") or ".." in Path(normalized).parts:
+        return None
+    sources_root = (wiki_root / "sources").resolve()
+    path = (wiki_root / normalized).resolve()
+    if not path.is_relative_to(sources_root):
+        return None
+    return path
+
+
+def _source_excerpt(wiki_root: Path, source: str, max_chars: int = 1600) -> str | None:
+    path = _source_path(wiki_root, source)
+    if path is None:
+        return None
     if not path.exists() or not path.is_file():
         return None
     try:
@@ -562,7 +575,8 @@ def build_context_pack_data(page: str, pages: dict[str, dict], edges: list[wiki_
     gaps = []
     for path in included_paths:
         source = str(pages[path]["fm"].get("source") or "")
-        if source and not (WIKI_ROOT / source).exists():
+        source_path = _source_path(WIKI_ROOT, source)
+        if source and (source_path is None or not source_path.exists()):
             gaps.append({"page": path, "gap": f"source_missing:{source}"})
     if not wiki_graph.incoming_edges(edges, page) and not wiki_graph.outgoing_edges(edges, page):
         gaps.append({"page": page, "gap": "seed_has_no_graph_edges"})

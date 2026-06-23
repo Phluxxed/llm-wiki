@@ -214,6 +214,10 @@ YAML frontmatter block (title, type: entity|concept, category: Entities & Concep
   Add `.venv/` and `.eval/` (local eval run records) to `.gitignore` when you run `git init`.
 
   If `uv` is not installed on the system, ask the user before falling back — do not silently install into system or user Python.
+- If the `llm-wiki` MCP server is configured in the current agent runtime, register the newly created wiki with the current runtime only:
+  - Use the `wiki_register` MCP tool with an alias derived from the directory name (kebab-case, ask only if ambiguous).
+  - Never register the wiki into another agent's home. Codex and Claude registries are intentionally separate.
+  - If `wiki_register` is unavailable or `LLM_WIKI_HOME` is not configured, skip registration and say the wiki was created but not attached to MCP. Do not edit `~/.codex/` or `~/.claude/` directly unless the current runtime owns that home.
 - Ensure `README.md` includes a `## Scripts & Tooling` section with the commands and what each produces:
   - `.venv/bin/python3 scripts/lint.py` → structural health check
   - `.venv/bin/python3 scripts/query.py --help` → frontmatter query filters and agent graph/context commands; add `--json` for machine-readable agent output

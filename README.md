@@ -43,6 +43,24 @@ ln -s ~/llm-wiki ~/.claude/skills/wikime
 
 Each agent has its own skills directory — your agent will know where to look.
 
+To expose registered wikis over MCP, install the local package and configure an
+agent-scoped registry home:
+
+```bash
+cd ~/llm-wiki
+uv venv
+uv pip install -e .
+
+# Codex personal registry
+codex mcp add --env LLM_WIKI_HOME="$HOME/.codex/llm-wiki" llm-wiki -- llm-wiki-mcp
+
+# Claude work registry; do not share this home with Codex
+claude mcp add llm-wiki -s local -e LLM_WIKI_HOME="$HOME/.claude/llm-wiki" -- llm-wiki-mcp
+```
+
+The MCP server fails closed when `LLM_WIKI_HOME` is absent. Codex and Claude
+should use separate registry homes so personal and work wikis do not cross over.
+
 Generated wikis should install script dependencies into a project-local `.venv`:
 
 ```bash
@@ -81,6 +99,22 @@ For agents landing cold in a wiki, start with:
 .venv/bin/python3 scripts/query.py --agent-overview --json
 .venv/bin/python3 scripts/query.py --context-pack <page> --tokens 12000 --json
 ```
+
+## MCP tools
+
+The MCP server is a context adapter over existing wiki folders. It does not
+author pages, mutate sources, or replace `/wikime`.
+
+| Tool | Purpose |
+| --- | --- |
+| `wiki_list` | List wikis registered in the current agent's registry. |
+| `wiki_register` / `wiki_unregister` | Attach or detach an alias in the current agent registry only. |
+| `wiki_doctor` | Check a registered wiki's required files and graph/context scripts. |
+| `wiki_overview` / `wiki_graph_health` | Return first-pass structure, hubs, orphans, risks, questions, and graph health. |
+| `wiki_query` | Query page frontmatter by status, category, type, tag, stale days, or open risks. |
+| `wiki_links` / `wiki_backlinks` / `wiki_around` | Navigate the deterministic wiki graph. |
+| `wiki_context_pack` | Return bounded task context around a seed page. |
+| `wiki_get_page` / `wiki_get_source_excerpt` | Read bounded page content and source excerpts. |
 
 ## Agent compatibility
 
