@@ -7,8 +7,8 @@ wiki change), but produces a richer artifact with eight views: Home, Page,
 Search, Graph, Risks, Recent changes, Open questions, Entities.
 
 Usage:
-    python3 scripts/render.py            # writes wiki.html to wiki root
-    python3 scripts/render.py --output path/to/out.html
+    .venv/bin/python3 scripts/render.py            # writes wiki.html to wiki root
+    .venv/bin/python3 scripts/render.py --output path/to/out.html
 """
 
 import argparse
@@ -17,19 +17,21 @@ import re
 import sys
 from pathlib import Path
 
+import wiki_graph
+
 try:
     import yaml
 except ImportError:
-    sys.exit("pyyaml required: pip3 install pyyaml")
+    sys.exit("pyyaml required: run `uv venv && uv pip install pyyaml markdown`, then use `.venv/bin/python3`")
 
 try:
     import markdown as md_lib
 except ImportError:
-    sys.exit("markdown required: pip3 install markdown")
+    sys.exit("markdown required: run `uv venv && uv pip install pyyaml markdown`, then use `.venv/bin/python3`")
 
 WIKI_ROOT = Path(__file__).parent.parent
 EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
-EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals", ".eval", "docs", "tests"}
+EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", ".venv", "evals", ".eval", "docs", "tests"}
 
 
 def parse_frontmatter(text: str) -> dict:
@@ -188,40 +190,11 @@ def resolve_link(raw: str, src_file: str, targets: set | dict) -> str | None:
 
     `targets` may be a dict (membership test against keys) or a set.
     """
-    raw = raw.replace("\\", "/")
-    cleaned = raw[2:] if raw.startswith("./") else raw
-
-    if cleaned in targets:
-        return cleaned
-
-    src_dir_parts = src_file.split("/")[:-1]
-    parts = list(src_dir_parts)
-    for c in cleaned.split("/"):
-        if c == "..":
-            if parts:
-                parts.pop()
-        elif c and c != ".":
-            parts.append(c)
-    resolved = "/".join(parts)
-    return resolved if resolved in targets else None
+    return wiki_graph.resolve_link(raw, src_file, targets)
 
 
 def collect_edges(pages: dict) -> list[tuple[str, str]]:
-    edges = set()
-    link_re = re.compile(r'\[(?:[^\]]+)\]\(([^)#\s]+\.md)\)')
-    for src_file, page in pages.items():
-        for raw in link_re.findall(page["body"]):
-            tgt = resolve_link(raw, src_file, pages)
-            if tgt and tgt != src_file:
-                edges.add((src_file, tgt))
-        mentioned = page["fm"].get("mentioned_in") or []
-        for referrer in mentioned:
-            referrer = str(referrer).replace("\\", "/")
-            if referrer.startswith("./"):
-                referrer = referrer[2:]
-            if referrer in pages and referrer != src_file:
-                edges.add((referrer, src_file))
-    return sorted(edges)
+    return wiki_graph.edge_pairs(wiki_graph.collect_typed_edges(pages))
 
 
 _INTERNAL_LINK_RE = re.compile(r'<a\s+href="([^"]+\.md)"')

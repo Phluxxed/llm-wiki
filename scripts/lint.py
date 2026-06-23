@@ -3,8 +3,8 @@
 lint.py — structural health check across all wiki pages.
 
 Usage:
-    python3 scripts/lint.py          # full structural lint
-    python3 scripts/lint.py --json   # machine-readable output for LLM consumption
+    .venv/bin/python3 scripts/lint.py          # full structural lint
+    .venv/bin/python3 scripts/lint.py --json   # machine-readable output for LLM consumption
 
 Checks performed (structural/mechanical — no LLM required):
   - Mandatory sections present in default-primary pages (no `type:` field) and entity pages
@@ -35,11 +35,12 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    sys.exit("pyyaml required: pip3 install pyyaml")
+    sys.exit("pyyaml required: run `uv venv && uv pip install pyyaml markdown`, then use `.venv/bin/python3`")
 
 WIKI_ROOT = Path(__file__).parent.parent
 EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
-EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", "evals", ".eval"}
+EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", ".venv", "evals", ".eval"}
+LINK_TARGET_EXCLUDE_DIRS = {".git", ".obsidian", ".venv", "evals", ".eval"}
 
 REQUIRED_FRONTMATTER = {"title", "category", "status", "owner", "tags", "created", "last_reviewed",
                         "type", "description", "timestamp"}
@@ -108,7 +109,7 @@ def collect_all_md_paths() -> set[str]:
     paths = set()
     for md in WIKI_ROOT.rglob("*.md"):
         rel = md.relative_to(WIKI_ROOT)
-        if rel.parts and rel.parts[0] == ".git":
+        if rel.parts and rel.parts[0] in LINK_TARGET_EXCLUDE_DIRS:
             continue
         paths.add(str(rel).replace("\\", "/"))
     return paths
@@ -375,7 +376,7 @@ def print_report(issues: list[dict]) -> None:
     open_risks = sum(1 for i in issues if i["check"] == "open_risk")
     structural = total - open_risks
     print(f"\n---\n{total} issue(s): {structural} structural, {open_risks} open risk row(s)")
-    print("\n⚠️  Contradiction scan and source drift require LLM — run `python3 scripts/eval.py` (LLM-as-judge quality eval).")
+    print("\n⚠️  Contradiction scan and source drift require LLM — run `.venv/bin/python3 scripts/eval.py` (LLM-as-judge quality eval).")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────

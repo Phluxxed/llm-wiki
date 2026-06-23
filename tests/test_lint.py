@@ -108,6 +108,15 @@ class BrokenBodyLinkCheckTest(unittest.TestCase):
         (self.wiki_root / "sources/SPEC.md").write_text("# Spec\n", encoding="utf-8")
         self.assertEqual(self._run(), [])
 
+    def test_venv_markdown_is_not_a_link_target(self):
+        """Project-local venv docs should never count as wiki content."""
+        write_md(self.wiki_root / "components/a.md", self._base_fm(title="A"), "See [Pkg](../.venv/pkg/README.md)")
+        (self.wiki_root / ".venv/pkg").mkdir(parents=True)
+        (self.wiki_root / ".venv/pkg/README.md").write_text("# Package\n", encoding="utf-8")
+        issues = self._run()
+        self.assertEqual(len(issues), 1)
+        self.assertIn(".venv/pkg/README.md", issues[0]["detail"])
+
     def test_external_links_ignored(self):
         write_md(self.wiki_root / "components/a.md", self._base_fm(title="A"),
                  "See [Web](https://example.com) and [Anchor](#section).")

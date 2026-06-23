@@ -81,7 +81,7 @@ When adding or significantly updating a page:
 1. Update `index.md` — add or revise the one-liner for that page under the right primary-type section
 2. Append a row to `log.md` — `## [YYYY-MM-DD] action | detail`
 3. Add a `Related` link in the new page if it connects to an existing one
-4. Re-run `python3 scripts/render.py` to refresh `wiki.html` so the reader reflects the change
+4. Re-run `.venv/bin/python3 scripts/render.py` to refresh `wiki.html` so the reader reflects the change
 
 ### Open Questions
 
@@ -131,9 +131,11 @@ Plus: the root `index.md` declares `okf_version: "0.1"`, and every non-reserved 
 
 | Script | Command | Output |
 | --- | --- | --- |
-| `scripts/lint.py` | `python3 scripts/lint.py` | Structural health check — missing sections, broken refs, open risks, index consistency |
-| `scripts/query.py` | `python3 scripts/query.py --status Draft` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
-| `scripts/render.py` | `python3 scripts/render.py` | Generates `wiki.html` — single-file reader with Home / Page / Search / Graph / Risks / Recent changes / Open questions / Entities views |
-| `scripts/eval.py` | `python3 scripts/eval.py --gate` | LLM-as-judge quality eval — grounding, contradictions, redundancy, disambiguation; thresholds + regression gating. Auto-detects your agent CLI as the judge (keyless); run records in `.eval/` |
+| `scripts/lint.py` | `.venv/bin/python3 scripts/lint.py` | Structural health check — missing sections, broken refs, open risks, index consistency |
+| `scripts/query.py` | `.venv/bin/python3 scripts/query.py --status Draft --json` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks`; add `--json` for agents |
+| `scripts/query.py` | `.venv/bin/python3 scripts/query.py --agent-overview --json` | Agent graph overview — hubs, orphans, unresolved risks/questions, and recent log context |
+| `scripts/query.py` | `.venv/bin/python3 scripts/query.py --context-pack <page> --json` | Deterministic agent context pack with inclusion reasons |
+| `scripts/render.py` | `.venv/bin/python3 scripts/render.py` | Generates `wiki.html` — single-file reader with Home / Page / Search / Graph / Risks / Recent changes / Open questions / Entities views |
+| `scripts/eval.py` | `.venv/bin/python3 scripts/eval.py --gate` | LLM-as-judge quality eval — grounding, contradictions, redundancy, disambiguation; thresholds + regression gating. Auto-detects your agent CLI as the judge (keyless); run records in `.eval/` |
 
-Requires: `pip3 install pyyaml markdown` (or `uv pip install pyyaml markdown` into a project-local `.venv/`). The eval's **claude** judge also needs `claude-agent-sdk` (skip if you use `--judge codex` or `--judge none`).
+Requires a project-local `.venv/`: `uv venv && uv pip install pyyaml markdown`. The eval's **claude** judge also needs `claude-agent-sdk` (skip if you use `--judge codex` or `--judge none`).

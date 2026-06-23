@@ -48,8 +48,9 @@ If the file already exists: append the pointer line. If it does not exist: creat
 Before creating any files, check whether `wiki-agent.md` already exists in the directory.
 
 - **If it exists**: this is an existing wiki. Do not overwrite anything. Run the migration checks below, then tell the user and stop.
-  - **render.py migration**: if `scripts/graph.py` or `graph.html` exists, this wiki predates the `render.py` change. Offer the user a one-line migration: replace `scripts/graph.py` with the current `skills/wikime/scripts/render.py`, delete `graph.html`, install `markdown` into the wiki's `.venv` (see Step 5 for the `uv` commands), then `python3 scripts/render.py`. After confirming, also update `wiki-agent.md`'s Operations section to add the `render.py` rule.
-  - **OKF conformance migration (pre-1.0.0 wikis)**: run `python3 scripts/lint.py` (after copying in the current `scripts/lint.py`). If pages are flagged for missing `type`, `description`, or `timestamp`, or `index.md` lacks `okf_version`, this wiki predates the OKF-conformance release. Offer the user a backfill: set each page's `type` from its primary directory slug (`policies/` → `type: policy`; entity/concept pages keep `type: entity|concept`); add `okf_version: "0.1"` to the top of `index.md`; and for `description`/`timestamp`, propose values (description from the page's lead sentence, timestamp from `last_reviewed` or the file's git mtime) for the user to confirm rather than inventing silently. Re-run lint after backfilling. Do not edit pages without the user's go-ahead.
+  - **render.py migration**: if `scripts/graph.py` or `graph.html` exists, this wiki predates the `render.py` change. Offer the user a one-line migration: replace `scripts/graph.py` with the current `skills/wikime/scripts/render.py`, delete `graph.html`, ensure the wiki has its project-local `.venv` from Step 5, then run `.venv/bin/python3 scripts/render.py`. After confirming, also update `wiki-agent.md`'s Operations section to add the `render.py` rule.
+  - **OKF conformance migration (pre-1.0.0 wikis)**: run `.venv/bin/python3 scripts/lint.py` (after copying in the current `scripts/lint.py`). If pages are flagged for missing `type`, `description`, or `timestamp`, or `index.md` lacks `okf_version`, this wiki predates the OKF-conformance release. Offer the user a backfill: set each page's `type` from its primary directory slug (`policies/` → `type: policy`; entity/concept pages keep `type: entity|concept`); add `okf_version: "0.1"` to the top of `index.md`; and for `description`/`timestamp`, propose values (description from the page's lead sentence, timestamp from `last_reviewed` or the file's git mtime) for the user to confirm rather than inventing silently. Re-run lint after backfilling. Do not edit pages without the user's go-ahead.
+  - **Agent graph/context migration**: if `scripts/wiki_graph.py` is missing, or `.venv/bin/python3 scripts/query.py --help` does not show `--agent-overview`, `--context-pack`, and `--json`, this wiki predates the agent graph/context layer. Offer the user a tooling-only migration: copy the current `skills/wikime/scripts/wiki_graph.py`, `scripts/query.py`, and `scripts/render.py` into the wiki, then run `.venv/bin/python3 scripts/query.py --agent-overview --json` and `.venv/bin/python3 scripts/render.py`. After confirming, also update the wiki README / conventions tooling table to mention `--agent-overview --json` and `--context-pack <page> --json`. This migration must not alter wiki pages, sources, index entries, or log history unless the user explicitly asks.
 - **If it does not exist**: proceed with scaffolding below.
 
 ## Step 4 — Create these files
@@ -67,8 +68,9 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `{slug}/` | Empty directory for primary wiki pages — **one per primary type** (e.g. `papers/`, `policies/`, `controls/`, `articles/`). |
 | `entities/` | Empty directory for entity and concept pages |
 | `sources/` | Empty directory for immutable raw inputs |
+| `scripts/wiki_graph.py` | Copy from skill bundle (`skills/wikime/scripts/wiki_graph.py`); shared graph substrate used by `query.py` and `render.py` |
 | `scripts/render.py` | Copy from skill bundle (`skills/wikime/scripts/render.py`); generates `wiki.html` — single-file reader artifact with eight views (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities) |
-| `scripts/query.py` | Copy from skill bundle (`skills/wikime/scripts/query.py`); frontmatter queries — `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
+| `scripts/query.py` | Copy from skill bundle (`skills/wikime/scripts/query.py`); frontmatter queries plus agent graph/context commands — `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks`, `--agent-overview`, `--links`, `--backlinks`, `--around`, `--graph-health`, `--context-pack`; add `--json` for machine-readable agent output |
 | `scripts/lint.py` | Copy from skill bundle (`skills/wikime/scripts/lint.py`); structural lint — missing sections, frontmatter, broken refs, open risks, index consistency |
 | `scripts/eval.py` | Copy from skill bundle (`skills/wikime/scripts/eval.py`); LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating. Auto-detects the agent CLI (`claude`/`codex`) as a keyless judge; writes run records to `.eval/` |
 
@@ -95,9 +97,9 @@ This file is the agent's operating manual. Include all of these:
    - **Confluence pages**: fetch content via the Atlassian MCP tool (`getConfluencePage` with `contentFormat: "markdown"`), write to `sources/` as a `.md` file (e.g. `sources/page-title-YYYY-MM-DD.md`), and prepend the Source File Header Block with the Confluence URL.
    - **Other web pages / markdown / pastes**: write to `sources/` as a `.md` file and prepend the Source File Header Block.
 
-   **After every ingest, run `python3 scripts/lint.py`** and report findings before declaring done.
+   **After every ingest, run `.venv/bin/python3 scripts/lint.py`** and report findings before declaring done.
 
-   **After every ingest, also run `python3 scripts/render.py`** to regenerate `wiki.html`. The artifact must always reflect the current state of the wiki — this is non-optional.
+   **After every ingest, also run `.venv/bin/python3 scripts/render.py`** to regenerate `wiki.html`. The artifact must always reflect the current state of the wiki — this is non-optional.
 
    **Ingest completeness protocol (deep):**
    - **ToC first**: For any structured document (paper, standard, report, spec), extract or identify the table of contents before writing the wiki page. Use it as a checklist.
@@ -212,10 +214,12 @@ YAML frontmatter block (title, type: entity|concept, category: Entities & Concep
   Add `.venv/` and `.eval/` (local eval run records) to `.gitignore` when you run `git init`.
 
   If `uv` is not installed on the system, ask the user before falling back — do not silently install into system or user Python.
-- Ensure `README.md` includes a `## Scripts & Tooling` section with all four commands and what each produces:
-  - `python3 scripts/lint.py` → structural health check
-  - `python3 scripts/query.py --help` → frontmatter query filters
-  - `python3 scripts/render.py` → generates `wiki.html` (open in browser, or view as a Claude artifact)
-  - `python3 scripts/eval.py --gate` → LLM-as-judge quality eval (grounding, contradictions, redundancy, disambiguation) with regression gating; run records in `.eval/`
+- Ensure `README.md` includes a `## Scripts & Tooling` section with the commands and what each produces:
+  - `.venv/bin/python3 scripts/lint.py` → structural health check
+  - `.venv/bin/python3 scripts/query.py --help` → frontmatter query filters and agent graph/context commands; add `--json` for machine-readable agent output
+  - `.venv/bin/python3 scripts/query.py --agent-overview --json` → agent-oriented first pass over wiki structure, hubs, orphans, risks, questions, and recent log context
+  - `.venv/bin/python3 scripts/query.py --context-pack <page> --tokens 12000 --json` → deterministic working context for an agent, with inclusion reasons
+  - `.venv/bin/python3 scripts/render.py` → generates `wiki.html` (open in browser, or view as a Claude artifact)
+  - `.venv/bin/python3 scripts/eval.py --gate` → LLM-as-judge quality eval (grounding, contradictions, redundancy, disambiguation) with regression gating; run records in `.eval/`
 - Offer `git init && echo '.env' >> .gitignore` if this looks like a standalone repo
 - Confirm page type and categories look right before the user adds their first page

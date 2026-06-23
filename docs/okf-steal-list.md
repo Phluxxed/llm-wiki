@@ -15,7 +15,7 @@ Do not integrate Google's cloud stack into the base scaffold (now). Do steal the
 
 The shape to preserve (unchanged):
 
-> A generated wiki should be useful with plain markdown, `python3 scripts/lint.py`, `python3 scripts/query.py`, and `python3 scripts/render.py`.
+> A generated wiki should be useful with plain markdown, `.venv/bin/python3 scripts/lint.py`, `.venv/bin/python3 scripts/query.py`, and `.venv/bin/python3 scripts/render.py`.
 
 What changes versus the Keppi verdict: OKF is not just a design donor, it's a **standard we may want to be conformant with**, because conformance is the cheap on-ramp to leveraging GCP's enrichment tooling post-migration.
 

@@ -23,9 +23,10 @@ your-wiki/
 │   └── entity.md          ← template for entity/concept pages
 ├── sources/               ← immutable raw inputs (never edited after saving)
 └── scripts/
+    ├── wiki_graph.py     ← shared graph substrate for traversal, health, and context packs
     ├── render.py          ← generates wiki.html — single-file reader with eight views
     ├── lint.py            ← structural health check
-    ├── query.py           ← frontmatter queries (filter by status, category, tag, etc.)
+    ├── query.py           ← frontmatter queries + agent graph/context commands
     └── eval.py            ← LLM-as-judge quality eval (grounding, contradictions, redundancy) with regression gating
 ```
 
@@ -42,13 +43,14 @@ ln -s ~/llm-wiki ~/.claude/skills/wikime
 
 Each agent has its own skills directory — your agent will know where to look.
 
-Requires `pyyaml` and `markdown` for the scripts:
+Generated wikis should install script dependencies into a project-local `.venv`:
 
 ```bash
-pip3 install pyyaml markdown
+uv venv
+uv pip install pyyaml markdown
 ```
 
-`scripts/eval.py`'s **claude** judge additionally needs `claude-agent-sdk` (`pip3 install claude-agent-sdk`); skip it if you run the eval with `--judge codex` or `--judge none`.
+Run wiki scripts with `.venv/bin/python3`. `scripts/eval.py`'s **claude** judge additionally needs `claude-agent-sdk` (`uv pip install claude-agent-sdk`); skip it if you run the eval with `--judge codex` or `--judge none`.
 
 ## Usage
 
@@ -68,10 +70,17 @@ The skill asks two questions — what the wiki is for, and what the primary page
 
 | Script | Command | Output |
 | --- | --- | --- |
-| `scripts/lint.py` | `python3 scripts/lint.py` | Structural health check — missing sections, broken refs, open risks, index consistency |
-| `scripts/query.py` | `python3 scripts/query.py --help` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks` |
-| `scripts/render.py` | `python3 scripts/render.py` | Generates `wiki.html` — single-file reader (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities). Open in a browser or view as a Claude artifact |
-| `scripts/eval.py` | `python3 scripts/eval.py --gate` | LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating (exit code). Auto-detects your agent CLI (`claude`/`codex`) as a keyless judge; run records in `.eval/` |
+| `scripts/lint.py` | `.venv/bin/python3 scripts/lint.py` | Structural health check — missing sections, broken refs, open risks, index consistency |
+| `scripts/query.py` | `.venv/bin/python3 scripts/query.py --help` | Frontmatter queries plus agent graph commands: `--agent-overview`, `--links`, `--backlinks`, `--around`, `--graph-health`, `--context-pack`; add `--json` for machine-readable output |
+| `scripts/render.py` | `.venv/bin/python3 scripts/render.py` | Generates `wiki.html` — single-file reader (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities). Open in a browser or view as a Claude artifact |
+| `scripts/eval.py` | `.venv/bin/python3 scripts/eval.py --gate` | LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating (exit code). Auto-detects your agent CLI (`claude`/`codex`) as a keyless judge; run records in `.eval/` |
+
+For agents landing cold in a wiki, start with:
+
+```bash
+.venv/bin/python3 scripts/query.py --agent-overview --json
+.venv/bin/python3 scripts/query.py --context-pack <page> --tokens 12000 --json
+```
 
 ## Agent compatibility
 
