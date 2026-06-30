@@ -96,6 +96,15 @@ class QueryAgentGraphTest(unittest.TestCase):
         self.assertIn("backlink:body_link", out)
         self.assertIn("outlink:body_link", out)
 
+    def test_type_filter_honors_custom_primary_type(self):
+        write_md(self.wiki_root / "work-history/a.md", base_fm(title="A", type="work-history"), "A body.")
+        write_md(self.wiki_root / "patterns/b.md", base_fm(title="B", type="pattern"), "B body.")
+
+        out = self.run_query("--type", "work-history")
+
+        self.assertIn("A", out)
+        self.assertNotIn("B", out)
+
     def test_agent_overview_reports_first_move_context(self):
         write_md(
             self.wiki_root / "hub.md",
@@ -192,3 +201,16 @@ class QueryAgentGraphTest(unittest.TestCase):
         self.assertEqual(data["source_excerpts"][0]["content"], "Raw source excerpt.")
         self.assertEqual(data["open_questions"][0]["question"], "Does B change the answer?")
         self.assertEqual(data["recent_log"][0]["detail"], "Updated notes/a.md")
+
+    def test_context_pack_json_includes_attention_items(self):
+        write_md(
+            self.wiki_root / "notes/a.md",
+            base_fm(title="A"),
+            "Seed body.\n\n> **Caveat:** Only applies to local stdio MCP.",
+        )
+        (self.wiki_root / "log.md").write_text("## [2026-06-19] update | Updated notes/a.md\n", encoding="utf-8")
+
+        data = json.loads(self.run_query("--context-pack", "notes/a.md", "--tokens", "1200", "--json"))
+
+        self.assertEqual(data["open_risks"][0]["kind"], "caveat")
+        self.assertEqual(data["open_risks"][0]["risk"], "Only applies to local stdio MCP.")

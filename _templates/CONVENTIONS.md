@@ -72,7 +72,7 @@ When adding a new source:
 
 ## Templates
 
-Copy the matching `_templates/{slug}.md` as the starting point for a new page of that type. Each primary template defines the structural sections suited to its type — policies, controls, and articles each have different shapes.
+Copy the matching `_templates/{slug}.md` as the starting point for a new page of that type. Each primary template defines the structural sections suited to its type. Those h2 sections are lint-enforced for pages with the matching `type:`.
 
 ## Keeping the Wiki Healthy
 
@@ -93,17 +93,30 @@ When a page raises something unresolved, mark it with a blockquote:
 
 The render script aggregates these into the Open questions tab of `wiki.html`. Use one blockquote per question.
 
+### Attention Items
+
+When a page carries an operational warning that should surface globally, use one of these one-line blockquotes:
+
+```markdown
+> **Risk:** This may break if the MCP registry changes.
+> **Caveat:** This only applies to local stdio MCP.
+> **Failure mode:** Agents skip the contract loader and edit from stale assumptions.
+```
+
+The render/query tooling surfaces these alongside open risk-register rows. Use a full Risk Register table only when likelihood, impact, mitigation, and status are worth tracking.
+
 ### Mandatory Sections by Type
 
-The `type:` field is **required** (it's OKF's one mandatory field) and doubles as a colour/filter/grouping signal — but it is not a lint-exemption knob. It's auto-defaulted from the page's primary directory slug (`policies/` → `type: policy`), so it's set on every page without manual effort. Every primary page must still answer the four load-bearing questions; type-specific content sits as h3 nested underneath. Section enforcement routes by the field's *value*:
+The `type:` field is **required** (it's OKF's one mandatory field) and doubles as a colour/filter/grouping signal. It's auto-defaulted from the page's primary directory slug (`policies/` → `type: policy`), so it's set on every page without manual effort. Primary page section enforcement comes from the matching generated template:
 
 | `type:` value | Mandatory sections (enforced by lint) |
 | --- | --- |
-| any primary value (the slug default, `policy`, `control`, `article`, …) | What This Is, How It Works, Risk Register, Prerequisites |
+| any primary value with `_templates/{type}.md` | the h2 sections in that template |
+| any primary value without a matching template | legacy fallback: What This Is, How It Works, Risk Register, Prerequisites |
 | `entity` / `concept` | What It Is, How We Use It, Where It Appears |
 | `meta` (or `category:` containing "meta") | none — free-form; for changelogs, archive indices, and other legitimately unstructured pages |
 
-Optional sections (include only if relevant): add domain-appropriate sections based on this wiki's topic and primary type.
+Newly scaffolded wikis should have a matching template for every primary type. The fallback exists for older wikis and accidental missing templates.
 
 ## OKF Conformance
 
@@ -131,7 +144,7 @@ Plus: the root `index.md` declares `okf_version: "0.1"`, and every non-reserved 
 
 | Script | Command | Output |
 | --- | --- | --- |
-| `scripts/lint.py` | `.venv/bin/python3 scripts/lint.py` | Structural health check — missing sections, broken refs, open risks, index consistency |
+| `scripts/lint.py` | `.venv/bin/python3 scripts/lint.py` | Structural health check — template-required sections, broken refs, open risks, index consistency |
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --status Draft --json` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks`; add `--json` for agents |
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --agent-overview --json` | Agent graph overview — hubs, orphans, unresolved risks/questions, and recent log context |
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --context-pack <page> --json` | Deterministic agent context pack with inclusion reasons |

@@ -7,7 +7,7 @@ Usage:
     .venv/bin/python3 scripts/lint.py --json   # machine-readable output for LLM consumption
 
 Checks performed (structural/mechanical — no LLM required):
-  - Mandatory sections present in default-primary pages (no `type:` field) and entity pages
+  - Mandatory sections present in primary pages (from matching template when present) and entity pages
   - Required YAML frontmatter fields present (incl. OKF: type, description, timestamp)
   - OKF v0.1: non-reserved .md files have parseable frontmatter (§9.1)
   - OKF v0.1: root index.md declares okf_version (§11)
@@ -48,9 +48,6 @@ REQUIRED_FRONTMATTER = {"title", "category", "status", "owner", "tags", "created
 # (strict superset): `type` is OKF's one required routing field (and our colour
 # signal), `description` a one-line summary, `timestamp` the ISO 8601 last
 # meaningful change — distinct from `created` (creation) and `last_reviewed`.
-# Enforced on every primary page regardless of its `type:` value (the slug
-# default, or article/policy/control/…). `type:` is a colour/filter signal, not
-# a lint exemption — only entity/concept and meta pages route elsewhere (§8b).
 PRIMARY_MANDATORY_SECTIONS = {"What This Is", "How It Works", "Risk Register", "Prerequisites"}
 ENTITY_MANDATORY_SECTIONS = {"What It Is", "How We Use It", "Where It Appears"}
 OPEN_RISK_STATUS = "🔲"
@@ -74,6 +71,21 @@ def parse_frontmatter(text: str) -> dict:
 
 def extract_sections(text: str) -> set[str]:
     return set(re.findall(r'^#{1,3}\s+(.+)', text, re.MULTILINE))
+
+
+def extract_template_sections(text: str) -> set[str]:
+    return set(re.findall(r'^##\s+(.+)', text, re.MULTILINE))
+
+
+def primary_sections_for_type(page_type: str) -> set[str]:
+    if not page_type:
+        return PRIMARY_MANDATORY_SECTIONS
+
+    template = WIKI_ROOT / "_templates" / f"{page_type}.md"
+    if not template.exists():
+        return PRIMARY_MANDATORY_SECTIONS
+
+    return extract_template_sections(template.read_text(encoding="utf-8"))
 
 
 def collect_pages() -> list[dict]:
@@ -262,26 +274,20 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
                     "detail": f"body references {refs_preview} but no source field — should this be set?",
                 })
 
-        # Mandatory sections. Behaviour by type:
-        #   entity/concept → entity sections enforced
-        #   meta (or category contains "meta") → free-form, no enforcement
-        #     (meta is for changelogs, archive indices, etc. — legitimately
-        #     unstructured)
-        #   anything else (no `type:` set, OR `type: policy/control/article/…`)
-        #     → strict primary sections enforced. The `type:` field is a
-        #     colour/filter/grouping signal, not a lint exemption — primary
-        #     pages of any custom type should still answer the four load-bearing
-        #     questions (What This Is / How It Works / Risk Register /
-        #     Prerequisites), with type-specific content nested as h3 below.
+        # Mandatory sections. Primary page types use their generated template
+        # as the contract; old wikis without a matching template fall back to
+        # the legacy four-section profile.
         is_meta = "meta" in str(fm.get("category", "")).lower() or page_type == "meta"
         if is_entity:
             for section in ENTITY_MANDATORY_SECTIONS:
                 if not any(section.lower() in s.lower() for s in sections):
                     issues.append({"file": f, "check": "missing_section", "detail": f"entity page missing section: {section}"})
         elif not is_meta:
-            for section in PRIMARY_MANDATORY_SECTIONS:
+            required_sections = primary_sections_for_type(str(page_type))
+            label = page_type or "primary"
+            for section in required_sections:
                 if not any(section.lower() in s.lower() for s in sections):
-                    issues.append({"file": f, "check": "missing_section", "detail": f"primary page missing section: {section}"})
+                    issues.append({"file": f, "check": "missing_section", "detail": f"{label} page missing section: {section}"})
 
         # Open risk register rows
         open_risks = parse_risk_open_rows(p["text"])

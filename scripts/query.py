@@ -17,6 +17,7 @@ Usage:
 import argparse
 import difflib
 import json as json_lib
+import re
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -34,6 +35,7 @@ EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", ".venv"
 
 STATUS_ICONS = {"⚠️": "⚠️", "🔲": "🔲", "✅": "✅"}
 OPEN_STATUSES = {"⚠️", "🔲"}
+ATTENTION_RE = re.compile(r"^>\s*\*\*(Risk|Caveat|Failure mode):\*\*\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
 
 
 # ── parsing ──────────────────────────────────────────────────────────────────
@@ -102,6 +104,20 @@ def parse_risk_rows(text: str, filename: str) -> list[dict]:
     return rows
 
 
+def parse_attention_items(text: str, filename: str) -> list[dict]:
+    return [
+        {
+            "file": filename,
+            "kind": match.group(1).lower(),
+            "risk": match.group(2).strip(),
+            "likelihood": "",
+            "impact": "",
+            "status": "⚠️ Attention",
+        }
+        for match in ATTENTION_RE.finditer(text)
+    ]
+
+
 # ── formatting ────────────────────────────────────────────────────────────────
 
 def col_widths(rows: list[list[str]]) -> list[int]:
@@ -128,13 +144,13 @@ def fmt_date(val) -> str:
 
 
 def infer_type(fm: dict) -> str:
-    t = fm.get("type", "")
-    if t in ("entity", "concept"):
+    t = str(fm.get("type") or "").strip().lower()
+    if t:
         return t
-    cat = fm.get("category", "").lower()
+    cat = str(fm.get("category") or "").lower()
     if "meta" in cat:
         return "meta"
-    return "use-case"
+    return "primary"
 
 
 # ── filters ───────────────────────────────────────────────────────────────────
@@ -198,9 +214,10 @@ def cmd_risks(pages: list[dict]) -> None:
     all_risks = []
     for p in pages:
         all_risks.extend(parse_risk_rows(p["_text"], p["_file"]))
+        all_risks.extend(parse_attention_items(p["_text"], p["_file"]))
 
     if not all_risks:
-        print("No open risk rows found (⚠️ or 🔲).")
+        print("No open risks or attention items found.")
         return
 
     headers = ["File", "Risk", "Likelihood", "Impact", "Status"]
@@ -216,6 +233,7 @@ def risks_data(pages: list[dict]) -> dict:
     risks = []
     for page in pages:
         risks.extend(parse_risk_rows(page["_text"], page["_file"]))
+        risks.extend(parse_attention_items(page["_text"], page["_file"]))
     return {"kind": "risks", "count": len(risks), "risks": risks}
 
 
@@ -674,7 +692,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Query wiki YAML frontmatter")
     parser.add_argument("--status",   help="Filter by status (Draft|Active|Deprecated)")
     parser.add_argument("--category", help="Filter by category (substring match)")
-    parser.add_argument("--type",     help="Filter by page type (entity|concept|use-case|meta)")
+    parser.add_argument("--type",     help="Filter by page type (entity|concept|meta|any custom primary type)")
     parser.add_argument("--tag",      help="Filter by tag")
     parser.add_argument("--stale",    type=int, metavar="DAYS",
                         help="Pages not reviewed in N+ days")

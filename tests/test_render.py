@@ -267,6 +267,22 @@ class ExtractRisksTest(unittest.TestCase):
         statuses = {r["status_symbol"] for r in risks}
         self.assertEqual(statuses, {"⚠️", "🔲"})
 
+    def test_collects_attention_item_blockquotes(self):
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("p.md", {**base, "title": "P"}, (
+            "> **Risk:** Registry state may be stale.\n"
+            "> **Caveat:** Applies only to local stdio MCP.\n"
+            "> **Failure mode:** Agent skips the contract loader.\n"
+        ))
+
+        pages = render.collect_pages(self.wiki_root)
+        risks = render.extract_risks(pages)
+
+        self.assertEqual(len(risks), 3)
+        self.assertEqual({r["kind"] for r in risks}, {"risk", "caveat", "failure mode"})
+        self.assertTrue(all(r["status_symbol"] == "⚠️" for r in risks))
+
 
 class ExtractOpenQsTest(unittest.TestCase):
     def setUp(self):

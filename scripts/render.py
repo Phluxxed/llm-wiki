@@ -98,6 +98,7 @@ def build_search_index(pages: dict) -> list[dict]:
 
 
 OPEN_Q_RE = re.compile(r"^>\s*\*\*Open question:\*\*\s*(.+?)\s*$", re.MULTILINE)
+ATTENTION_RE = re.compile(r"^>\s*\*\*(Risk|Caveat|Failure mode):\*\*\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
 
 
 def extract_open_qs(pages: dict) -> list[dict]:
@@ -148,6 +149,20 @@ def _parse_risk_rows(body: str) -> list[dict]:
     return rows
 
 
+def _parse_attention_items(body: str) -> list[dict]:
+    return [
+        {
+            "kind": match.group(1).lower(),
+            "risk": match.group(2).strip(),
+            "likelihood": "",
+            "impact": "",
+            "mitigation": "",
+            "status": "⚠️ Attention",
+        }
+        for match in ATTENTION_RE.finditer(body)
+    ]
+
+
 def extract_risks(pages: dict) -> list[dict]:
     risks = []
     for path, page in pages.items():
@@ -159,6 +174,13 @@ def extract_risks(pages: dict) -> list[dict]:
                 "page": path,
                 "page_title": page["title"],
                 "status_symbol": symbol,
+                **row,
+            })
+        for row in _parse_attention_items(page["body"]):
+            risks.append({
+                "page": path,
+                "page_title": page["title"],
+                "status_symbol": "⚠️",
                 **row,
             })
     return risks

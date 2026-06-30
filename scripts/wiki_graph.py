@@ -26,6 +26,7 @@ DEFAULT_EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian",
 
 BODY_LINK_RE = re.compile(r'\[(?:[^\]]+)\]\(([^)#\s]+\.md)\)')
 OPEN_Q_RE = re.compile(r"^>\s*\*\*Open question:\*\*\s*(.+?)\s*$", re.MULTILINE)
+ATTENTION_RE = re.compile(r"^>\s*\*\*(Risk|Caveat|Failure mode):\*\*\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
 LOG_LINE_RE = re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})\]\s*([^|]+?)\s*\|\s*(.+?)\s*$")
 OPEN_RISK_MARKERS = ("\u26a0\ufe0f", "\U0001f532")
 
@@ -353,10 +354,22 @@ def extract_open_questions(page: dict) -> list[str]:
 
 def extract_open_risks(page: dict) -> list[dict]:
     rows = []
+    body = page.get("body") or ""
+
+    for match in ATTENTION_RE.finditer(body):
+        rows.append({
+            "kind": match.group(1).lower(),
+            "risk": match.group(2).strip(),
+            "likelihood": "",
+            "impact": "",
+            "mitigation": "",
+            "status": "⚠️ Attention",
+        })
+
     in_table = False
     header_seen = False
 
-    for line in (page.get("body") or "").splitlines():
+    for line in body.splitlines():
         stripped = line.strip()
         if "Risk" in stripped and "Likelihood" in stripped and "|" in stripped:
             in_table = True

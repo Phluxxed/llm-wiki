@@ -19,7 +19,7 @@ your-wiki/
 ├── entities/              ← entity and concept pages
 │   └── *.md
 ├── _templates/
-│   ├── {page-type}.md     ← template for new pages
+│   ├── {page-type}.md     ← purpose-aware template for that page type
 │   └── entity.md          ← template for entity/concept pages
 ├── sources/               ← immutable raw inputs (never edited after saving)
 └── scripts/
@@ -78,9 +78,9 @@ In any directory (empty or existing project), run:
 /wikime
 ```
 
-The skill asks two questions — what the wiki is for, and what the primary page type is — then scaffolds everything in one pass.
+The skill asks two questions — what the wiki is for, and what the primary page type or types are — then scaffolds everything in one pass.
 
-**Supported page types:** use cases, papers, experiments, runbooks, ADRs, or anything else you name.
+**Supported page types:** use cases, papers, experiments, runbooks, ADRs, agent Brain pages, or anything else you name. The agent generates templates from the wiki purpose; the template h2 sections become the lint-enforced shape for pages of that type.
 
 **Safe on existing projects:** if a `CLAUDE.md`, `AGENTS.md`, or `GEMINI.md` already exists, the skill appends a single pointer line rather than overwriting it. If `wiki-agent.md` already exists, the skill stops — you already have a wiki.
 
@@ -88,7 +88,7 @@ The skill asks two questions — what the wiki is for, and what the primary page
 
 | Script | Command | Output |
 | --- | --- | --- |
-| `scripts/lint.py` | `.venv/bin/python3 scripts/lint.py` | Structural health check — missing sections, broken refs, open risks, index consistency |
+| `scripts/lint.py` | `.venv/bin/python3 scripts/lint.py` | Structural health check — template-required sections, broken refs, open risks, index consistency |
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --help` | Frontmatter queries plus agent graph commands: `--agent-overview`, `--links`, `--backlinks`, `--around`, `--graph-health`, `--context-pack`; add `--json` for machine-readable output |
 | `scripts/render.py` | `.venv/bin/python3 scripts/render.py` | Generates `wiki.html` — single-file reader (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities). Open in a browser or view as a Claude artifact |
 | `scripts/eval.py` | `.venv/bin/python3 scripts/eval.py --gate` | LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating (exit code). Auto-detects your agent CLI (`claude`/`codex`) as a keyless judge; run records in `.eval/` |

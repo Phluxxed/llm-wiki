@@ -252,19 +252,7 @@ class CoverFieldCheckTest(unittest.TestCase):
 
 
 class TypeAwareSectionChecksTest(unittest.TestCase):
-    """Section-presence enforcement is keyed on the `type:` frontmatter field.
-
-    The `type:` field is a colour/filter/grouping signal — not a lint-exemption
-    knob. Strict primary checks apply to every primary page regardless of which
-    custom type it declares; the only opt-outs are entity/concept (which use
-    entity checks) and meta (which is free-form by design — changelogs, archive
-    indices, etc.).
-
-    - No `type:` set                   → strict primary checks (PRIMARY_MANDATORY_SECTIONS)
-    - `type:` set to anything that isn't entity/concept/meta → strict primary checks too
-    - `type: entity` / `type: concept` → entity checks
-    - `type: meta` or `category: meta` → free-form, no section enforcement
-    """
+    """Primary section checks come from the generated template for that type."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -285,8 +273,8 @@ class TypeAwareSectionChecksTest(unittest.TestCase):
         all_md = lint.collect_all_md_paths()
         return [i for i in lint.run_checks(pages, set(), set(), all_md) if i["check"] == "missing_section"]
 
-    def test_no_type_field_enforces_primary_sections(self):
-        # Untyped primary page with no mandatory sections — should flag all four.
+    def test_no_type_field_uses_legacy_primary_sections(self):
+        # Untyped legacy page with no matching template still gets the fallback.
         write_md(self.wiki_root / "policies/foo.md", self._base_fm(title="Foo"), "Some body text.")
         issues = self._run()
         details = {i["detail"] for i in issues}
@@ -301,38 +289,42 @@ class TypeAwareSectionChecksTest(unittest.TestCase):
         write_md(self.wiki_root / "policies/foo.md", self._base_fm(title="Foo"), body)
         self.assertEqual(self._run(), [])
 
-    def test_explicit_article_type_enforces_primary_sections(self):
-        # Article-typed page with no canonical sections — should flag all four.
-        # `type:` is a colour/filter signal, not a lint exemption.
-        write_md(self.wiki_root / "articles/foo.md",
-                 self._base_fm(title="Foo", type="article"),
-                 "Some article body without canonical sections.")
+    def test_explicit_type_without_template_uses_legacy_primary_sections(self):
+        write_md(self.wiki_root / "articles/foo.md", self._base_fm(title="Foo", type="article"), "Some body.")
         issues = self._run()
         self.assertEqual(len(issues), 4)
 
-    def test_explicit_policy_type_enforces_primary_sections(self):
-        # Policy-typed page must still have the four mandatory sections —
-        # type-specific content (Statement, Enforcement, etc.) sits as h3 nested
-        # under the h2 mandatory sections, not in lieu of them.
-        write_md(self.wiki_root / "policies/foo.md",
-                 self._base_fm(title="Foo", type="policy"),
-                 "Policy body without canonical sections.")
-        issues = self._run()
-        self.assertEqual(len(issues), 4)
-
-    def test_explicit_policy_type_with_h3_nested_sections_passes(self):
-        # Policy with h2 mandatory sections + h3 policy-specific subsections.
-        # Lint matches h1-h3 with substring matching, so this is valid.
-        body = (
-            "## What This Is\nPurpose and scope.\n\n"
-            "## How It Works\n### Policy Statement\nNumbered statements.\n"
-            "### Enforcement\nHow it's monitored.\n\n"
-            "## Risk Register\n| Risk | Likelihood | Impact | Mitigation | Status |\n"
-            "| --- | --- | --- | --- | --- |\n\n"
-            "## Prerequisites\nWhat must be in place.\n"
+    def test_template_sections_replace_legacy_primary_sections(self):
+        (self.wiki_root / "_templates").mkdir()
+        (self.wiki_root / "_templates/work-history.md").write_text(
+            "---\ntype: work-history\n---\n"
+            "## What Happened\n\n"
+            "## Why It Mattered\n\n"
+            "## Evidence\n",
+            encoding="utf-8",
         )
-        write_md(self.wiki_root / "policies/foo.md",
-                 self._base_fm(title="Foo", type="policy"), body)
+        body = "## What Happened\nUpdated MCP setup.\n\n## Evidence\nSession log.\n"
+        write_md(self.wiki_root / "work-history/foo.md", self._base_fm(title="Foo", type="work-history"), body)
+
+        issues = self._run()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["detail"], "work-history page missing section: Why It Mattered")
+
+    def test_template_sections_pass_without_legacy_primary_sections(self):
+        (self.wiki_root / "_templates").mkdir()
+        (self.wiki_root / "_templates/pattern.md").write_text(
+            "---\ntype: pattern\n---\n"
+            "## Trigger\n\n"
+            "## Move\n\n"
+            "## Failure Mode\n",
+            encoding="utf-8",
+        )
+        body = (
+            "## Trigger\nWhen the request is over-governed.\n\n"
+            "## Move\nStrip it back to the primitive.\n\n"
+            "## Failure Mode\nAdding process instead of behavior.\n"
+        )
+        write_md(self.wiki_root / "patterns/foo.md", self._base_fm(title="Foo", type="pattern"), body)
         self.assertEqual(self._run(), [])
 
     def test_entity_type_still_uses_entity_sections(self):
