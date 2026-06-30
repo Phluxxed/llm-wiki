@@ -515,6 +515,7 @@ input[type="text"]:focus { border-color: #60a5fa; }
 .article-shell { --accent: #60a5fa; }
 .article-header { padding-bottom: 24px; border-bottom: 1px solid #1a2230; margin-bottom: 30px; }
 .article-cols { display: grid; grid-template-columns: 184px minmax(0, 1fr) 244px; gap: 48px; align-items: start; }
+.article-cols.no-toc { grid-template-columns: minmax(0, 1fr) 244px; }
 .kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent, #60a5fa); margin-bottom: 18px; }
 .article-title { font-size: 44px; line-height: 1.08; font-weight: 560; letter-spacing: -0.012em; color: #f5f8fc; max-width: 1100px; }
 .article-lead { font-family: var(--font-display); font-style: italic; font-size: 21px; line-height: 1.5; color: #b6c2d2; margin-top: 18px; font-weight: 400; max-width: 860px; }
@@ -949,6 +950,7 @@ function buildToc() {
   const body = document.getElementById('article-body');
   const toc  = document.getElementById('toc');
   const main = document.getElementById('main');
+  const cols = body ? body.closest('.article-cols') : null;
   if (!body || !toc || !main) return;
 
   const seen = {};
@@ -959,7 +961,9 @@ function buildToc() {
     return { id, text: h.textContent, level: h.tagName === 'H3' ? 3 : 2 };
   });
 
-  if (items.length < 2) {
+  const hideToc = items.length < 2;
+  if (cols) cols.classList.toggle('no-toc', hideToc);
+  if (hideToc) {
     toc.style.display = 'none';
   } else {
     toc.style.display = '';

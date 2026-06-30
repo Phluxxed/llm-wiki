@@ -597,6 +597,13 @@ class PageViewTest(unittest.TestCase):
         self.assertIn("Grounded in", html)
         self.assertIn("Referenced by", html)
 
+    def test_page_view_expands_reading_column_when_toc_is_hidden(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [])
+        self.assertIn(".article-cols.no-toc", html)
+        self.assertIn("cols.classList.toggle('no-toc', hideToc)", html)
+        self.assertIn("const hideToc = items.length < 2", html)
+
 
 class SearchViewTest(unittest.TestCase):
     def test_search_view_includes_minisearch_and_handler(self):
