@@ -545,7 +545,7 @@ function daysAgo(dateStr) {
   return Math.floor(days / 365) + ' years ago';
 }
 
-function isArticle(p) { const t = p.type || ''; return t === 'article' || t === 'primary' || t === ''; }
+function isArticle(p) { const t = p.type || ''; return t !== 'entity' && t !== 'concept' && t !== 'position'; }
 function statBox(n, label) { return '<div class="stat"><span class="n">' + n + '</span><span class="l">' + label + '</span></div>'; }
 function provBadge(p) {
   const c = p.source ? 'prov-source' : 'prov-synth';
@@ -567,7 +567,7 @@ function renderHome() {
     '<div class="masthead">' +
       '<h1>Wiki</h1>' +
       '<div class="stats">' +
-        statBox(articles.length, 'Articles') +
+        statBox(articles.length, 'Pages') +
         statBox(positions.length, 'Positions') +
         statBox(entities.length, 'Entities') +
         statBox(nQ, 'Open questions') +
