@@ -71,7 +71,7 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `entities/` | Empty directory for entity and concept pages |
 | `sources/` | Empty directory for immutable raw inputs |
 | `scripts/wiki_graph.py` | Copy from skill bundle (`skills/wikime/scripts/wiki_graph.py`); shared graph substrate used by `query.py` and `render.py` |
-| `scripts/render.py` | Copy from skill bundle (`skills/wikime/scripts/render.py`); generates `wiki.html` — single-file reader artifact with eight views (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities) |
+| `scripts/render.py` | Copy from skill bundle (`skills/wikime/scripts/render.py`); generates `wiki.html` — single-file reader artifact with nine views (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities, Sources) |
 | `scripts/query.py` | Copy from skill bundle (`skills/wikime/scripts/query.py`); frontmatter queries plus agent graph/context commands — `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks`, `--agent-overview`, `--links`, `--backlinks`, `--around`, `--graph-health`, `--context-pack`; add `--json` for machine-readable agent output |
 | `scripts/lint.py` | Copy from skill bundle (`skills/wikime/scripts/lint.py`); structural lint — missing sections, frontmatter, broken refs, open risks, index consistency |
 | `scripts/eval.py` | Copy from skill bundle (`skills/wikime/scripts/eval.py`); LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating. Auto-detects the agent CLI (`claude`/`codex`) as a keyless judge; writes run records to `.eval/` |

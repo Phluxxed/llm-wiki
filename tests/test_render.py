@@ -54,6 +54,23 @@ class CollectPagesTest(unittest.TestCase):
         pages = render.collect_pages(self.wiki_root)
         self.assertEqual(set(pages.keys()), {"papers/keep.md"})
 
+    def test_collects_sources_separately_from_pages(self):
+        import render
+        self.write_page("sources/raw.md", {"title": "Raw"}, "# Raw\n\nEvidence.")
+        self.write_page(
+            "papers/keep.md",
+            {"title": "Keep", "category": "X", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"},
+            "kept",
+        )
+
+        pages = render.collect_pages(self.wiki_root)
+        sources = render.collect_sources(self.wiki_root)
+
+        self.assertEqual(set(pages.keys()), {"papers/keep.md"})
+        self.assertIn("sources/raw.md", sources)
+        self.assertEqual(sources["sources/raw.md"]["title"], "Raw")
+        self.assertIn("Evidence", sources["sources/raw.md"]["rendered_html"])
+
 
 class CollectEdgesTest(unittest.TestCase):
     def setUp(self):
@@ -185,8 +202,8 @@ class RewriteInternalLinksTest(unittest.TestCase):
         self.assertIn('data-page="components/b.md"', html)
 
     def test_unresolved_link_left_untouched(self):
-        """Links that don't resolve to a wiki page (e.g. typo, source file) should
-        keep their original href and have NO data-page attribute injected."""
+        """Links that don't resolve to a wiki page or source file should keep
+        their original href and have no in-wiki routing attribute injected."""
         import render
         base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
         self.write_page("components/a.md", {**base, "title": "A"}, "See [Ghost](./ghost.md)")
@@ -194,6 +211,20 @@ class RewriteInternalLinksTest(unittest.TestCase):
         html = pages["components/a.md"]["rendered_html"]
         self.assertIn('href="./ghost.md"', html)
         self.assertNotIn('data-page', html)
+        self.assertNotIn('data-source', html)
+
+    def test_source_link_gets_data_source(self):
+        import render
+        base = {"category": "x", "status": "Live", "owner": "x", "tags": [], "created": "2026-04-30", "last_reviewed": "2026-04-30"}
+        self.write_page("components/a.md", {**base, "title": "A"}, "See [Spec](../sources/SPEC.md)")
+        self.write_page("sources/SPEC.md", {"title": "Spec"}, "# Spec\n\nRaw evidence.")
+        pages = render.collect_pages(self.wiki_root)
+        sources = render.collect_sources(self.wiki_root)
+
+        html = pages["components/a.md"]["rendered_html"]
+        self.assertIn('data-source="sources/SPEC.md"', html)
+        self.assertNotIn(("components/a.md", "sources/SPEC.md"), render.collect_edges(pages))
+        self.assertIn("sources/SPEC.md", sources)
 
     def test_external_links_left_untouched(self):
         import render
@@ -370,7 +401,8 @@ class PageSummaryTest(unittest.TestCase):
         import json
         import render
         pages = render.collect_pages(self.wiki_root)
-        html = render.render_html(pages, [], [], [], [], [])
+        sources = render.collect_sources(self.wiki_root)
+        html = render.render_html(pages, [], [], [], [], [], sources)
         marker = "window.WIKI_DATA = "
         start = html.find(marker)
         end = html.find("</script>", start)
@@ -387,6 +419,13 @@ class PageSummaryTest(unittest.TestCase):
         )
         data = self._data()
         self.assertEqual(data["pages"]["p.md"]["summary"], "A one-line summary of Foo.")
+
+    def test_sources_are_in_data_block_but_not_pages(self):
+        self.write_page("sources/SPEC.md", {"title": "Spec"}, "# Spec\n\nRaw evidence.")
+        data = self._data()
+        self.assertNotIn("sources/SPEC.md", data["pages"])
+        self.assertIn("sources/SPEC.md", data["sources"])
+        self.assertEqual(data["sources"]["sources/SPEC.md"]["title"], "Spec")
 
     def test_summary_empty_when_no_description(self):
         self.write_page(
@@ -426,14 +465,23 @@ class RenderHtmlShellTest(unittest.TestCase):
     def test_data_block_is_valid_json(self):
         import json
         import render
-        html = render.render_html({}, [], [], [], [], [])
+        html = render.render_html({}, [], [], [], [], [], {})
         marker = "window.WIKI_DATA = "
         start = html.find(marker)
         self.assertGreater(start, -1)
         end = html.find("</script>", start)
         block = html[start + len(marker):end].rstrip("; \n")
         data = json.loads(block)
-        self.assertEqual(set(data.keys()), {"pages", "edges", "log", "risks", "open_qs", "search"})
+        self.assertEqual(set(data.keys()), {"pages", "sources", "edges", "log", "risks", "open_qs", "search"})
+
+
+class SourcesViewTest(unittest.TestCase):
+    def test_sources_view_and_open_source_script_present(self):
+        import render
+        html = render.render_html({}, [], [], [], [], [], {})
+        self.assertIn('id="view-sources"', html)
+        self.assertIn("function renderSources", html)
+        self.assertIn("window.openSource", html)
 
 
 class ProvenanceBadgeTest(unittest.TestCase):
@@ -582,9 +630,10 @@ class EndToEndRenderTest(unittest.TestCase):
         import render
         self.write_page(
             "use-cases/foo.md",
-            {"title": "Foo", "category": "Demo", "status": "Live", "owner": "x", "tags": ["alpha"], "created": "2026-04-30", "last_reviewed": "2026-04-30"},
-            "## What This Is\nFoo body.\n\n## Risk Register\n| Risk | Likelihood | Impact | Mitigation | Status |\n| --- | --- | --- | --- | --- |\n| R1 | Low | Med | M1 | ⚠️ Action required |\n",
+            {"title": "Foo", "category": "Demo", "status": "Live", "owner": "x", "tags": ["alpha"], "created": "2026-04-30", "last_reviewed": "2026-04-30", "source": "sources/raw.md"},
+            "## What This Is\nFoo body.\n\nSee [Raw](./sources/raw.md).\n\n## Risk Register\n| Risk | Likelihood | Impact | Mitigation | Status |\n| --- | --- | --- | --- | --- |\n| R1 | Low | Med | M1 | ⚠️ Action required |\n",
         )
+        self.write_page("sources/raw.md", {"title": "Raw"}, "# Raw\n\nEvidence.")
         (self.wiki_root / "log.md").write_text("## [2026-04-30] init | Created wiki\n", encoding="utf-8")
         out = self.wiki_root / "wiki.html"
         render.run(self.wiki_root, out)
@@ -593,6 +642,8 @@ class EndToEndRenderTest(unittest.TestCase):
         self.assertIn('"alpha"', html)
         self.assertIn("Created wiki", html)
         self.assertIn('"⚠️"', html)
+        self.assertIn('"sources"', html)
+        self.assertIn('data-source=\\"sources/raw.md\\"', html)
 
 
 class PageTypeTest(unittest.TestCase):

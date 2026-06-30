@@ -24,7 +24,7 @@ your-wiki/
 ├── sources/               ← immutable raw inputs (never edited after saving)
 └── scripts/
     ├── wiki_graph.py     ← shared graph substrate for traversal, health, and context packs
-    ├── render.py          ← generates wiki.html — single-file reader with eight views
+    ├── render.py          ← generates wiki.html — single-file reader with nine views
     ├── lint.py            ← structural health check
     ├── query.py           ← frontmatter queries + agent graph/context commands
     └── eval.py            ← LLM-as-judge quality eval (grounding, contradictions, redundancy) with regression gating
@@ -90,7 +90,7 @@ The skill asks two questions — what the wiki is for, and what the primary page
 | --- | --- | --- |
 | `scripts/lint.py` | `.venv/bin/python3 scripts/lint.py` | Structural health check — template-required sections, broken refs, open risks, index consistency |
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --help` | Frontmatter queries plus agent graph commands: `--agent-overview`, `--links`, `--backlinks`, `--around`, `--graph-health`, `--context-pack`; add `--json` for machine-readable output |
-| `scripts/render.py` | `.venv/bin/python3 scripts/render.py` | Generates `wiki.html` — single-file reader (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities). Open in a browser or view as a Claude artifact |
+| `scripts/render.py` | `.venv/bin/python3 scripts/render.py` | Generates `wiki.html` — single-file reader (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities, Sources). Open in a browser or view as a Claude artifact |
 | `scripts/eval.py` | `.venv/bin/python3 scripts/eval.py --gate` | LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating (exit code). Auto-detects your agent CLI (`claude`/`codex`) as a keyless judge; run records in `.eval/` |
 
 For agents landing cold in a wiki, start with:

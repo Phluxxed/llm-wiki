@@ -3,8 +3,8 @@
 render.py — generate wiki.html: a single self-contained reader for the wiki.
 
 Replaces scripts/graph.py. Same call pattern (the agent runs this after every
-wiki change), but produces a richer artifact with eight views: Home, Page,
-Search, Graph, Risks, Recent changes, Open questions, Entities.
+wiki change), but produces a richer artifact with nine views: Home, Page,
+Search, Graph, Risks, Recent changes, Open questions, Entities, Sources.
 
 Usage:
     .venv/bin/python3 scripts/render.py            # writes wiki.html to wiki root
@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import html as html_lib
 import json
 import re
 import sys
@@ -220,31 +221,94 @@ def collect_edges(pages: dict) -> list[tuple[str, str]]:
 
 
 _INTERNAL_LINK_RE = re.compile(r'<a\s+href="([^"]+\.md)"')
+TEXT_SOURCE_EXTENSIONS = {
+    ".md", ".markdown", ".txt", ".text", ".csv", ".json", ".jsonl",
+    ".yaml", ".yml", ".toml", ".xml", ".html", ".htm", ".css",
+    ".js", ".ts", ".tsx", ".py", ".sh", ".sql",
+}
 
 
-def rewrite_internal_links(html: str, src_file: str, pages: dict) -> str:
-    """Add data-page attributes to <a> links pointing at wiki pages.
+def rewrite_internal_links(html: str, src_file: str, pages: dict, sources: dict | None = None) -> str:
+    """Add in-wiki routing attributes to markdown links.
 
     Markdown like [X](./sibling.md) renders as <a href="./sibling.md">X</a>
     with no SPA hook, so the browser tries to navigate to the file URL.
-    This injects data-page="<resolved-key>" so the existing renderPage
-    click handler intercepts the click and opens the page in-app.
+    This injects data-page="<resolved-key>" for wiki pages, and
+    data-source="<resolved-key>" for read-only source files.
 
-    Links that don't resolve to a wiki page (external URLs, source files,
-    anchors) are left untouched and behave as standard browser links.
+    Links that don't resolve to a wiki page or source file (external URLs,
+    anchors, typos) are left untouched and behave as standard browser links.
     """
+    sources = sources or {}
+
     def repl(m: re.Match) -> str:
         href = m.group(1)
         resolved = resolve_link(href, src_file, pages)
-        if resolved is None:
-            return m.group(0)
-        return f'<a href="{href}" data-page="{resolved}"'
+        if resolved is not None:
+            return f'<a href="{href}" data-page="{resolved}"'
+        source = resolve_link(href, src_file, sources)
+        if source is not None:
+            return f'<a href="{href}" data-source="{source}"'
+        return m.group(0)
 
     return _INTERNAL_LINK_RE.sub(repl, html)
 
 
-def collect_pages(wiki_root: Path = WIKI_ROOT) -> dict:
+def source_title(path: Path, fm: dict, body: str = "") -> str:
+    if fm.get("title"):
+        return str(fm["title"])
+    heading = re.search(r"^#\s+(.+?)\s*$", body, re.MULTILINE)
+    if heading:
+        return heading.group(1)
+    return path.stem.replace("-", " ").replace("_", " ").title()
+
+
+def source_rendered_html(path: Path, body: str) -> str:
+    if path.suffix.lower() in {".md", ".markdown"}:
+        return render_markdown(body)
+    escaped = html_lib.escape(body)
+    return f"<pre><code>{escaped}</code></pre>"
+
+
+def collect_sources(wiki_root: Path = WIKI_ROOT, pages: dict | None = None) -> dict:
+    sources_root = wiki_root / "sources"
+    sources = {}
+    if not sources_root.exists():
+        return sources
+
+    for path in sorted(sources_root.rglob("*")):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        rel = path.relative_to(wiki_root)
+        key = str(rel).replace("\\", "/")
+        if path.suffix.lower() not in TEXT_SOURCE_EXTENSIONS:
+            sources[key] = {
+                "path": key,
+                "title": source_title(path, {}),
+                "kind": path.suffix.lower().lstrip(".") or "file",
+                "rendered_html": render_markdown(f"This source file is stored at `{key}` and is not text-renderable in `wiki.html`."),
+                "text": "",
+            }
+            continue
+        text = path.read_text(encoding="utf-8")
+        fm, body = split_frontmatter_and_body(text)
+        sources[key] = {
+            "path": key,
+            "title": source_title(path, fm, body),
+            "kind": path.suffix.lower().lstrip(".") or "text",
+            "rendered_html": source_rendered_html(path, body),
+            "text": body,
+        }
+
+    if pages is not None:
+        for key, source in sources.items():
+            source["rendered_html"] = rewrite_internal_links(source["rendered_html"], key, pages, sources)
+    return sources
+
+
+def collect_pages(wiki_root: Path = WIKI_ROOT, sources: dict | None = None) -> dict:
     pages = {}
+    sources = sources if sources is not None else collect_sources(wiki_root)
     for path in sorted(wiki_root.rglob("*.md")):
         rel = path.relative_to(wiki_root)
         if rel.parts[0] in EXCLUDE_DIRS:
@@ -269,7 +333,7 @@ def collect_pages(wiki_root: Path = WIKI_ROOT) -> dict:
     # SPA click handler picks them up. Runs after the dict is fully populated
     # so cross-page links resolve regardless of write order.
     for key, page in pages.items():
-        page["rendered_html"] = rewrite_internal_links(page["rendered_html"], key, pages)
+        page["rendered_html"] = rewrite_internal_links(page["rendered_html"], key, pages, sources)
     return pages
 
 
@@ -314,7 +378,7 @@ a { color: #93c5fd; text-decoration: none; } a:hover { text-decoration: underlin
 h2 { font-size: 18px; color: #cbd5e1; margin-bottom: 16px; font-weight: 600; }
 .muted { color: #94a3b8; font-size: 12px; }
 .card { background: #11151f; border: 1px solid #1f2937; border-radius: 7px; padding: 14px 16px; margin-bottom: 10px; transition: border-color 0.12s, background 0.12s; }
-.card[data-page]:hover, .card[style*="cursor"]:hover { border-color: #2d3a4f; background: #131825; }
+.card[data-page]:hover, .card[data-source]:hover, .card[style*="cursor"]:hover { border-color: #2d3a4f; background: #131825; }
 /* Unified view header */
 .view-header { margin-bottom: 22px; }
 .view-title { font-size: 27px; font-weight: 560; color: #f5f8fc; letter-spacing: -0.005em; }
@@ -485,6 +549,7 @@ HTML_NAV_BUTTONS = [
     ("recent", "Recent changes"),
     ("open-qs", "Open questions"),
     ("entities", "Entities"),
+    ("sources", "Sources"),
 ]
 
 
@@ -507,6 +572,10 @@ def _nav_html() -> str:
 HTML_SCRIPT_UTIL = """
 function escHtml(s) {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function sourceLabel(path) {
+  const src = (WIKI_DATA.sources || {})[path];
+  return src ? src.title : path;
 }
 // Lightweight inline-markdown renderer for snippet fields (risk text, open
 // questions, log details) that arrive as raw markdown. Block markdown is not
@@ -749,8 +818,11 @@ function renderPage(path) {
     : '';
   const pageQs = (WIKI_DATA.open_qs || []).filter(q => q.page === path);
   const qsHtml = pageQs.length ? '<ul class="rail-list rail-qs">' + pageQs.map(q => '<li>' + inlineMd(q.question) + '</li>').join('') + '</ul>' : '';
+  const sourceHtml = page.source
+    ? '<div class="rail-source"><a href="#" data-source="' + page.source + '">' + escHtml(sourceLabel(page.source)) + '</a></div>'
+    : '';
   const evidence =
-    railBlock('Source', page.source ? '<div class="rail-source">' + escHtml(page.source) + '</div>' : '') +
+    railBlock('Source', sourceHtml) +
     railBlock('Open questions', qsHtml, pageQs.length) +
     railBlock('Grounded in', railLinks(out), out.length) +
     railBlock('Referenced by', railLinks(inc), inc.length);
@@ -773,6 +845,9 @@ function renderPage(path) {
 
   root.querySelectorAll('a[data-page]').forEach(a => {
     a.addEventListener('click', e => { e.preventDefault(); window.openPage(a.dataset.page); });
+  });
+  root.querySelectorAll('a[data-source]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); window.openSource(a.dataset.source); });
   });
   buildToc();
 }
@@ -831,6 +906,44 @@ window.openPage = function(path) {
   renderPage(path);
   showView('page');
   if (window.setSidebarActivePage) window.setSidebarActivePage(path);
+};
+
+function renderSource(path) {
+  const source = (WIKI_DATA.sources || {})[path];
+  const root = document.getElementById('view-page');
+  if (!source) { root.innerHTML = '<p class="muted">Source not found.</p>'; return; }
+  const words = (source.rendered_html || '').replace(/<[^>]+>/g, ' ').split(/\\s+/).filter(Boolean).length;
+  const readMin = Math.max(1, Math.round(words / 200));
+  root.innerHTML =
+    '<div class="article-shell" style="--accent:#93c5fd">' +
+      '<header class="article-header">' +
+        '<div class="kicker"><span class="tdot" style="background:#93c5fd"></span>Source</div>' +
+        '<h1 class="article-title">' + escHtml(source.title) + '</h1>' +
+        '<div class="article-meta">' +
+          '<span>' + escHtml(path) + '</span><span class="meta-sep">·</span><span>' + readMin + ' min read</span>' +
+        '</div>' +
+      '</header>' +
+      '<div class="article-cols">' +
+        '<nav class="toc article-contents" id="toc" aria-label="On this source"></nav>' +
+        '<div class="markdown-body article-reading" id="article-body">' + (source.rendered_html || '') + '</div>' +
+        '<aside class="article-evidence">' +
+          '<div class="rail-block"><div class="rail-block-title">Source path</div><div class="rail-source">' + escHtml(path) + '</div></div>' +
+        '</aside>' +
+      '</div>' +
+    '</div>';
+  root.querySelectorAll('a[data-page]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); window.openPage(a.dataset.page); });
+  });
+  root.querySelectorAll('a[data-source]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); window.openSource(a.dataset.source); });
+  });
+  buildToc();
+}
+
+window.openSource = function(path) {
+  renderSource(path);
+  showView('page');
+  if (window.clearSidebarActivePage) window.clearSidebarActivePage();
 };
 """
 
@@ -1354,6 +1467,26 @@ function renderPositions() {
 """
 
 
+HTML_SCRIPT_SOURCES = """
+function renderSources() {
+  const root = document.getElementById('view-sources');
+  const sources = Object.values(WIKI_DATA.sources || {}).sort((a, b) => a.title.localeCompare(b.title));
+  const rows = sources.map(s =>
+    '<div class="card" style="cursor:pointer" data-source="' + s.path + '">' +
+      '<div class="tcard-title"><span class="tdot" style="background:#93c5fd"></span><span>' + escHtml(s.title) + '</span></div>' +
+      '<div class="muted" style="margin-top:6px">' + escHtml(s.path) + '</div>' +
+    '</div>'
+  ).join('');
+  root.innerHTML =
+    viewHeader('Sources', 'Raw and bounded evidence files, rendered read-only and excluded from the page graph.', sources.length) +
+    (sources.length === 0 ? '<p class="muted">No sources yet.</p>' : rows);
+  root.querySelectorAll('[data-source]').forEach(el => {
+    el.addEventListener('click', () => window.openSource(el.dataset.source));
+  });
+}
+"""
+
+
 HTML_SCRIPT_VIEW_SWITCH = """
 const buttons = document.querySelectorAll('#sidebar > nav > button');
 const views = document.querySelectorAll('.view');
@@ -1368,6 +1501,7 @@ function showView(name) {
   if (name === 'recent' && window.renderRecent) window.renderRecent();
   if (name === 'open-qs' && window.renderOpenQs) window.renderOpenQs();
   if (name === 'entities' && window.renderEntities) window.renderEntities();
+  if (name === 'sources' && window.renderSources) window.renderSources();
 }
 buttons.forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
 showView('home');
@@ -1381,7 +1515,9 @@ def render_html(
     risks: list,
     open_qs: list,
     search_docs: list,
+    sources: dict | None = None,
 ) -> str:
+    sources = sources or {}
     data = {
         "pages": {
             path: {
@@ -1400,6 +1536,15 @@ def render_html(
             }
             for path, p in pages.items()
         },
+        "sources": {
+            path: {
+                "path": path,
+                "title": s["title"],
+                "kind": s.get("kind") or "",
+                "rendered_html": s["rendered_html"],
+            }
+            for path, s in sources.items()
+        },
         "edges": list(edges),
         "log": list(log),
         "risks": list(risks),
@@ -1408,7 +1553,7 @@ def render_html(
     }
     data_json = json.dumps(data, ensure_ascii=False)
 
-    view_ids = ["home", "positions", "page", "search", "graph", "risks", "recent", "open-qs", "entities"]
+    view_ids = ["home", "positions", "page", "search", "graph", "risks", "recent", "open-qs", "entities", "sources"]
     view_divs = "\n".join(f'    <section class="view" id="view-{vid}"></section>' for vid in view_ids)
 
     return f"""<!DOCTYPE html>
@@ -1444,6 +1589,7 @@ window.WIKI_DATA = {data_json};
 {HTML_SCRIPT_RECENT}
 {HTML_SCRIPT_OPEN_QS}
 {HTML_SCRIPT_ENTITIES}
+{HTML_SCRIPT_SOURCES}
 {HTML_SCRIPT_POSITIONS}
 {HTML_SCRIPT_SIDEBAR_PAGES}
 {HTML_SCRIPT_VIEW_SWITCH}
@@ -1456,13 +1602,15 @@ renderHome();
 
 
 def run(wiki_root: Path, output_path: Path) -> None:
-    pages = collect_pages(wiki_root)
+    sources = collect_sources(wiki_root)
+    pages = collect_pages(wiki_root, sources)
+    sources = collect_sources(wiki_root, pages)
     edges = collect_edges(pages)
     log = collect_log(wiki_root)
     risks = extract_risks(pages)
     open_qs = extract_open_qs(pages)
     search_docs = build_search_index(pages)
-    html = render_html(pages, edges, log, risks, open_qs, search_docs)
+    html = render_html(pages, edges, log, risks, open_qs, search_docs, sources)
     output_path.write_text(html, encoding="utf-8")
 
 
