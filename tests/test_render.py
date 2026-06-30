@@ -483,6 +483,61 @@ class SourcesViewTest(unittest.TestCase):
         self.assertIn("function renderSources", html)
         self.assertIn("window.openSource", html)
 
+    def test_home_and_sidebar_expose_sources_without_pages(self):
+        import json
+        import render
+        sources = {
+            "sources/raw.md": {
+                "path": "sources/raw.md",
+                "title": "Raw Source",
+                "kind": "md",
+                "rendered_html": "<p>Raw evidence.</p>",
+                "text": "Raw evidence.",
+                "meta": [],
+            }
+        }
+        html = render.render_html({}, [], [], [], [], [], sources)
+        self.assertIn("Source Evidence", html)
+        self.assertIn("buildSidebarSources", html)
+        self.assertIn("sb-source", html)
+        self.assertIn("data-source", html)
+        marker = "window.WIKI_DATA = "
+        start = html.find(marker)
+        end = html.find("</script>", start)
+        data = json.loads(html[start + len(marker):end].rstrip("; \n"))
+        self.assertEqual(data["sources"]["sources/raw.md"]["meta"], [])
+
+    def test_source_rendering_moves_leading_metadata_out_of_body(self):
+        import render
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki_root = Path(tmp)
+            source_path = wiki_root / "sources" / "raw.md"
+            source_path.parent.mkdir()
+            source_path.write_text(
+                "> **Source type:** External note.\n"
+                "> **URL:** https://example.test/source\n"
+                "> **Fetched:** 2026-06-30\n"
+                "\n"
+                "# Raw Source\n\n"
+                "Useful evidence.\n",
+                encoding="utf-8",
+            )
+            sources = render.collect_sources(wiki_root)
+
+        source = sources["sources/raw.md"]
+        self.assertEqual(source["title"], "Raw Source")
+        self.assertEqual(
+            source["meta"],
+            [
+                {"label": "Source type", "value": "External note."},
+                {"label": "URL", "value": "https://example.test/source"},
+                {"label": "Fetched", "value": "2026-06-30"},
+            ],
+        )
+        self.assertNotIn("Source type", source["rendered_html"])
+        self.assertNotIn("<h1", source["rendered_html"])
+        self.assertIn("Useful evidence.", source["rendered_html"])
+
 
 class ProvenanceBadgeTest(unittest.TestCase):
     def test_provenance_badge_styles_and_labels_present(self):

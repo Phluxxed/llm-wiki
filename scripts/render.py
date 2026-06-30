@@ -270,6 +270,44 @@ def source_rendered_html(path: Path, body: str) -> str:
     return f"<pre><code>{escaped}</code></pre>"
 
 
+SOURCE_META_RE = re.compile(r"^>\s*\*\*(.+?):\*\*\s*(.*?)\s*$")
+SOURCE_TITLE_RE = re.compile(r"^#\s+(.+?)\s*$")
+
+
+def split_source_leading_meta(body: str) -> tuple[list[dict], str]:
+    """Move a leading source-metadata quote block out of the reading body."""
+    lines = body.splitlines()
+    if not lines or not lines[0].startswith(">"):
+        return [], body
+
+    meta = []
+    idx = 0
+    while idx < len(lines) and lines[idx].startswith(">"):
+        match = SOURCE_META_RE.match(lines[idx])
+        if match:
+            meta.append({"label": match.group(1).strip(), "value": match.group(2).strip()})
+        idx += 1
+    while idx < len(lines) and not lines[idx].strip():
+        idx += 1
+    return meta, "\n".join(lines[idx:]).lstrip("\n")
+
+
+def strip_source_title_heading(body: str, title: str) -> str:
+    lines = body.splitlines()
+    idx = 0
+    while idx < len(lines) and not lines[idx].strip():
+        idx += 1
+    if idx >= len(lines):
+        return body
+    match = SOURCE_TITLE_RE.match(lines[idx])
+    if not match or match.group(1).strip() != title:
+        return body
+    idx += 1
+    while idx < len(lines) and not lines[idx].strip():
+        idx += 1
+    return "\n".join(lines[idx:]).lstrip("\n")
+
+
 def collect_sources(wiki_root: Path = WIKI_ROOT, pages: dict | None = None) -> dict:
     sources_root = wiki_root / "sources"
     sources = {}
@@ -288,16 +326,21 @@ def collect_sources(wiki_root: Path = WIKI_ROOT, pages: dict | None = None) -> d
                 "kind": path.suffix.lower().lstrip(".") or "file",
                 "rendered_html": render_markdown(f"This source file is stored at `{key}` and is not text-renderable in `wiki.html`."),
                 "text": "",
+                "meta": [],
             }
             continue
         text = path.read_text(encoding="utf-8")
         fm, body = split_frontmatter_and_body(text)
+        title = source_title(path, fm, body)
+        source_meta, body = split_source_leading_meta(body)
+        body = strip_source_title_heading(body, title)
         sources[key] = {
             "path": key,
-            "title": source_title(path, fm, body),
+            "title": title,
             "kind": path.suffix.lower().lstrip(".") or "text",
             "rendered_html": source_rendered_html(path, body),
             "text": body,
+            "meta": source_meta,
         }
 
     if pages is not None:
@@ -504,6 +547,9 @@ input[type="text"]:focus { border-color: #60a5fa; }
 .rail-list a { font-size: 12px; }
 .rail-qs li { font-size: 12px; color: #93a0b2; line-height: 1.45; }
 .rail-source { font-size: 11px; color: #66748a; word-break: break-word; font-family: var(--font-mono); }
+.rail-source-meta { display: grid; gap: 9px; }
+.rail-source-meta dt { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #475569; margin-bottom: 2px; }
+.rail-source-meta dd { font-size: 12px; color: #93a0b2; line-height: 1.45; word-break: break-word; }
 
 /* ── Graph view ───────────────────────────────────────────────────────── */
 #view-graph.active { display: block; position: relative; height: calc(100vh - 48px); padding: 0; margin: -24px -32px; }
@@ -647,6 +693,7 @@ function agoSpan(p) { const a = daysAgo(p.last_reviewed); return a ? '<span>upda
 function renderHome() {
   const root = document.getElementById('view-home');
   const pages = Object.values(WIKI_DATA.pages);
+  const sources = Object.values(WIKI_DATA.sources || {}).sort((a, b) => a.title.localeCompare(b.title));
   const positions = pages.filter(p => p.type === 'position');
   const articles  = pages.filter(isArticle);
   const entities  = pages.filter(p => p.type === 'entity' || p.type === 'concept');
@@ -661,6 +708,7 @@ function renderHome() {
         statBox(articles.length, 'Pages') +
         statBox(positions.length, 'Positions') +
         statBox(entities.length, 'Entities') +
+        statBox(sources.length, 'Sources') +
         statBox(nQ, 'Open questions') +
         statBox(nR, 'Open risks') +
       '</div>' +
@@ -701,9 +749,27 @@ function renderHome() {
     html.push('</div>');
   });
 
+  if (sources.length) {
+    html.push('<div class="home-section-title">Source Evidence</div>');
+    html.push('<div class="card-grid">');
+    sources.forEach(s => {
+      html.push(
+        '<div class="tcard" data-source="' + s.path + '">' +
+          '<div class="tcard-title"><span class="tdot" style="background:#93c5fd"></span><span>' + escHtml(s.title) + '</span></div>' +
+          '<div class="tcard-summary">' + escHtml(s.path) + '</div>' +
+          '<div class="tcard-meta"><span class="badge prov-source">source</span><span>' + escHtml(s.kind || 'file') + '</span></div>' +
+        '</div>'
+      );
+    });
+    html.push('</div>');
+  }
+
   root.innerHTML = html.join('');
   root.querySelectorAll('[data-page]').forEach(el => {
     el.addEventListener('click', () => window.openPage(el.dataset.page));
+  });
+  root.querySelectorAll('[data-source]').forEach(el => {
+    el.addEventListener('click', () => window.openSource(el.dataset.source));
   });
 }
 """
@@ -716,6 +782,7 @@ function buildSidebarPages() {
   const pages = Object.values(WIKI_DATA.pages);
   if (pages.length === 0) {
     root.innerHTML = '<div class="muted" style="font-size:11px;padding:6px 8px">No pages yet.</div>';
+    buildSidebarSources(root);
     return;
   }
   const groups = {};
@@ -750,6 +817,22 @@ function buildSidebarPages() {
   root.querySelectorAll('.sb-page').forEach(b => {
     b.addEventListener('click', () => window.openPage(b.dataset.page));
   });
+  buildSidebarSources(root);
+}
+
+function buildSidebarSources(root) {
+  root = root || document.getElementById('sidebar-pages');
+  if (!root) return;
+  const sources = Object.values(WIKI_DATA.sources || {}).sort((a, b) => a.title.localeCompare(b.title));
+  if (sources.length === 0) return;
+  const html = '<div class="sb-section-title" style="margin-top:14px">Sources</div>' +
+    sources.map(s =>
+      '<button class="sb-page sb-source" data-source="' + s.path + '" title="' + escHtml(s.path) + '">' + escHtml(s.title) + '</button>'
+    ).join('');
+  root.insertAdjacentHTML('beforeend', html);
+  root.querySelectorAll('.sb-source').forEach(b => {
+    b.addEventListener('click', () => window.openSource(b.dataset.source));
+  });
 }
 
 function setSidebarActivePage(path) {
@@ -767,6 +850,16 @@ function setSidebarActivePage(path) {
       }
       b.scrollIntoView({ block: 'nearest' });
     }
+  });
+}
+
+function setSidebarActiveSource(path) {
+  const root = document.getElementById('sidebar-pages');
+  if (!root) return;
+  root.querySelectorAll('.sb-page').forEach(b => {
+    const isActive = b.dataset.source === path;
+    b.classList.toggle('active', isActive);
+    if (isActive) b.scrollIntoView({ block: 'nearest' });
   });
 }
 
@@ -914,6 +1007,13 @@ function renderSource(path) {
   if (!source) { root.innerHTML = '<p class="muted">Source not found.</p>'; return; }
   const words = (source.rendered_html || '').replace(/<[^>]+>/g, ' ').split(/\\s+/).filter(Boolean).length;
   const readMin = Math.max(1, Math.round(words / 200));
+  const metaRows = (source.meta || [])
+    .filter(m => m.value)
+    .map(m => '<div><dt>' + escHtml(m.label) + '</dt><dd>' + escHtml(m.value) + '</dd></div>')
+    .join('');
+  const sourceDetails = metaRows
+    ? '<div class="rail-block"><div class="rail-block-title">Source details</div><dl class="rail-source-meta">' + metaRows + '</dl></div>'
+    : '';
   root.innerHTML =
     '<div class="article-shell" style="--accent:#93c5fd">' +
       '<header class="article-header">' +
@@ -927,6 +1027,7 @@ function renderSource(path) {
         '<nav class="toc article-contents" id="toc" aria-label="On this source"></nav>' +
         '<div class="markdown-body article-reading" id="article-body">' + (source.rendered_html || '') + '</div>' +
         '<aside class="article-evidence">' +
+          sourceDetails +
           '<div class="rail-block"><div class="rail-block-title">Source path</div><div class="rail-source">' + escHtml(path) + '</div></div>' +
         '</aside>' +
       '</div>' +
@@ -943,7 +1044,7 @@ function renderSource(path) {
 window.openSource = function(path) {
   renderSource(path);
   showView('page');
-  if (window.clearSidebarActivePage) window.clearSidebarActivePage();
+  if (window.setSidebarActiveSource) window.setSidebarActiveSource(path);
 };
 """
 
@@ -1542,6 +1643,7 @@ def render_html(
                 "title": s["title"],
                 "kind": s.get("kind") or "",
                 "rendered_html": s["rendered_html"],
+                "meta": list(s.get("meta") or []),
             }
             for path, s in sources.items()
         },
