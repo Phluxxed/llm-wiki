@@ -6,9 +6,11 @@ Hardens the checks lint.py defers to prose ("contradiction scan and source drift
 require LLM"). Metrics are scored 0..1 with rationales; a gating layer applies
 thresholds and averages runs so quality regressions can be caught.
 
-The judge is the host agent CLI, auto-detected on PATH (claude, codex), driven
-via subprocess and inheriting the user's existing login — no new API key. Falls
-back to deterministic-only + an emitted brief when no agent CLI is present.
+The judge is the host agent CLI, auto-detected on PATH (claude, codex) by
+default, driven via subprocess and inheriting the user's existing login — no new
+API key. A generated wiki can set OWNER_JUDGE to owner-lock evals to a specific
+agent CLI. Falls back to deterministic-only + an emitted brief when no allowed
+agent CLI is present.
 
 Layers:
   deterministic  — structural validity, near-duplicate candidates (no judge)
@@ -23,6 +25,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import json
+import os
 import re
 import shlex
 import shutil
@@ -92,13 +95,27 @@ def parse_json_obj(text: str) -> dict:
 # Both inherit the user's existing login — no new API key.
 
 JUDGE_TIMEOUT = 180  # seconds per judge call
+OWNER_JUDGE = None   # None = auto-detect; set to "claude" or "codex" to owner-lock.
+OWNER_LABEL = "wiki"
+CODEX_JUDGE_REASONING_ENV = "CODEX_JUDGE_REASONING_EFFORT"
 _JUDGE_SYSTEM_PROMPT = ("You are a strict evaluation judge. Respond with ONLY the "
                         "requested JSON object and nothing else — no prose, no fences.")
 
 
+def _trim_process_output(text: str, limit: int = 1200) -> str:
+    text = str(text or "").strip()
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "…"
+
+
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+    proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
                           text=True, timeout=JUDGE_TIMEOUT)
+    if proc.returncode != 0:
+        detail = (_trim_process_output(proc.stderr)
+                  or _trim_process_output(proc.stdout)
+                  or "no stderr/stdout")
+        raise RuntimeError(f"judge command failed with exit {proc.returncode}: {detail}")
+    return proc
 
 
 def claude_judge(prompt: str) -> str:
@@ -129,8 +146,11 @@ def codex_judge(prompt: str) -> str:
     """codex exec writes its final message to --output-last-message; read it back."""
     with tempfile.NamedTemporaryFile("r", suffix=".txt", delete=False) as f:
         out_path = f.name
-    cmd = ["codex", "exec", "--skip-git-repo-check", "-s", "read-only",
-           "--output-last-message", out_path, prompt]
+    cmd = ["codex", "exec", "--ephemeral", "--skip-git-repo-check", "-s", "read-only"]
+    reasoning_effort = os.environ.get(CODEX_JUDGE_REASONING_ENV)
+    if reasoning_effort:
+        cmd += ["-c", f"model_reasoning_effort={json.dumps(reasoning_effort)}"]
+    cmd += ["--output-last-message", out_path, prompt]
     _run(cmd)
     try:
         return Path(out_path).read_text(encoding="utf-8", errors="replace")
@@ -162,9 +182,29 @@ def detect_judge(spec: str | None) -> tuple[Judge | None, str]:
       "none"      → deterministic-only (no judge)
       "claude"/"codex" → that adapter
       anything else    → a custom command (escape hatch)
+
+    When OWNER_JUDGE is set to "claude" or "codex", auto-detect is restricted to
+    that adapter; explicitly selecting a different adapter or custom command is
+    rejected. "none" remains available for deterministic-only fallback.
     Returns (judge_or_None, label).
     """
     if spec == "none":
+        return None, "none"
+    owner = str(OWNER_JUDGE or "").strip().lower() or None
+    if owner and owner not in _KNOWN_ADAPTERS:
+        raise ValueError(f"{OWNER_LABEL} evals have invalid OWNER_JUDGE={OWNER_JUDGE!r}.")
+    if owner:
+        if spec in _KNOWN_ADAPTERS:
+            if spec != owner:
+                raise ValueError(f"{OWNER_LABEL} evals must use {owner}; got {spec}.")
+            return _KNOWN_ADAPTERS[spec], spec
+        if spec:
+            raise ValueError(
+                f"Custom judge commands are disabled for owner-locked evals; "
+                f"use --judge {owner} or --judge none."
+            )
+        if shutil.which(owner):
+            return _KNOWN_ADAPTERS[owner], owner
         return None, "none"
     if spec in _KNOWN_ADAPTERS:
         return _KNOWN_ADAPTERS[spec], spec
@@ -283,6 +323,10 @@ def _judge_json(judge: Judge, prompt: str, retries: int = 2, label: str = "",
     caller fails the gate (fail-closed). Never silently degrades to a pass."""
     reason = "no response"
     for attempt in range(retries + 1):
+        if label:
+            sys.stderr.write(f"[eval] judge start: {label} "
+                             f"(attempt {attempt + 1}/{retries + 1})\n")
+            sys.stderr.flush()
         try:
             res = parse_json_obj(judge(prompt))
         except Exception as e:  # SDK/CLI failure (auth, network, not-installed, …)
@@ -290,6 +334,9 @@ def _judge_json(judge: Judge, prompt: str, retries: int = 2, label: str = "",
             res = {}
         else:
             if res and require in res:
+                if label:
+                    sys.stderr.write(f"[eval] judge ok: {label}\n")
+                    sys.stderr.flush()
                 return res
             reason = "unparseable or missing required key" if not res or require not in res else reason
         if attempt < retries and _JUDGE_RETRY_BACKOFF:
@@ -638,7 +685,7 @@ def main():
     parser.add_argument("command", nargs="?", choices=["collect", "score"],
                         help="collect: deterministic + emit brief; score <dir>: gate captured verdicts")
     parser.add_argument("path", nargs="?", help="run dir for `score`")
-    parser.add_argument("--judge", help="claude | codex | none | <custom command> (default: auto-detect)")
+    parser.add_argument("--judge", help="claude | codex | none | <custom command> (default: auto-detect; OWNER_JUDGE can restrict)")
     parser.add_argument("--runs", type=int, default=1, help="judge runs to average (default 1)")
     parser.add_argument("--gate", action="store_true", help="exit non-zero on regression")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
@@ -657,7 +704,10 @@ def main():
         _report_or_json(agg, "external", args.json)
         sys.exit(gate_exit_code(agg) if args.gate else 0)
 
-    judge, label = detect_judge(args.judge)
+    try:
+        judge, label = detect_judge(args.judge)
+    except ValueError as e:
+        sys.exit(f"[eval] {e}")
     if judge is None:
         brief = emit_brief(wiki_root)
         agg = aggregate([run_once(wiki_root, None)], thresholds)
