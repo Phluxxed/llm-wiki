@@ -74,7 +74,7 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `scripts/render.py` | Copy from skill bundle (`skills/wikime/scripts/render.py`); generates `wiki.html` — single-file reader artifact with nine views (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities, Sources) |
 | `scripts/query.py` | Copy from skill bundle (`skills/wikime/scripts/query.py`); frontmatter queries plus agent graph/context commands — `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks`, `--agent-overview`, `--links`, `--backlinks`, `--around`, `--graph-health`, `--context-pack`; add `--json` for machine-readable agent output |
 | `scripts/lint.py` | Copy from skill bundle (`skills/wikime/scripts/lint.py`); structural lint — missing sections, frontmatter, broken refs, open risks, index consistency |
-| `scripts/eval.py` | Copy from skill bundle (`skills/wikime/scripts/eval.py`); LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating. Auto-detects the agent CLI (`claude`/`codex`) as a keyless judge; writes run records to `.eval/` |
+| `scripts/eval.py` | Copy from skill bundle (`skills/wikime/scripts/eval.py`); risk-triggered LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating. Auto-detects the agent CLI (`claude`/`codex`) as a keyless judge; writes run records to `.eval/` |
 
 The scripts require `pyyaml` and `markdown`; `eval.py`'s claude judge also needs `claude-agent-sdk`. Install via `uv` into a project-local venv — see Step 5.
 
@@ -85,7 +85,7 @@ This file is the agent's operating manual. Include all of these:
 1. **Directory structure** — annotated tree showing all primary directories (one per primary type, e.g. `policies/`, `controls/`, `articles/` — or just one like `papers/` for a single-type wiki), plus `entities/`, `sources/`, `_templates/`, `scripts/` and the root control files
 2. **This Wiki's Page Types** — list each primary type, its slug/directory, one-line description, and required h2 sections from that type's template; note that the choice of types is a per-wiki decision, not universal
 3. **Absolute Rules** — never edit `sources/`; always update `index.md`; always append to `log.md`; every derived page needs `source` in frontmatter; primary pages go in their respective primary directory (the slug matches the type); entity/concept pages go in `entities/`
-4. **Operations** — Ingest (ask user: quick or deep before extracting; then follow the completeness protocol below), Query (read index.md first; file substantive answers back as new pages), Update, Lint (structural checks — missing sections, frontmatter, broken refs, OKF conformance, index consistency), Eval (LLM-as-judge quality gate via `scripts/eval.py`: grounding against sources, cross-page contradictions, redundancy, near-duplicate disambiguation — with thresholds + regression gating). Lint is fast and deterministic; Eval is the LLM-judged quality layer that supersedes the old prose "contradiction scan / source drift" notes.
+4. **Operations** — Ingest (ask user: quick or deep before extracting; then follow the completeness protocol below), Query (read index.md first; file substantive answers back as new pages), Update, Lint (structural checks — missing sections, frontmatter, broken refs, OKF conformance, index consistency), Eval (risk-triggered LLM-as-judge quality audit via `scripts/eval.py`: grounding against sources, cross-page contradictions, redundancy, near-duplicate disambiguation — with thresholds + regression gating). Lint/render are routine after wiki writes; Eval is reserved for high-risk changes, not every update.
 
    **Optional accelerator — `loci` for inspecting existing notes (never a dependency):** Several operations re-read existing wiki pages — Ingest checks whether a note already covers the incoming material (dedup/route), and Update needs to find the right page and section to change. When a `loci` symbol indexer is available, it can serve just the relevant heading sections instead of loading whole files, which matters for large/cover notes (§8a). Use it as follows, and **fall back to normal `Read` whenever it is absent or unhelpful**:
    - **Front-matter routing stays on `scripts/query.py`** (`--type`, `--tag`, `--category`, …). loci indexes heading sections only, not YAML front-matter, so query.py remains the way to find *which* notes are relevant. loci is purely for reading their bodies more cheaply once identified.
@@ -102,6 +102,8 @@ This file is the agent's operating manual. Include all of these:
    **After every ingest, run `.venv/bin/python3 scripts/lint.py`** and report findings before declaring done.
 
    **After every ingest, also run `.venv/bin/python3 scripts/render.py`** to regenerate `wiki.html`. The artifact must always reflect the current state of the wiki — this is non-optional.
+
+   **Run `.venv/bin/python3 scripts/eval.py --gate` only for risk-triggered audits**: self-model or operating-rule changes, ownership-boundary changes, major source ingests, rebuilds, suspected contradictions, page merge/split decisions, weak grounding concerns, near-duplicate concept cleanup, or eval tooling changes. Do not run judge eval for routine page/log/index maintenance.
 
    **Ingest completeness protocol (deep):**
    - **ToC first**: For any structured document (paper, standard, report, spec), extract or identify the table of contents before writing the wiki page. Use it as a checklist.
@@ -222,6 +224,6 @@ YAML frontmatter block (title, type: entity|concept, category: Entities & Concep
   - `.venv/bin/python3 scripts/query.py --agent-overview --json` → agent-oriented first pass over wiki structure, hubs, orphans, risks, questions, and recent log context
   - `.venv/bin/python3 scripts/query.py --context-pack <page> --tokens 12000 --json` → deterministic working context for an agent, with inclusion reasons
   - `.venv/bin/python3 scripts/render.py` → generates `wiki.html` (open in browser, or view as a Claude artifact)
-  - `.venv/bin/python3 scripts/eval.py --gate` → LLM-as-judge quality eval (grounding, contradictions, redundancy, disambiguation) with regression gating; run records in `.eval/`
+  - `.venv/bin/python3 scripts/eval.py --gate` → risk-triggered LLM-as-judge quality audit (grounding, contradictions, redundancy, disambiguation) with regression gating; run records in `.eval/`
 - Offer `git init && echo '.env' >> .gitignore` if this looks like a standalone repo
 - Confirm page type and categories look right before the user adds their first page

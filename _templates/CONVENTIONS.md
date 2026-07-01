@@ -149,6 +149,8 @@ Plus: the root `index.md` declares `okf_version: "0.1"`, and every non-reserved 
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --agent-overview --json` | Agent graph overview — hubs, orphans, unresolved risks/questions, and recent log context |
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --context-pack <page> --json` | Deterministic agent context pack with inclusion reasons |
 | `scripts/render.py` | `.venv/bin/python3 scripts/render.py` | Generates `wiki.html` — single-file reader with Home / Page / Search / Graph / Risks / Recent changes / Open questions / Entities views |
-| `scripts/eval.py` | `.venv/bin/python3 scripts/eval.py --gate` | LLM-as-judge quality eval — grounding, contradictions, redundancy, disambiguation; thresholds + regression gating. Auto-detects your agent CLI as the judge (keyless); run records in `.eval/` |
+| `scripts/eval.py` | `.venv/bin/python3 scripts/eval.py --gate` | Risk-triggered LLM-as-judge quality audit — grounding, contradictions, redundancy, disambiguation; thresholds + regression gating. Auto-detects your agent CLI as the judge (keyless); run records in `.eval/` |
 
 Requires a project-local `.venv/`: `uv venv && uv pip install pyyaml markdown`. The eval's **claude** judge also needs `claude-agent-sdk` (skip if you use `--judge codex` or `--judge none`).
+
+Routine wiki updates run lint and render. Reserve judge eval for high-risk changes such as self-model or operating-rule changes, ownership-boundary changes, major source ingests, rebuilds, suspected contradictions, page merge/split decisions, weak grounding concerns, near-duplicate concept cleanup, or eval tooling changes.

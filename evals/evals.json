@@ -16,7 +16,8 @@
         "index.md exists",
         "log.md exists and contains an init entry",
         "lint_output.txt contains 'No structural issues found'",
-        "wiki-agent.md contains all 11 required sections: Directory Structure, Page Type, Absolute Rules, Operations, File Naming, Source File Header Block, Risk Register Format, Wiki Page Frontmatter, index.md Format, log.md Format, Entity and Concept Pages"
+        "wiki-agent.md contains all 11 required sections: Directory Structure, Page Type, Absolute Rules, Operations, File Naming, Source File Header Block, Risk Register Format, Wiki Page Frontmatter, index.md Format, log.md Format, Entity and Concept Pages",
+        "wiki-agent.md says lint/render are routine after wiki writes and eval.py --gate is reserved for risk-triggered audits"
       ]
     },
     {

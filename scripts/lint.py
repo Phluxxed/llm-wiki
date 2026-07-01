@@ -382,7 +382,7 @@ def print_report(issues: list[dict]) -> None:
     open_risks = sum(1 for i in issues if i["check"] == "open_risk")
     structural = total - open_risks
     print(f"\n---\n{total} issue(s): {structural} structural, {open_risks} open risk row(s)")
-    print("\n⚠️  Contradiction scan and source drift require LLM — run `.venv/bin/python3 scripts/eval.py` (LLM-as-judge quality eval).")
+    print("\n⚠️  Contradiction scan and source drift require LLM. Run `.venv/bin/python3 scripts/eval.py --gate` only for risk-triggered audits, not routine lint/render maintenance.")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
