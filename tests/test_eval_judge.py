@@ -145,5 +145,24 @@ class JudgeDetectionTests(unittest.TestCase):
                 self.eval._run(["codex"])
 
 
+class ContradictionScoringTests(unittest.TestCase):
+    def setUp(self):
+        self.eval = load_eval_module()
+        self.pages = [{"file": "a.md", "text": "Body A."},
+                      {"file": "b.md", "text": "Body B."}]
+
+    def test_empty_conflicts_scores_perfect_even_if_judge_underscores(self):
+        judge = lambda _prompt: '{"score":0.92,"conflicts":[],"rationale":"none"}'
+        result = self.eval.check_contradictions(self.pages, judge)
+        self.assertEqual(result.score, 1.0)
+        self.assertTrue(result.passed)
+
+    def test_listed_conflict_cannot_reach_a_perfect_score(self):
+        judge = lambda _prompt: '{"score":1.0,"conflicts":["X in a.md vs Y in b.md"],"rationale":"one"}'
+        result = self.eval.check_contradictions(self.pages, judge)
+        self.assertLess(result.score, 1.0)
+        self.assertFalse(result.passed)
+
+
 if __name__ == "__main__":
     unittest.main()

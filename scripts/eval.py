@@ -428,6 +428,14 @@ def check_contradictions(pages: list[dict], judge: Judge) -> MetricResult:
         return _judge_error_result("absence_of_contradictions", e)
     score = float(res.get("score") or 0.0)
     conflicts = res.get("conflicts") or []
+    # Ground this metric on the conflicts list, not the judge's fuzzy self-score:
+    # the judge often emits ~0.95 even when it finds nothing, so an empty list is
+    # a clean 1.0; and any listed conflict must stay below a perfect score so the
+    # 1.0 threshold fails even if the judge over-scored.
+    if not conflicts:
+        score = 1.0
+    elif score >= 1.0:
+        score = 0.99
     detail = ("No contradictions found." if not conflicts
               else f"{len(conflicts)} conflict(s): " + "; ".join(_clip(c, 200) for c in conflicts[:3]))
     return MetricResult("absence_of_contradictions", score,
