@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -7,6 +8,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+FIXTURES = REPO_ROOT / "tests" / "fixtures"
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from llm_wiki_mcp.errors import WikiMcpError
@@ -81,6 +83,13 @@ class WikiRuntimeTest(unittest.TestCase):
         self.assertEqual(source["source"], "sources/a.md")
         self.assertTrue(source["content"].endswith("[truncated]"))
 
+    def test_context_pack_matches_v1_golden_contract(self):
+        expected = json.loads((FIXTURES / "context_pack_v1.json").read_text(encoding="utf-8"))
+
+        pack = context_pack("brain", "notes/a.md", tokens=500)
+
+        self.assertEqual(pack, expected)
+
     def test_source_excerpt_rejects_path_escape(self):
         with self.assertRaises(WikiMcpError) as raised:
             get_source_excerpt("brain", source="../log.md")
@@ -121,3 +130,20 @@ class WikiRuntimeTest(unittest.TestCase):
         self.assertEqual(manual["conventions"], "# Conventions\n")
         self.assertIn("Read and obey operating_manual before mutating this wiki", manual["must_follow"])
         self.assertTrue(manual["doctor"]["is_wiki"])
+
+    def test_registered_wiki_reads_do_not_execute_local_traversal_scripts(self):
+        (self.wiki / "scripts" / "query.py").write_text(
+            "raise RuntimeError('wiki-local query code executed')\n",
+            encoding="utf-8",
+        )
+        (self.wiki / "scripts" / "wiki_graph.py").write_text(
+            "raise RuntimeError('wiki-local graph code executed')\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(overview("brain")["page_count"], 3)
+        self.assertEqual(links("brain", "notes/a.md")["links"][0]["page"], "notes/b.md")
+        self.assertEqual(query_pages("brain", tag="agent")["count"], 2)
+        self.assertEqual(context_pack("brain", "notes/a.md", tokens=500)["kind"], "context_pack")
+        self.assertEqual(get_page("brain", "notes/a.md")["page"], "notes/a.md")
+        self.assertEqual(graph_health("brain")["page_count"], 3)

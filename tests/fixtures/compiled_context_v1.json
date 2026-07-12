@@ -1,0 +1,84 @@
+{
+  "kind": "compiled_context",
+  "contract_version": "1",
+  "wiki": {
+    "alias": "brain",
+    "schema_version": "1",
+    "runtime_contract": "2"
+  },
+  "query": {
+    "question": "What currently owns traversal?",
+    "shapes": [
+      "lookup",
+      "state"
+    ],
+    "state_view": "current",
+    "resolved_seeds": [
+      "systems/llm-wiki.md"
+    ]
+  },
+  "evidence": [
+    {
+      "id": "seed:systems/llm-wiki.md",
+      "provider": "seed",
+      "route": "exact_seed",
+      "page": "systems/llm-wiki.md",
+      "source": null,
+      "locator": {
+        "section": "Ownership"
+      },
+      "content": "llm-wiki owns the shared runtime.",
+      "roles": [
+        "answer",
+        "current_claim",
+        "authority"
+      ],
+      "authored_state": "current",
+      "derived_flags": [],
+      "authority_signals": [
+        "explicit_current"
+      ],
+      "selection_reasons": [
+        "exact_seed",
+        "covers:current_claim"
+      ],
+      "byte_cost": 35,
+      "truncated": false
+    }
+  ],
+  "omissions": [],
+  "coverage": {
+    "required_roles": [
+      "answer",
+      "authority",
+      "current_claim"
+    ],
+    "covered_roles": [
+      "answer",
+      "authority",
+      "current_claim"
+    ],
+    "uncovered_roles": []
+  },
+  "budget": {
+    "limits": {
+      "target_bytes": 48000,
+      "max_bytes": 192000,
+      "target_items": 24,
+      "max_items": 96,
+      "max_estimated_tokens": null
+    },
+    "target_exceeded_for_coverage": false,
+    "evidence_bytes": 35,
+    "envelope_bytes": 0,
+    "items": 1,
+    "estimated_tokens": 9
+  },
+  "stop": {
+    "reason": "sufficient",
+    "sufficient": true,
+    "detail": "All required roles covered"
+  },
+  "continuation": null,
+  "diagnostics": []
+}

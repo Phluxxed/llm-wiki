@@ -1,6 +1,6 @@
 ---
 name: wikime
-version: 1.0.0
+version: 2.0.0
 description: Use when user runs /wikime or asks to scaffold a new wiki, knowledge base, or LLM-maintained document store in an empty or fresh directory
 ---
 
@@ -52,7 +52,7 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 - **If it exists**: this is an existing wiki. Do not overwrite anything. Run the migration checks below, then tell the user and stop.
   - **render.py migration**: if `scripts/graph.py` or `graph.html` exists, this wiki predates the `render.py` change. Offer the user a one-line migration: replace `scripts/graph.py` with the current `skills/wikime/scripts/render.py`, delete `graph.html`, ensure the wiki has its project-local `.venv` from Step 5, then run `.venv/bin/python3 scripts/render.py`. After confirming, also update `wiki-agent.md`'s Operations section to add the `render.py` rule.
   - **OKF conformance migration (pre-1.0.0 wikis)**: run `.venv/bin/python3 scripts/lint.py` (after copying in the current `scripts/lint.py`). If pages are flagged for missing `type`, `description`, or `timestamp`, or `index.md` lacks `okf_version`, this wiki predates the OKF-conformance release. Offer the user a backfill: set each page's `type` from its primary directory slug (`policies/` → `type: policy`; entity/concept pages keep `type: entity|concept`); add `okf_version: "0.1"` to the top of `index.md`; and for `description`/`timestamp`, propose values (description from the page's lead sentence, timestamp from `last_reviewed` or the file's git mtime) for the user to confirm rather than inventing silently. Re-run lint after backfilling. Do not edit pages without the user's go-ahead.
-  - **Agent graph/context migration**: if `scripts/wiki_graph.py` is missing, or `.venv/bin/python3 scripts/query.py --help` does not show `--agent-overview`, `--context-pack`, and `--json`, this wiki predates the agent graph/context layer. Offer the user a tooling-only migration: copy the current `skills/wikime/scripts/wiki_graph.py`, `scripts/query.py`, and `scripts/render.py` into the wiki, then run `.venv/bin/python3 scripts/query.py --agent-overview --json` and `.venv/bin/python3 scripts/render.py`. After confirming, also update the wiki README / conventions tooling table to mention `--agent-overview --json` and `--context-pack <page> --json`. This migration must not alter wiki pages, sources, index entries, or log history unless the user explicitly asks.
+  - **Versioned runtime migration**: run `llm-wiki doctor --wiki .`, then `llm-wiki migrate dry-run --wiki .`. Show the exact plan and blockers. Do not apply it automatically. Only after explicit user consent, run `llm-wiki migrate apply --wiki . --plan-hash <hash-from-dry-run>`, followed by `llm-wiki migrate verify --wiki .`. The migration must not alter wiki pages, sources, index entries, or log history; its receipt provides the exact ID accepted by `llm-wiki migrate rollback`.
 - **If it does not exist**: proceed with scaffolding below.
 
 ## Step 4 — Create these files
@@ -63,6 +63,7 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `{your schema file}` | Pointer file for your platform — see Step 2. Append if exists; create if not. |
 | `CONVENTIONS.md` | Copy from skill bundle (`skills/wikime/_templates/CONVENTIONS.md`); fill in `{WIKI_NAME}`, `{REPO_NAME}`, and the `{PRIMARY_TYPES}` table (one row per primary type — name, slug, one-line description) |
 | `README.md` | Quick start, operations cheat sheet, directory structure, useful commands, Scripts & Tooling section |
+| `.llm-wiki.toml` | Copy from `skills/wikime/_templates/llm-wiki.toml`; declares the supported schema/runtime contract and canonical compiler defaults. |
 | `index.md` | Catalog. Starts with a root `okf_version: "0.1"` frontmatter block (see §9), then an empty catalog with a commented example showing exact format. For multi-primary-type wikis, use one section per primary type. |
 | `log.md` | Seeded: `## [YYYY-MM-DD] init | Created wiki: {files listed}` |
 | `_templates/{slug}.md` | Page template — **one per primary type** (e.g. `_templates/policy.md`, `_templates/control.md`, `_templates/article.md`). See Template sections below. |
@@ -70,13 +71,13 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `{slug}/` | Empty directory for primary wiki pages — **one per primary type** (e.g. `papers/`, `policies/`, `controls/`, `articles/`). |
 | `entities/` | Empty directory for entity and concept pages |
 | `sources/` | Empty directory for immutable raw inputs |
-| `scripts/wiki_graph.py` | Copy from skill bundle (`skills/wikime/scripts/wiki_graph.py`); shared graph substrate used by `query.py` and `render.py` |
+| `scripts/wiki_graph.py` | Copy from `skills/wikime/_templates/adapters/wiki_graph.py`; thin compatibility import backed by the canonical `llm-wiki` runtime. |
 | `scripts/render.py` | Copy from skill bundle (`skills/wikime/scripts/render.py`); generates `wiki.html` — single-file reader artifact with nine views (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities, Sources) |
-| `scripts/query.py` | Copy from skill bundle (`skills/wikime/scripts/query.py`); frontmatter queries plus agent graph/context commands — `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks`, `--agent-overview`, `--links`, `--backlinks`, `--around`, `--graph-health`, `--context-pack`; add `--json` for machine-readable agent output |
+| `scripts/query.py` | Copy from `skills/wikime/_templates/adapters/query.py`; thin compatibility entrypoint preserving the existing query/context CLI through the canonical runtime. |
 | `scripts/lint.py` | Copy from skill bundle (`skills/wikime/scripts/lint.py`); structural lint — missing sections, frontmatter, broken refs, open risks, index consistency |
 | `scripts/eval.py` | Copy from skill bundle (`skills/wikime/scripts/eval.py`); risk-triggered LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating. Auto-detects the agent CLI (`claude`/`codex`) as a keyless judge; writes run records to `.eval/` |
 
-The scripts require `pyyaml` and `markdown`; `eval.py`'s claude judge also needs `claude-agent-sdk`. Install via `uv` into a project-local venv — see Step 5.
+The scripts require the canonical `llm-wiki` package (which includes `pyyaml` and `markdown`); `eval.py`'s claude judge also needs `claude-agent-sdk`. Install via `uv` into a project-local venv — see Step 5.
 
 ## wiki-agent.md — required sections
 
@@ -85,7 +86,7 @@ This file is the agent's operating manual. Include all of these:
 1. **Directory structure** — annotated tree showing all primary directories (one per primary type, e.g. `policies/`, `controls/`, `articles/` — or just one like `papers/` for a single-type wiki), plus `entities/`, `sources/`, `_templates/`, `scripts/` and the root control files
 2. **This Wiki's Page Types** — list each primary type, its slug/directory, one-line description, and required h2 sections from that type's template; note that the choice of types is a per-wiki decision, not universal
 3. **Absolute Rules** — never edit `sources/`; always update `index.md`; always append to `log.md`; every derived page needs `source` in frontmatter; primary pages go in their respective primary directory (the slug matches the type); entity/concept pages go in `entities/`
-4. **Operations** — Ingest (ask user: quick or deep before extracting; then follow the completeness protocol below), Query (read index.md first; file substantive answers back as new pages), Update, Lint (structural checks — missing sections, frontmatter, broken refs, OKF conformance, index consistency), Eval (risk-triggered LLM-as-judge quality audit via `scripts/eval.py`: grounding against sources, cross-page contradictions, redundancy, near-duplicate disambiguation — with thresholds + regression gating). Lint/render are routine after wiki writes; Eval is reserved for high-risk changes, not every update.
+4. **Operations** — Ingest (ask user: quick or deep before extracting; then follow the completeness protocol below), Query (read index.md first; file substantive answers back as new pages), Update, Lint (structural checks — missing sections, frontmatter, broken refs, grounding-evidence refs, OKF conformance, index consistency), Eval (risk-triggered LLM-as-judge quality audit via `scripts/eval.py`: grounding against source evidence, typed cross-page contradictions, redundancy, boolean near-duplicate disambiguation — with thresholds + regression gating). Lint/render are routine after wiki writes; Eval is reserved for high-risk changes, not every update.
 
    **Optional accelerator — `loci` for inspecting existing notes (never a dependency):** Several operations re-read existing wiki pages — Ingest checks whether a note already covers the incoming material (dedup/route), and Update needs to find the right page and section to change. When a `loci` symbol indexer is available, it can serve just the relevant heading sections instead of loading whole files, which matters for large/cover notes (§8a). Use it as follows, and **fall back to normal `Read` whenever it is absent or unhelpful**:
    - **Front-matter routing stays on `scripts/query.py`** (`--type`, `--tag`, `--category`, …). loci indexes heading sections only, not YAML front-matter, so query.py remains the way to find *which* notes are relevant. loci is purely for reading their bodies more cheaply once identified.
@@ -95,9 +96,12 @@ This file is the agent's operating manual. Include all of these:
    - **Small notes**: for short pages, reading the whole file is simpler than outline-then-get. Reach for loci on large and cover/chapter notes, where the saving is real.
 
    **Saving sources — by type:**
-   - **PDFs**: already a file — move/copy to `sources/` as-is. Do not add a header block.
+   - **PDFs**: already a file — move/copy to `sources/` as-is. Do not add a header block. Also persist judge-readable extracted text or a claim-complete evidence pack in `sources/` and reference it with `evidence:`; eval never treats decoded PDF bytes as evidence.
+   - **Repository or URL manifests**: keep the identity/URL manifest in `sources/`, set `source_mode: manifest`, and persist a claim-complete evidence pack containing the pinned revision plus the inspected files, sections, excerpts, or snapshots that support the derived page. Reference the pack with `evidence:`.
    - **Confluence pages**: fetch content via the Atlassian MCP tool (`getConfluencePage` with `contentFormat: "markdown"`), write to `sources/` as a `.md` file (e.g. `sources/page-title-YYYY-MM-DD.md`), and prepend the Source File Header Block with the Confluence URL.
    - **Other web pages / markdown / pastes**: write to `sources/` as a `.md` file and prepend the Source File Header Block.
+
+   Evidence packs are immutable source artifacts, not wiki pages. They must be sufficiently complete to support every factual claim in the derived page; a list of URLs or a prose summary written from memory is not evidence. `evidence:` accepts one path or a YAML list of paths under `sources/`. Keep each page's combined grounding material within the evaluator's 48,000-character budget; if a full extraction is larger, create a bounded, claim-complete pack rather than relying on silent truncation (eval fails oversized bundles before judging).
 
    **After every ingest, run `.venv/bin/python3 scripts/lint.py`** and report findings before declaring done.
 
@@ -114,6 +118,7 @@ This file is the agent's operating manual. Include all of these:
    - **Scale check**: Before declaring an ingest done, ask: does the output reflect the depth of the source? A 40-page document should produce substantially more than 100 lines of wiki content. If the ratio seems wrong, re-read and expand.
    - **Cover+chapter split for very large sources**: If a single wiki page from this ingest would exceed ~1000 lines, split into a cover note + chapter notes per §8a. Don't split trivially — short sources stay as a single page.
    - **Completeness gate**: Before writing the final log entry and declaring done, compare the document's ToC against what was captured. Any uncovered section must be either added or explicitly excluded with a reason.
+   - **Grounding-evidence gate**: Before finishing a deep ingest from a binary source or a source manifest, save the judge-readable extraction/evidence pack and set `evidence:` on every derived page. Use `source_mode: manifest` when `source:` contains identity/linkage rather than the inspected artifact itself.
 
    **Ingest completeness protocol (quick):**
    - Capture: title, abstract or executive summary, key claims (≤5 bullets), and threat model or attack surface if present.
@@ -123,7 +128,7 @@ This file is the agent's operating manual. Include all of these:
 5. **File Naming** — source files: kebab-case with ID if one exists; primary wiki pages: `{slug}/{id}-{title}.md` or `{slug}/{title}.md` where `{slug}` is the primary directory for that type (each primary type has its own); entity/concept pages: `entities/{title}.md`; all cross-page links use wiki-root-relative paths (e.g. `./policies/data-retention.md`, `./entities/openai.md`); `mentioned_in` frontmatter values also use wiki-root-relative paths
 6. **Source File Header Block** — immutability header template (source type, URL, fetched date, do-not-edit warning)
 7. **Attention Items and Risk Register Format** — for lightweight warnings, use one-line blockquotes: `> **Risk:** <text>`, `> **Caveat:** <text>`, or `> **Failure mode:** <text>`. For formal/detailed pages, a Risk Register table with Likelihood/Impact/Mitigation/Status is still supported; status reflects design clarity not build status.
-8. **Wiki Page Frontmatter** — YAML schema. **Required (lint-enforced):** title, category, status, owner, tags, created, last_reviewed, **type** (see §8b), **description** (one-line summary), **timestamp** (ISO 8601 datetime of last meaningful change — distinct from `created` and `last_reviewed`). **Optional:** source (set when the page derives from a `sources/` file), cover (chapter notes only, see §8a).
+8. **Wiki Page Frontmatter** — YAML schema. **Required (lint-enforced):** title, category, status, owner, tags, created, last_reviewed, **type** (see §8b), **description** (one-line summary), **timestamp** (ISO 8601 datetime of last meaningful change — distinct from `created` and `last_reviewed`). **Optional:** source (set when the page derives from a `sources/` file), `source_mode: manifest` (when that source is only an identity/URL manifest), evidence (one source path or a list of immutable judge-readable evidence packs; required for manifest and binary sources), cover (chapter notes only, see §8a).
 
    The last three are the **OKF v0.1 conformance fields** (strict superset): `type` is OKF's one required routing field, `description` its recommended summary, `timestamp` its last-modified marker. `type` is **auto-defaulted from the page's primary directory slug** (a page in `policies/` gets `type: policy`, `papers/` → `type: paper`); entity/concept pages use `type: entity|concept`, meta pages `type: meta`. Because it's always set from the directory, authors rarely write it by hand — but it is required and lint flags its absence.
 
@@ -153,6 +158,8 @@ This file is the agent's operating manual. Include all of these:
 - **OKF conformance** (§9.1): any non-reserved `.md` file with no parseable frontmatter (these are silently skipped by the page collector, so they get a dedicated scan)
 - **OKF conformance** (§11): root `index.md` missing the `okf_version` declaration
 - Pages with `source` pointing to a file that doesn't exist in `sources/`
+- Pages with `evidence` pointing to a file that doesn't exist in `sources/`
+- Pages whose source is binary, or whose `source_mode` is `manifest`, without judge-readable `evidence`
 - Pages with no `source` frontmatter whose body references `sources/X` (likely an ingest where the agent forgot to set the field)
 - Body markdown links whose target `.md` file does not exist anywhere in the wiki tree (broken refs, typos, links to deleted pages)
 - Risk Register rows with status `🔲 Not yet addressed` — flag explicitly. Render/query also surface attention-item blockquotes (`Risk`, `Caveat`, `Failure mode`) alongside open risk rows.
@@ -173,7 +180,7 @@ Report all findings as a markdown checklist. Do not auto-fix — report and let 
 
 ## Templates — required sections
 
-Create **one template per primary type** in `_templates/{slug}.md`. Each template starts with the same YAML frontmatter block (title, category, status, owner, source, **type** [defaulted to the directory slug — see §8b], **description**, **timestamp**, tags, created, last_reviewed). Pre-fill `type:` in each template with that type's slug value (e.g. `type: policy` in `_templates/policy.md`) so new pages are OKF-conformant by default.
+Create **one template per primary type** in `_templates/{slug}.md`. Each template starts with the same YAML frontmatter block (title, category, status, owner, source, **type** [defaulted to the directory slug — see §8b], **description**, **timestamp**, tags, created, last_reviewed). Pre-fill `type:` in each template with that type's slug value (e.g. `type: policy` in `_templates/policy.md`) so new pages are OKF-conformant by default. `source_mode` and `evidence` stay optional and should only be added when the source contract requires them; do not pre-fill empty evidence fields.
 
 After the frontmatter, generate h2 sections that fit the wiki's actual purpose and that page type. These h2 headings are lint-enforced for pages with the matching `type:`.
 
@@ -200,9 +207,11 @@ YAML frontmatter block (title, type: entity|concept, category: Entities & Concep
 
   ```bash
   uv venv                                    # creates .venv/ in the wiki dir
-  uv pip install pyyaml markdown             # installs into .venv automatically
+  uv pip install /path/to/llm-wiki           # current skill bundle or release checkout; includes pyyaml + markdown
   uv pip install claude-agent-sdk            # only for eval.py's claude judge (skip if using --judge codex/none)
   ```
+
+  Resolve `/path/to/llm-wiki` to the current skill bundle root before running the command. Do not hard-code one user's home path into the scaffold.
 
   Then run the scripts via `.venv/bin/python3` (or `source .venv/bin/activate` once per shell):
 

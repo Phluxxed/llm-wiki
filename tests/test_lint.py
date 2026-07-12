@@ -179,6 +179,79 @@ class MentionedInCheckTest(unittest.TestCase):
         self.assertIn("./notes/ghost.md", issues[0]["detail"])
 
 
+class GroundingEvidenceCheckTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+        (self.wiki_root / "sources").mkdir()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _fm(self, **overrides):
+        fm = {"title": "X", "category": "X", "status": "Live", "owner": "x", "tags": [],
+              "created": "2026-04-30", "last_reviewed": "2026-04-30",
+              "type": "paper", "description": "d", "timestamp": "2026-04-30T00:00:00Z"}
+        fm.update(overrides)
+        return fm
+
+    def _run(self, *check_names):
+        lint = reload_lint_with_root(self.wiki_root)
+        pages = lint.collect_pages()
+        sources = lint.collect_source_files()
+        all_md = lint.collect_all_md_paths()
+        return [i for i in lint.run_checks(pages, sources, set(), all_md)
+                if i["check"] in check_names]
+
+    def test_manifest_source_requires_evidence(self):
+        (self.wiki_root / "sources/repo.md").write_text("URL: https://example.com/repo\n")
+        write_md(
+            self.wiki_root / "papers/a.md",
+            self._fm(source="sources/repo.md", source_mode="manifest"),
+            "body",
+        )
+        issues = self._run("grounding_evidence_missing")
+        self.assertEqual(len(issues), 1)
+        self.assertIn("manifest", issues[0]["detail"])
+
+    def test_binary_source_requires_evidence(self):
+        (self.wiki_root / "sources/paper.pdf").write_bytes(b"%PDF-fake")
+        write_md(self.wiki_root / "papers/a.md", self._fm(source="sources/paper.pdf"), "body")
+        issues = self._run("grounding_evidence_missing")
+        self.assertEqual(len(issues), 1)
+        self.assertIn("binary", issues[0]["detail"])
+
+    def test_missing_evidence_file_is_flagged(self):
+        (self.wiki_root / "sources/repo.md").write_text("manifest\n")
+        write_md(
+            self.wiki_root / "papers/a.md",
+            self._fm(
+                source="sources/repo.md", source_mode="manifest",
+                evidence=["sources/missing-evidence.md"],
+            ),
+            "body",
+        )
+        issues = self._run("evidence_missing")
+        self.assertEqual(len(issues), 1)
+        self.assertIn("missing-evidence.md", issues[0]["detail"])
+
+    def test_evidence_file_counts_as_referenced_source(self):
+        (self.wiki_root / "sources/repo.md").write_text("manifest\n")
+        (self.wiki_root / "sources/repo-evidence.md").write_text("inspected source evidence\n")
+        write_md(
+            self.wiki_root / "papers/a.md",
+            self._fm(
+                source="sources/repo.md", source_mode="manifest",
+                evidence="sources/repo-evidence.md",
+            ),
+            "body",
+        )
+        self.assertEqual(
+            self._run("grounding_evidence_missing", "evidence_missing", "orphan_source"),
+            [],
+        )
+
+
 class CoverFieldCheckTest(unittest.TestCase):
     """Chapter notes carry `cover:` pointing at their cover note.
     Lint enforces: target exists, target isn't itself a chapter, source values match."""

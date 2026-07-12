@@ -352,18 +352,91 @@ def _judge_error_result(name: str, e: Exception) -> MetricResult:
     return MetricResult(name, None, False, f"JUDGE ERROR — {e}", error=True)
 
 
+def _source_path(wiki_root: Path, src: str) -> Path:
+    root = Path(wiki_root).resolve()
+    sources_root = (root / "sources").resolve()
+    candidate = (root / src).resolve()
+    if candidate.is_relative_to(sources_root):
+        return candidate
+    fallback = (sources_root / Path(src).name).resolve()
+    return fallback if fallback.is_relative_to(sources_root) else sources_root
+
+
 def _read_source(wiki_root: Path, src: str) -> str:
-    f = Path(wiki_root) / src
-    if not f.exists():
-        f = Path(wiki_root) / "sources" / Path(src).name
+    f = _source_path(wiki_root, src)
     try:
         return f.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
 
 
+_BINARY_SOURCE_SUFFIXES = {
+    ".doc", ".docx", ".gif", ".jpeg", ".jpg", ".pdf", ".png",
+    ".ppt", ".pptx", ".webp", ".xls", ".xlsx",
+}
+GROUNDING_MATERIAL_LIMIT = 48000
+
+
+def _reference_list(value) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()]
+
+
+def _grounding_material(p: dict, wiki_root: Path) -> tuple[str, str | None]:
+    """Build judge-readable source material and explain any evidence gap."""
+    fm = p["fm"]
+    source_ref = str(fm["source"])
+    evidence_refs = _reference_list(fm.get("evidence"))
+    source_is_binary = Path(source_ref).suffix.lower() in _BINARY_SOURCE_SUFFIXES
+    source_is_manifest = str(fm.get("source_mode", "")).strip().lower() == "manifest"
+    requires_evidence = source_is_binary or source_is_manifest
+    parts = []
+
+    if not _source_path(wiki_root, source_ref).is_file():
+        return "", f"source {source_ref!r} does not exist"
+
+    if not source_is_binary:
+        source_text = _read_source(wiki_root, source_ref)
+        if source_text.strip():
+            parts.append(f"PRIMARY SOURCE ({source_ref}):\n{source_text}")
+        elif not requires_evidence:
+            return "", f"source {source_ref!r} is empty or unreadable"
+
+    readable_evidence = []
+    unreadable_evidence = []
+    for evidence_ref in evidence_refs:
+        if Path(evidence_ref).suffix.lower() in _BINARY_SOURCE_SUFFIXES:
+            unreadable_evidence.append(evidence_ref)
+            continue
+        evidence_text = _read_source(wiki_root, evidence_ref)
+        if evidence_text.strip():
+            readable_evidence.append(evidence_ref)
+            parts.append(f"SUPPORTING EVIDENCE ({evidence_ref}):\n{evidence_text}")
+        else:
+            unreadable_evidence.append(evidence_ref)
+
+    if unreadable_evidence:
+        return "", "declared evidence is empty, unreadable, or binary: " + ", ".join(unreadable_evidence)
+    if requires_evidence and not readable_evidence:
+        kind = "manifest" if source_is_manifest else "binary"
+        return "", f"{kind} source {source_ref!r} requires evidence"
+    if not parts:
+        return "", f"source {source_ref!r} has no judge-readable material"
+    material = "\n\n".join(parts)
+    if len(material) > GROUNDING_MATERIAL_LIMIT:
+        return "", (
+            f"evidence bundle is {len(material)} characters and exceeds the "
+            f"{GROUNDING_MATERIAL_LIMIT}-character judge budget; provide a bounded, "
+            "claim-complete evidence pack"
+        )
+    return material, None
+
+
 def check_grounding(pages: list[dict], wiki_root: Path, judge: Judge) -> MetricResult:
-    """Every factual claim in a *derived* page is supported by its source file.
+    """Every factual claim in a *derived* page is supported by its source material.
     Self-skips (None) when no page declares a source. One judge call per derived
     page, fanned out in parallel."""
     derived = [p for p in pages if p["fm"].get("source")]
@@ -371,15 +444,32 @@ def check_grounding(pages: list[dict], wiki_root: Path, judge: Judge) -> MetricR
         return MetricResult("grounding", None, True,
                             "no derived pages with a source to ground against")
 
+    prepared = {}
+    grounding_issues = []
+    for p in derived:
+        material, issue = _grounding_material(p, wiki_root)
+        if issue:
+            grounding_issues.append((p["file"], issue))
+        else:
+            prepared[p["file"]] = material
+    if grounding_issues:
+        detail = "; ".join(f"{page}: {issue}" for page, issue in grounding_issues[:3])
+        return MetricResult(
+            "grounding", 0.0, False,
+            _clip(f"{len(grounding_issues)} page(s) lack judge-readable grounding material — {detail}", 1500),
+            extra={
+                "missing_evidence": [page for page, _ in grounding_issues[:20]],
+                "grounding_issues": [f"{page}: {issue}" for page, issue in grounding_issues[:20]],
+            },
+        )
+
     def _one(p):
-        src_text = _read_source(wiki_root, str(p["fm"]["source"]))
-        if not src_text.strip():
-            return None
+        source_material = prepared[p["file"]]
         prompt = (
             "You are a strict groundedness judge. Decide whether the factual claims "
-            "in the PAGE are supported by the SOURCE. Be lenient on paraphrase; "
-            "schema/structural facts present in the source count as supported.\n\n"
-            f"SOURCE:\n{src_text[:48000]}\n\nPAGE:\n{_body(p['text'])[:48000]}\n\n"
+            "in the PAGE are supported by the EVIDENCE BUNDLE. Be lenient on paraphrase; "
+            "schema/structural facts present in the evidence count as supported.\n\n"
+            f"EVIDENCE BUNDLE:\n{source_material}\n\nPAGE:\n{_body(p['text'])[:48000]}\n\n"
             'Return STRICT JSON: {"score":<0..1 fraction of claims supported>,'
             '"unsupported":[<quoted unsupported claims>],"rationale":"<one sentence>"}')
         res = _judge_json(judge, prompt, label=f"grounding {p['file']}")
@@ -418,16 +508,34 @@ def check_contradictions(pages: list[dict], judge: Judge) -> MetricResult:
         "across the wiki pages below — conflicting claims about the same tool, "
         "service, credential, join key, enum, metric definition, or behaviour. "
         "BE SPECIFIC: name both conflicting statements and where each appears. "
-        "Generic claims like 'has some contradictions' are not acceptable.\n\n"
+        "Generic claims like 'has some contradictions' are not acceptable. Classify "
+        "a finding as documented_source_drift only when the wiki explicitly presents "
+        "both versions, identifies which source/version/time each belongs to, and does "
+        "not assert the stale version as current truth. Otherwise classify it unresolved.\n\n"
         f"PAGES:\n{_content_blob(pages)}\n\n"
         'Return STRICT JSON: {"score":<0..1, 1=no contradictions 0=explicit conflict>,'
-        '"conflicts":[<each conflict described specifically>],"rationale":"<one sentence>"}')
+        '"conflicts":[{"description":"<specific conflict>",'
+        '"classification":"unresolved|documented_source_drift"}],'
+        '"rationale":"<one sentence>"}')
     try:
         res = _judge_json(judge, prompt, label="absence_of_contradictions")
     except JudgeError as e:
         return _judge_error_result("absence_of_contradictions", e)
     score = float(res.get("score") or 0.0)
-    conflicts = res.get("conflicts") or []
+    raw_conflicts = res.get("conflicts") or []
+    conflicts = []
+    documented_drift = []
+    for item in raw_conflicts:
+        if isinstance(item, dict):
+            description = str(item.get("description") or item.get("conflict") or item)
+            classification = str(item.get("classification") or "unresolved").strip().lower()
+            if classification == "documented_source_drift":
+                documented_drift.append(description)
+            else:
+                conflicts.append(description)
+        else:
+            # Legacy/untyped findings fail closed as unresolved contradictions.
+            conflicts.append(str(item))
     # Ground this metric on the conflicts list, not the judge's fuzzy self-score:
     # the judge often emits ~0.95 even when it finds nothing, so an empty list is
     # a clean 1.0; and any listed conflict must stay below a perfect score so the
@@ -436,11 +544,24 @@ def check_contradictions(pages: list[dict], judge: Judge) -> MetricResult:
         score = 1.0
     elif score >= 1.0:
         score = 0.99
-    detail = ("No contradictions found." if not conflicts
-              else f"{len(conflicts)} conflict(s): " + "; ".join(_clip(c, 200) for c in conflicts[:3]))
+    if conflicts:
+        detail = f"{len(conflicts)} unresolved conflict(s): " + "; ".join(
+            _clip(c, 200) for c in conflicts[:3]
+        )
+        if documented_drift:
+            detail += f"; {len(documented_drift)} documented source drift item(s) also reported"
+    elif documented_drift:
+        detail = f"No unresolved contradictions; {len(documented_drift)} documented source drift item(s): " + "; ".join(
+            _clip(c, 200) for c in documented_drift[:3]
+        )
+    else:
+        detail = "No contradictions found."
     return MetricResult("absence_of_contradictions", score,
                         score >= DEFAULT_THRESHOLDS["absence_of_contradictions"],
-                        _clip(detail, 1500), extra={"conflicts": conflicts[:20]})
+                        _clip(detail, 1500), extra={
+                            "conflicts": conflicts[:20],
+                            "documented_source_drift": documented_drift[:20],
+                        })
 
 
 def check_redundancy(pages: list[dict], judge: Judge) -> MetricResult:
@@ -483,11 +604,14 @@ def check_disambiguation(pages: list[dict], judge: Judge) -> MetricResult:
         prompt = (
             "Two wiki pages look similar (" + reason + "). Decide whether they are "
             "GENUINELY DISTINCT concepts (keep both) or near-duplicates that should "
-            "merge. 1.0=clearly distinct, 0.0=should merge.\n\n"
+            "merge. The distinct boolean is the authoritative decision.\n\n"
             f"PAGE A ({fa}):\n{_body(a['text'])[:24000]}\n\nPAGE B ({fb}):\n{_body(b['text'])[:24000]}\n\n"
-            'Return STRICT JSON: {"score":<0..1>,"distinct":<bool>,"rationale":"<one sentence>"}')
-        res = _judge_json(judge, prompt, label=f"disambiguation {fa}~{fb}")
-        return (fa, fb, float(res.get("score") or 0.0), res.get("rationale", ""))
+            'Return STRICT JSON: {"distinct":<bool>,"rationale":"<one sentence>"}')
+        res = _judge_json(judge, prompt, require="distinct", label=f"disambiguation {fa}~{fb}")
+        distinct = res.get("distinct")
+        if not isinstance(distinct, bool):
+            raise JudgeError(f"disambiguation {fa}~{fb} returned non-boolean distinct")
+        return (fa, fb, distinct, res.get("rationale", ""))
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=_JUDGE_WORKERS) as ex:
@@ -497,8 +621,9 @@ def check_disambiguation(pages: list[dict], judge: Judge) -> MetricResult:
     if not judged:
         return MetricResult("disambiguation", None, True,
                             f"{len(pairs)} candidate pair(s) had no comparable content")
-    score = round(sum(r[2] for r in judged) / len(judged), 3)
-    dupes = [f"{fa} ~ {fb}: {_clip(rat, 160)}" for fa, fb, sc, rat in judged if sc < 1.0]
+    score = round(sum(1 for _, _, distinct, _ in judged if distinct) / len(judged), 3)
+    dupes = [f"{fa} ~ {fb}: {_clip(rat, 160)}"
+             for fa, fb, distinct, rat in judged if not distinct]
     detail = (f"All {len(judged)} candidate pair(s) judged distinct."
               if not dupes else f"{len(dupes)} near-duplicate(s): " + "; ".join(dupes[:3]))
     return MetricResult("disambiguation", score,
@@ -656,13 +781,19 @@ def emit_brief(wiki_root: Path) -> Path:
     pages = load_pages(wiki_root)
     eval_dir = Path(wiki_root) / ".eval"
     eval_dir.mkdir(parents=True, exist_ok=True)
-    derived = [(p["file"], p["fm"]["source"]) for p in pages if p["fm"].get("source")]
+    derived = [p for p in pages if p["fm"].get("source")]
     cands = near_duplicate_candidates(pages)
     lines = ["# Eval judging brief\n",
              "No agent CLI judge was available. Install/point one with `--judge`, "
              "or judge the items below manually.\n",
-             "## Grounding — check each page's claims against its source"]
-    lines += [f"- `{f}` ← `{s}`" for f, s in derived] or ["- (no derived pages)"]
+             "## Grounding — check each page's claims against its source and evidence"]
+    for p in derived:
+        source = p["fm"]["source"]
+        evidence = _reference_list(p["fm"].get("evidence"))
+        evidence_text = ", ".join(f"`{ref}`" for ref in evidence) or "(none declared)"
+        lines.append(f"- `{p['file']}` ← `{source}`; evidence: {evidence_text}")
+    if not derived:
+        lines.append("- (no derived pages)")
     lines += ["\n## Contradictions / redundancy — review all pages together",
               "\n## Disambiguation — confirm these near-duplicate candidates are distinct"]
     lines += [f"- `{a}` ~ `{b}` ({why})" for a, b, why in cands] or ["- (no candidates)"]

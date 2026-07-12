@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from llm_wiki_core.doctor import inspect_runtime
 from llm_wiki_mcp.errors import WikiMcpError
 
 
@@ -121,6 +122,7 @@ def doctor(alias: str) -> dict[str, Any]:
         "required_files": diagnostics["required_files"],
         "context_tooling": diagnostics["context_tooling"],
         "warnings": diagnostics["warnings"],
+        **inspect_runtime(path),
     }
 
 

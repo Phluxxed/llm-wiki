@@ -1,0 +1,21 @@
+schema_version = "1"
+runtime_contract = "2"
+profile = "default"
+
+[content]
+exclude_directories = [".git", ".venv", "node_modules"]
+source_directory = "sources"
+
+[compiler]
+providers = ["seed", "frontmatter", "text", "graph", "source"]
+target_bytes = 48000
+max_bytes = 192000
+target_items = 24
+max_items = 96
+
+[state]
+field = "knowledge_state"
+default = "unspecified"
+
+[stewardship]
+mode = "manual"

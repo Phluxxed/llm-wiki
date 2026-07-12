@@ -1,5 +1,7 @@
 # {WIKI_NAME} — Conventions
 
+This wiki declares its shared runtime contract in `.llm-wiki.toml`. `scripts/query.py` and `scripts/wiki_graph.py` are thin compatibility adapters; traversal and context compilation live in the installed canonical `llm-wiki` package.
+
 ## Primary Page Types
 
 This wiki has the following primary page types. Each gets its own directory, its own template, and its own section in `index.md`.
@@ -51,7 +53,7 @@ Links between pages use wiki-root-relative paths: `[title](./policies/data-reten
 
 ## Sources Layer
 
-`sources/` holds raw, unmodified inputs exactly as they came in. These are never edited.
+`sources/` holds raw, unmodified inputs and immutable grounding-evidence packs. These are never edited.
 
 Every source file must start with this header block:
 
@@ -69,6 +71,17 @@ When adding a new source:
 1. Save it to `sources/` with a descriptive filename
 2. Decide which primary type the derived page belongs to and use that template
 3. Set `source: sources/filename.md` in the wiki page frontmatter
+
+If `source:` is only an identity/URL manifest, also set `source_mode: manifest`. Manifest and binary sources require judge-readable evidence: persist extracted text or a claim-complete evidence pack in `sources/` and set `evidence:` to one path or a YAML list of paths. Evidence packs must identify the inspected revision/sections and contain enough source material to support every factual claim in the derived page; URLs or an agent-authored summary alone are not evidence. Keep each page's combined grounding material within the evaluator's 48,000-character budget; curate larger extractions into bounded, claim-complete packs because eval fails oversized bundles instead of silently truncating them.
+
+```yaml
+source: sources/example-repo-manifest.md
+source_mode: manifest
+evidence:
+  - sources/example-repo-evidence.md
+```
+
+Lint checks that evidence paths exist and treats them as referenced source files. Judge eval fails before spending model calls when a manifest or binary source lacks readable evidence.
 
 ## Templates
 
@@ -149,8 +162,8 @@ Plus: the root `index.md` declares `okf_version: "0.1"`, and every non-reserved 
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --agent-overview --json` | Agent graph overview — hubs, orphans, unresolved risks/questions, and recent log context |
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --context-pack <page> --json` | Deterministic agent context pack with inclusion reasons |
 | `scripts/render.py` | `.venv/bin/python3 scripts/render.py` | Generates `wiki.html` — single-file reader with Home / Page / Search / Graph / Risks / Recent changes / Open questions / Entities views |
-| `scripts/eval.py` | `.venv/bin/python3 scripts/eval.py --gate` | Risk-triggered LLM-as-judge quality audit — grounding, contradictions, redundancy, disambiguation; thresholds + regression gating. Auto-detects your agent CLI as the judge (keyless); run records in `.eval/` |
+| `scripts/eval.py` | `.venv/bin/python3 scripts/eval.py --gate` | Risk-triggered LLM-as-judge quality audit — source-evidence grounding, typed contradictions, redundancy, boolean disambiguation; thresholds + regression gating. Auto-detects your agent CLI as the judge (keyless); run records in `.eval/` |
 
-Requires a project-local `.venv/`: `uv venv && uv pip install pyyaml markdown`. The eval's **claude** judge also needs `claude-agent-sdk` (skip if you use `--judge codex` or `--judge none`).
+Requires a project-local `.venv/` with the canonical package installed from the current skill bundle or release checkout: `uv venv && uv pip install /path/to/llm-wiki`. Do not hard-code a user-specific checkout path into the wiki. The eval's **claude** judge also needs `claude-agent-sdk` (skip if you use `--judge codex` or `--judge none`).
 
 Routine wiki updates run lint and render. Reserve judge eval for high-risk changes such as self-model or operating-rule changes, ownership-boundary changes, major source ingests, rebuilds, suspected contradictions, page merge/split decisions, weak grounding concerns, near-duplicate concept cleanup, or eval tooling changes.

@@ -29,18 +29,28 @@ class McpServerTest(unittest.TestCase):
 
         self.assertIn("wiki_register", result["tools"])
         self.assertIn("wiki_context_pack", result["tools"])
+        self.assertIn("wiki_maintenance_candidates", result["tools"])
         self.assertEqual(result["registered"]["alias"], "brain")
         self.assertEqual(result["listed"]["wikis"][0]["alias"], "brain")
         self.assertEqual(result["overview"]["kind"], "agent_overview")
         self.assertEqual(result["manual"]["kind"], "wiki_agent_manual")
         self.assertIn("Wiki Agent", result["manual"]["operating_manual"])
         self.assertEqual(result["links"]["links"][0]["page"], "b.md")
+        self.assertEqual(result["maintenance"]["kind"], "maintenance_candidate_packet")
+        self.assertFalse(result["maintenance"]["mutation"]["allowed"])
 
     def test_stdio_server_returns_structured_error_without_home(self):
         result = asyncio.run(_missing_home_error())
 
         self.assertTrue(result["is_error"])
-        self.assertEqual(result["error"]["code"], "CONFIG_REQUIRED")
+        self.assertEqual(
+            result["error"],
+            {
+                "code": "CONFIG_REQUIRED",
+                "message": "LLM_WIKI_HOME must be set to the current agent's llm-wiki home",
+                "details": {"env": "LLM_WIKI_HOME"},
+            },
+        )
 
 
 async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
@@ -71,6 +81,10 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
                 "wiki_links",
                 arguments={"alias": "brain", "page": "a.md"},
             )
+            maintenance = await session.call_tool(
+                "wiki_maintenance_candidates",
+                arguments={"alias": "brain", "stale_after_days": 180},
+            )
 
     return {
         "tools": tool_names,
@@ -79,6 +93,7 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
         "overview": overview.structuredContent,
         "manual": manual.structuredContent,
         "links": links.structuredContent,
+        "maintenance": maintenance.structuredContent,
     }
 
 

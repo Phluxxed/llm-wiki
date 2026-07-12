@@ -12,10 +12,12 @@ from llm_wiki_mcp.wiki_runtime import (
     around,
     backlinks,
     context_pack,
+    compiled_context,
     get_page,
     get_source_excerpt,
     graph_health,
     links,
+    maintenance_candidates,
     overview,
     query_pages,
 )
@@ -28,7 +30,7 @@ def create_server() -> FastMCP:
         instructions=(
             "Local stdio MCP server for registered llm-wiki folders. "
             "Tools expose registry, navigation, graph health, page, source, "
-            "and context-pack data without mutating wiki content."
+            "context-pack, and compiled-context data without mutating wiki content."
         ),
     )
 
@@ -114,6 +116,45 @@ def create_server() -> FastMCP:
     def wiki_context_pack(alias: str, page: str, tokens: int = 12_000) -> CallToolResult:
         """Return deterministic task context around a seed page."""
         return _handle_wiki_error(lambda: context_pack(alias, page, tokens=tokens))
+
+    @mcp.tool()
+    def wiki_compile_context(
+        alias: str,
+        question: str,
+        seeds: list[str] | None = None,
+        state_view: str = "current",
+        target_bytes: int = 48_000,
+        max_bytes: int = 192_000,
+        target_items: int = 24,
+        max_items: int = 96,
+        max_estimated_tokens: int | None = None,
+        contract_version: str = "1",
+    ) -> CallToolResult:
+        """Compile bounded, question-shaped evidence from a registered wiki."""
+        return _handle_wiki_error(
+            lambda: compiled_context(
+                alias,
+                question,
+                seeds=seeds,
+                state_view=state_view,
+                target_bytes=target_bytes,
+                max_bytes=max_bytes,
+                target_items=target_items,
+                max_items=max_items,
+                max_estimated_tokens=max_estimated_tokens,
+                contract_version=contract_version,
+            )
+        )
+
+    @mcp.tool()
+    def wiki_maintenance_candidates(
+        alias: str,
+        stale_after_days: int = 180,
+    ) -> CallToolResult:
+        """Return read-only, evidence-backed candidates for steward review."""
+        return _handle_wiki_error(
+            lambda: maintenance_candidates(alias, stale_after_days=stale_after_days)
+        )
 
     @mcp.tool()
     def wiki_get_page(alias: str, page: str, max_chars: int = 4_000) -> CallToolResult:

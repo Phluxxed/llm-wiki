@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import difflib
-import hashlib
-import importlib.util
-import sys
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
 from typing import Any
 
+from llm_wiki_core.config import ContentConfig, inspect_wiki_config
+from llm_wiki_core.compiler import compile_context as compile_wiki_context
+from llm_wiki_core.contracts import CompileRequest, ContractError
+from llm_wiki_core.legacy import LegacyRuntime
+from llm_wiki_core.maintenance import build_maintenance_packet
 from llm_wiki_mcp.errors import WikiMcpError
 from llm_wiki_mcp.registry import doctor, get_wiki
 
@@ -49,9 +50,7 @@ def agent_manual(alias: str, include_conventions: bool = True, max_chars: int = 
 
 
 def overview(alias: str) -> dict[str, Any]:
-    query = _load_query(alias)
-    pages, edges = query._graph()
-    return query.agent_overview_data(pages, edges)
+    return _legacy_runtime(alias).overview()
 
 
 def query_pages(
@@ -63,77 +62,97 @@ def query_pages(
     stale: int | None = None,
     risks: bool = False,
 ) -> dict[str, Any]:
-    query = _load_query(alias)
-    pages = query.collect_pages()
-    args = SimpleNamespace(
+    return _legacy_runtime(alias).query(
         status=status,
         category=category,
-        type=type,
+        page_type=type,
         tag=tag,
         stale=stale,
+        risks=risks,
     )
-    filtered = query.apply_filters(pages, args)
-    return query.risks_data(filtered) if risks else query.summary_data(filtered)
 
 
 def links(alias: str, page: str) -> dict[str, Any]:
-    query = _load_query(alias)
-    pages, edges = query._graph()
-    resolved = _page_or_error(query, page, pages)
-    return {
-        "kind": "links",
-        **query._page_record(resolved, pages),
-        "links": query._link_records(resolved, pages, edges),
-    }
+    runtime = _legacy_runtime(alias)
+    return runtime.links(_page_or_error(page, runtime))
 
 
 def backlinks(alias: str, page: str) -> dict[str, Any]:
-    query = _load_query(alias)
-    pages, edges = query._graph()
-    resolved = _page_or_error(query, page, pages)
-    return {
-        "kind": "backlinks",
-        **query._page_record(resolved, pages),
-        "backlinks": query._backlink_records(resolved, pages, edges),
-    }
+    runtime = _legacy_runtime(alias)
+    return runtime.backlinks(_page_or_error(page, runtime))
 
 
 def around(alias: str, page: str, depth: int = 1) -> dict[str, Any]:
-    query = _load_query(alias)
-    pages, edges = query._graph()
-    resolved = _page_or_error(query, page, pages)
+    runtime = _legacy_runtime(alias)
+    resolved = _page_or_error(page, runtime)
     safe_depth = max(1, min(int(depth), 5))
-    return {
-        "kind": "around",
-        "seed": query._page_record(resolved, pages),
-        "depth": safe_depth,
-        "pages": query._around_records(resolved, pages, edges, safe_depth),
-    }
+    return runtime.around(resolved, depth=safe_depth)
 
 
 def context_pack(alias: str, page: str, tokens: int = 12_000) -> dict[str, Any]:
-    query = _load_query(alias)
-    pages, edges = query._graph()
-    resolved = _page_or_error(query, page, pages)
+    runtime = _legacy_runtime(alias)
+    resolved = _page_or_error(page, runtime)
     safe_tokens = max(500, min(int(tokens), MAX_CONTEXT_TOKENS))
-    return query.build_context_pack_data(resolved, pages, edges, safe_tokens)
+    return runtime.context_pack(resolved, tokens=safe_tokens)
+
+
+def compiled_context(
+    alias: str,
+    question: str,
+    *,
+    seeds: list[str] | None = None,
+    state_view: str = "current",
+    target_bytes: int = 48_000,
+    max_bytes: int = 192_000,
+    target_items: int = 24,
+    max_items: int = 96,
+    max_estimated_tokens: int | None = None,
+    contract_version: str = "1",
+) -> dict[str, Any]:
+    record = get_wiki(alias)
+    request_data = {
+        "contract_version": contract_version,
+        "alias": record["alias"],
+        "question": question,
+        "seeds": seeds or [],
+        "state_view": state_view,
+        "budget": {
+            "target_bytes": target_bytes,
+            "max_bytes": max_bytes,
+            "target_items": target_items,
+            "max_items": max_items,
+            "max_estimated_tokens": max_estimated_tokens,
+        },
+    }
+    try:
+        request = CompileRequest.from_mapping(request_data)
+        return compile_wiki_context(record["path"], request).to_dict()
+    except ContractError as exc:
+        raise WikiMcpError(exc.code, exc.message, exc.details) from exc
 
 
 def graph_health(alias: str) -> dict[str, Any]:
-    query = _load_query(alias)
-    pages, edges = query._graph()
-    return query.graph_health_data(pages, edges)
+    return _legacy_runtime(alias).health()
+
+
+def maintenance_candidates(alias: str, *, stale_after_days: int = 180) -> dict[str, Any]:
+    record = get_wiki(alias)
+    threshold = _bounded_int(stale_after_days, default=180, upper=3650)
+    return build_maintenance_packet(
+        record["path"],
+        alias=record["alias"],
+        stale_after_days=threshold,
+    )
 
 
 def get_page(alias: str, page: str, max_chars: int = 4_000) -> dict[str, Any]:
-    query = _load_query(alias)
-    pages, _edges = query._graph()
-    resolved = _page_or_error(query, page, pages)
+    runtime = _legacy_runtime(alias)
+    resolved = _page_or_error(page, runtime)
     limit = _bounded_int(max_chars, default=4_000, upper=MAX_PAGE_CHARS)
     return {
         "kind": "page",
-        **query._page_record(resolved, pages),
-        "content": query._page_content(pages[resolved], max_chars=limit),
+        **runtime.page_record(resolved),
+        "content": runtime.page_content(resolved, max_chars=limit),
     }
 
 
@@ -143,8 +162,7 @@ def get_source_excerpt(
     source: str | None = None,
     max_chars: int = 1_600,
 ) -> dict[str, Any]:
-    query = _load_query(alias)
-    wiki_root = Path(query.WIKI_ROOT).resolve()
+    runtime = _legacy_runtime(alias)
     if bool(page) == bool(source):
         raise WikiMcpError(
             "INVALID_INPUT",
@@ -153,9 +171,8 @@ def get_source_excerpt(
         )
 
     if page:
-        pages, _edges = query._graph()
-        resolved = _page_or_error(query, page, pages)
-        source = str(pages[resolved]["fm"].get("source") or "")
+        resolved = _page_or_error(page, runtime)
+        source = str(runtime.pages[resolved].frontmatter.get("source") or "")
         if not source:
             raise WikiMcpError(
                 "SOURCE_NOT_FOUND",
@@ -164,7 +181,13 @@ def get_source_excerpt(
             )
 
     assert source is not None
-    source_path = _safe_source_path(wiki_root, source)
+    source_path = runtime.source_path(source)
+    if source_path is None:
+        raise WikiMcpError(
+            "INVALID_INPUT",
+            "Source must be a relative path inside the configured sources directory",
+            {"source": source},
+        )
     if not source_path.is_file():
         raise WikiMcpError(
             "SOURCE_NOT_FOUND",
@@ -190,37 +213,22 @@ def get_source_excerpt(
     }
 
 
-def _load_query(alias: str) -> ModuleType:
+def _legacy_runtime(alias: str) -> LegacyRuntime:
     record = get_wiki(alias)
     wiki_root = Path(record["path"]).expanduser().resolve()
-    scripts_dir = wiki_root / "scripts"
-    query_path = scripts_dir / "query.py"
-    graph_path = scripts_dir / "wiki_graph.py"
-    missing = [str(path.relative_to(wiki_root)) for path in (query_path, graph_path) if not path.is_file()]
-    if missing:
+    inspection = inspect_wiki_config(wiki_root)
+    if inspection.config is not None:
+        content = inspection.config.content
+    elif inspection.status == "legacy_missing":
+        content = ContentConfig()
+    else:
+        assert inspection.error is not None
         raise WikiMcpError(
-            "TOOLING_MISSING",
-            "Wiki is missing graph/context tooling",
-            {"alias": alias, "missing": missing},
+            inspection.error.code,
+            inspection.error.message,
+            inspection.error.details,
         )
-
-    digest = hashlib.sha1(str(wiki_root).encode("utf-8")).hexdigest()[:12]
-    graph_name = f"_llm_wiki_{digest}_wiki_graph"
-    query_name = f"_llm_wiki_{digest}_query"
-
-    graph = _load_module(graph_name, graph_path)
-    previous_graph = sys.modules.get("wiki_graph")
-    sys.modules["wiki_graph"] = graph
-    try:
-        query = _load_module(query_name, query_path)
-    finally:
-        if previous_graph is None:
-            sys.modules.pop("wiki_graph", None)
-        else:
-            sys.modules["wiki_graph"] = previous_graph
-
-    query.WIKI_ROOT = wiki_root
-    return query
+    return LegacyRuntime(wiki_root, content=content)
 
 
 def _read_control_file(wiki_root: Path, filename: str, max_chars: int, required: bool) -> dict[str, Any] | None:
@@ -254,62 +262,17 @@ def _read_control_file(wiki_root: Path, filename: str, max_chars: int, required:
     return {"content": content, "truncated": truncated}
 
 
-def _load_module(name: str, path: Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise WikiMcpError(
-            "TOOLING_LOAD_FAILED",
-            "Could not load wiki tooling module",
-            {"path": str(path)},
-        )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception as exc:
-        raise WikiMcpError(
-            "TOOLING_LOAD_FAILED",
-            "Wiki tooling module failed to load",
-            {"path": str(path), "error": str(exc)},
-        ) from exc
-    return module
-
-
-def _page_or_error(query: ModuleType, raw: str, pages: dict[str, dict]) -> str:
-    page = query.wiki_graph.normalize_page_ref(raw)
-    if page in pages:
+def _page_or_error(raw: str, runtime: LegacyRuntime) -> str:
+    page = str(raw).replace("\\", "/")
+    page = page[2:] if page.startswith("./") else page
+    if page in runtime.pages:
         return page
-    matches = difflib.get_close_matches(page, sorted(pages), n=5)
+    matches = difflib.get_close_matches(page, sorted(runtime.pages), n=5)
     raise WikiMcpError(
         "PAGE_NOT_FOUND",
         "Unknown wiki page",
         {"page": raw, "suggestions": matches},
     )
-
-
-def _safe_source_path(wiki_root: Path, source: str) -> Path:
-    normalized = str(source).replace("\\", "/")
-    if not normalized or normalized.startswith("/") or "\x00" in normalized:
-        raise WikiMcpError(
-            "INVALID_INPUT",
-            "Source must be a relative path inside sources/",
-            {"source": source},
-        )
-    if not normalized.startswith("sources/") or ".." in Path(normalized).parts:
-        raise WikiMcpError(
-            "INVALID_INPUT",
-            "Source must be a relative path inside sources/",
-            {"source": source},
-        )
-    sources_root = (wiki_root / "sources").resolve()
-    source_path = (wiki_root / normalized).resolve()
-    if not source_path.is_relative_to(sources_root):
-        raise WikiMcpError(
-            "INVALID_INPUT",
-            "Source must stay inside the wiki sources directory",
-            {"source": source},
-        )
-    return source_path
 
 
 def _bounded_int(value: int, *, default: int, upper: int) -> int:

@@ -52,6 +52,10 @@ PRIMARY_MANDATORY_SECTIONS = {"What This Is", "How It Works", "Risk Register", "
 ENTITY_MANDATORY_SECTIONS = {"What It Is", "How We Use It", "Where It Appears"}
 OPEN_RISK_STATUS = "🔲"
 SOURCE_REF_RE = re.compile(r'\bsources/[\w\-./]+\.\w+')
+_BINARY_SOURCE_SUFFIXES = {
+    ".doc", ".docx", ".gif", ".jpeg", ".jpg", ".pdf", ".png",
+    ".ppt", ".pptx", ".webp", ".xls", ".xlsx",
+}
 BODY_LINK_RE = re.compile(r'\[(?:[^\]]+)\]\(([^)#\s]+\.md)\)')
 
 
@@ -109,6 +113,14 @@ def collect_source_files() -> set[str]:
     if not sources_dir.exists():
         return set()
     return {f.name for f in sources_dir.iterdir() if f.is_file() and not f.name.startswith(".")}
+
+
+def reference_list(value) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()]
 
 
 def collect_all_md_paths() -> set[str]:
@@ -259,6 +271,24 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
             if src_name not in source_files:
                 issues.append({"file": f, "check": "source_missing", "detail": f"source '{src}' not found in sources/"})
 
+        evidence_refs = reference_list(fm.get("evidence"))
+        for evidence_ref in evidence_refs:
+            if Path(evidence_ref).name not in source_files:
+                issues.append({
+                    "file": f,
+                    "check": "evidence_missing",
+                    "detail": f"evidence '{evidence_ref}' not found in sources/",
+                })
+        source_is_manifest = str(fm.get("source_mode", "")).strip().lower() == "manifest"
+        source_is_binary = bool(src) and Path(str(src)).suffix.lower() in _BINARY_SOURCE_SUFFIXES
+        if src and (source_is_manifest or source_is_binary) and not evidence_refs:
+            kind = "manifest" if source_is_manifest else "binary"
+            issues.append({
+                "file": f,
+                "check": "grounding_evidence_missing",
+                "detail": f"{kind} source '{src}' requires an evidence file for judge grounding",
+            })
+
         # Page has no source field but body references a sources/X file —
         # likely an ingest where the agent forgot to set the frontmatter source.
         # Skip entity/concept pages (legitimately have no source) and meta pages.
@@ -327,6 +357,11 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
 
     # Sources with no wiki page
     wiki_sources = {Path(p["fm"].get("source", "")).name for p in pages if p["fm"].get("source")}
+    wiki_sources.update(
+        Path(ref).name
+        for p in pages
+        for ref in reference_list(p["fm"].get("evidence"))
+    )
     for src_file in sorted(source_files):
         if src_file not in wiki_sources:
             issues.append({"file": f"sources/{src_file}", "check": "orphan_source", "detail": "no wiki page has source pointing here"})
@@ -347,6 +382,8 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
 CHECK_LABELS = {
     "frontmatter":        "Frontmatter",
     "source_missing":     "Broken source ref",
+    "evidence_missing":   "Broken evidence ref",
+    "grounding_evidence_missing": "Missing grounding evidence",
     "likely_missing_source": "Likely missing source field",
     "broken_body_link":   "Broken body link",
     "missing_section":    "Missing section",

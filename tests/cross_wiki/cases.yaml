@@ -1,0 +1,54 @@
+- id: ai_graph_authored_moss_bridge
+  root_env: LLM_WIKI_ACCEPTANCE_AI_GRAPH
+  request:
+    alias: ai-graph-ideas
+    question: How does MOSS connect deterministic graph grounding handlers and the governed hybrid retrieval pipeline?
+    seeds:
+      - papers/moss-auditable-agentic-memory-architecture.md
+      - ideas/deterministic-graph-grounding-handlers.md
+      - ideas/governed-hybrid-retrieval-pipeline.md
+    state_view: all
+    budget:
+      target_bytes: 2000
+      max_bytes: 24000
+      target_items: 2
+      max_items: 12
+  required_evidence:
+    - page: papers/moss-auditable-agentic-memory-architecture.md
+      provider: graph
+      role: bridge
+      source_line: 29
+      locator_start_line: 29
+      text: The direct paper verifies and sharpens the brief-level MOSS claim in [Deterministic Graph Grounding Handlers](./ideas/deterministic-graph-grounding-handlers.md) and [Governed Hybrid Retrieval Pipeline](./ideas/governed-hybrid-retrieval-pipeline.md).
+  expected:
+    sufficient: true
+    target_exceeded_for_coverage: true
+    uncovered_roles: []
+
+- id: brain_current_boundary_without_false_state_claim
+  root_env: LLM_WIKI_ACCEPTANCE_BRAIN
+  request:
+    alias: anvil-brain-codex
+    question: What is the current ownership boundary between Anvil, llm-wiki, Brain, Continuity, and Loci now?
+    seeds:
+      - projects/anvil-redux.md
+    state_view: current
+    budget:
+      target_bytes: 2000
+      max_bytes: 12000
+      target_items: 1
+      max_items: 8
+  required_evidence:
+    - page: projects/anvil-redux.md
+      provider: seed
+      role: endpoint
+      source_line: 28
+      authored_state: unspecified
+      text: The current Brain shape is intentionally plain llm-wiki. Anvil owns setup metadata, routing, bootstrap, and tool orchestration. llm-wiki owns the scaffold, page contract, graph/context tooling, lint, render, and wiki operating rules.
+  forbidden_text:
+    - Retire the stale Anvil Continuity next action that says llm-wiki purpose-aware templates still need updating.
+  expected:
+    sufficient: false
+    target_exceeded_for_coverage: true
+    uncovered_roles:
+      - current_claim

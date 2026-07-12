@@ -17,3 +17,5 @@ Use an ADR when a decision changes architecture, public behavior, dependency pos
 |---|---|---:|---|
 | [ADR-001](./ADR-001-agent-graph-layer-adapter.md) | Accepted | 2026-06-19 | Build the agent graph layer as an adapter over plain markdown. |
 | [ADR-002](./ADR-002-agent-scoped-mcp-context-server.md) | Accepted | 2026-06-23 | Serve wiki context over local, agent-scoped MCP. |
+| [ADR-003](./ADR-003-canonical-runtime-and-versioned-wiki-contract.md) | Accepted | 2026-07-12 | Centralize shared behavior in a versioned runtime contract. |
+| [ADR-004](./ADR-004-question-shaped-state-aware-context-compiler.md) | Accepted | 2026-07-12 | Compile question-shaped context with explicit knowledge state. |

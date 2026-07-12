@@ -82,6 +82,13 @@ class CoreTest(unittest.TestCase):
     def test_body_no_frontmatter_passthrough(self):
         self.assertEqual(ev._body("# Just markdown\n"), "# Just markdown\n")
 
+    def test_source_reader_does_not_escape_sources_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki_root = Path(tmp)
+            private = wiki_root / "private.txt"
+            private.write_text("private material\n")
+            self.assertEqual(ev._read_source(wiki_root, str(private.resolve())), "")
+
 
 class DeterministicTest(unittest.TestCase):
     def setUp(self):
@@ -123,6 +130,22 @@ class DeterministicTest(unittest.TestCase):
         write_md(self.wiki_root / "papers/a.md", conformant_fm(title="Apples", tags=["fruit"]), PRIMARY_BODY)
         write_md(self.wiki_root / "papers/b.md", conformant_fm(title="Networking", tags=["infra"]), PRIMARY_BODY)
         self.assertEqual(ev.near_duplicate_candidates(ev.load_pages(self.wiki_root)), [])
+
+    def test_emit_brief_lists_grounding_evidence(self):
+        (self.wiki_root / "sources").mkdir()
+        (self.wiki_root / "sources/repo.md").write_text("manifest\n")
+        (self.wiki_root / "sources/repo-evidence.md").write_text("evidence\n")
+        write_md(
+            self.wiki_root / "papers/a.md",
+            conformant_fm(
+                title="A", source="sources/repo.md", source_mode="manifest",
+                evidence="sources/repo-evidence.md",
+            ),
+            PRIMARY_BODY,
+        )
+        brief = ev.emit_brief(self.wiki_root).read_text()
+        self.assertIn("sources/repo.md", brief)
+        self.assertIn("sources/repo-evidence.md", brief)
 
 
 def stub(payload: str):
@@ -166,6 +189,108 @@ class JudgeMetricsTest(unittest.TestCase):
         self.assertTrue(r.passed)
         self.assertFalse(r.error)    # legitimate N/A, NOT a judge error
 
+    def test_grounding_manifest_without_evidence_fails_before_judging(self):
+        src = "sources/repo.md"
+        (self.wiki_root / src).write_text("Repository: example/repo\nURL: https://example.com/repo\n")
+        write_md(
+            self.wiki_root / "papers/a.md",
+            conformant_fm(title="A", type="paper", source=src, source_mode="manifest"),
+            "Claim derived from repository inspection.",
+        )
+
+        def should_not_run(_prompt):
+            self.fail("judge should not run without required grounding evidence")
+
+        r = ev.check_grounding(ev.load_pages(self.wiki_root), self.wiki_root, should_not_run)
+        self.assertEqual(r.score, 0.0)
+        self.assertFalse(r.passed)
+        self.assertIn("requires evidence", r.detail)
+        self.assertEqual(r.extra["missing_evidence"], ["papers/a.md"])
+
+    def test_grounding_manifest_uses_evidence_pack(self):
+        src = "sources/repo.md"
+        evidence = "sources/repo-evidence.md"
+        (self.wiki_root / src).write_text("Repository: example/repo\nURL: https://example.com/repo\n")
+        (self.wiki_root / evidence).write_text("The repository exposes four read-only graph tools.\n")
+        write_md(
+            self.wiki_root / "papers/a.md",
+            conformant_fm(
+                title="A", type="paper", source=src, source_mode="manifest",
+                evidence=[evidence],
+            ),
+            "The repository exposes four read-only graph tools.",
+        )
+        prompts = []
+
+        def judge(prompt):
+            prompts.append(prompt)
+            return '{"score":1.0,"unsupported":[]}'
+
+        r = ev.check_grounding(ev.load_pages(self.wiki_root), self.wiki_root, judge)
+        self.assertTrue(r.passed)
+        self.assertIn("Repository: example/repo", prompts[0])
+        self.assertIn("four read-only graph tools", prompts[0])
+        self.assertIn(evidence, prompts[0])
+
+    def test_grounding_pdf_uses_text_evidence_pack(self):
+        src = "sources/paper.pdf"
+        evidence = "sources/paper-evidence.md"
+        (self.wiki_root / src).write_bytes(b"%PDF-1.7\x00binary")
+        (self.wiki_root / evidence).write_text("The study reports a 12 percent improvement.\n")
+        write_md(
+            self.wiki_root / "papers/a.md",
+            conformant_fm(title="A", type="paper", source=src, evidence=evidence),
+            "The study reports a 12 percent improvement.",
+        )
+        prompts = []
+
+        def judge(prompt):
+            prompts.append(prompt)
+            return '{"score":1.0,"unsupported":[]}'
+
+        r = ev.check_grounding(ev.load_pages(self.wiki_root), self.wiki_root, judge)
+        self.assertTrue(r.passed)
+        self.assertIn("12 percent improvement", prompts[0])
+        self.assertNotIn("%PDF-1.7", prompts[0])
+
+    def test_grounding_missing_primary_source_fails_even_with_evidence(self):
+        evidence = "sources/repo-evidence.md"
+        (self.wiki_root / evidence).write_text("Repository evidence.\n")
+        write_md(
+            self.wiki_root / "papers/a.md",
+            conformant_fm(
+                title="A", type="paper", source="sources/missing-repo.md",
+                source_mode="manifest", evidence=evidence,
+            ),
+            "Repository claim.",
+        )
+        r = ev.check_grounding(
+            ev.load_pages(self.wiki_root), self.wiki_root,
+            lambda _prompt: self.fail("judge should not run with a missing primary source"),
+        )
+        self.assertEqual(r.score, 0.0)
+        self.assertIn("does not exist", r.detail)
+
+    def test_grounding_oversized_evidence_fails_instead_of_truncating(self):
+        src = "sources/repo.md"
+        evidence = "sources/repo-evidence.md"
+        (self.wiki_root / src).write_text("manifest\n")
+        (self.wiki_root / evidence).write_text("x" * (ev.GROUNDING_MATERIAL_LIMIT + 1))
+        write_md(
+            self.wiki_root / "papers/a.md",
+            conformant_fm(
+                title="A", type="paper", source=src, source_mode="manifest",
+                evidence=evidence,
+            ),
+            "Repository claim.",
+        )
+        r = ev.check_grounding(
+            ev.load_pages(self.wiki_root), self.wiki_root,
+            lambda _prompt: self.fail("judge should not run with oversized evidence"),
+        )
+        self.assertEqual(r.score, 0.0)
+        self.assertIn("exceeds", r.detail)
+
     # ── contradictions ──
     def test_contradictions_clean_passes(self):
         write_md(self.wiki_root / "papers/a.md", conformant_fm(title="A"), PRIMARY_BODY)
@@ -181,6 +306,29 @@ class JudgeMetricsTest(unittest.TestCase):
                                     stub('{"score":0.0,"conflicts":["a says X, b says Y"]}'))
         self.assertFalse(r.passed)
         self.assertIn("X", r.detail)
+
+    def test_documented_source_drift_is_reported_without_failing(self):
+        write_md(self.wiki_root / "papers/a.md", conformant_fm(title="A"), PRIMARY_BODY)
+        payload = (
+            '{"score":0.5,"conflicts":[{"description":"README says 7 tools; current code has 4",'
+            '"classification":"documented_source_drift"}]}'
+        )
+        r = ev.check_contradictions(ev.load_pages(self.wiki_root), stub(payload))
+        self.assertEqual(r.score, 1.0)
+        self.assertTrue(r.passed)
+        self.assertIn("documented source drift", r.detail.lower())
+        self.assertEqual(len(r.extra["documented_source_drift"]), 1)
+
+    def test_unresolved_typed_contradiction_still_fails(self):
+        write_md(self.wiki_root / "papers/a.md", conformant_fm(title="A"), PRIMARY_BODY)
+        payload = (
+            '{"score":1.0,"conflicts":[{"description":"Page A says X; page B says Y",'
+            '"classification":"unresolved"}]}'
+        )
+        r = ev.check_contradictions(ev.load_pages(self.wiki_root), stub(payload))
+        self.assertLess(r.score, 1.0)
+        self.assertFalse(r.passed)
+        self.assertIn("Page A says X", r.detail)
 
     def test_malformed_judge_is_loud_error_not_silent_pass(self):
         # A judge that was expected to produce a verdict but returns garbage is an
@@ -234,6 +382,27 @@ class JudgeMetricsTest(unittest.TestCase):
         r = ev.check_disambiguation(ev.load_pages(self.wiki_root), stub('{"score":1.0,"distinct":true}'))
         self.assertEqual(r.score, 1.0)
         self.assertTrue(r.passed)
+
+    def test_disambiguation_distinct_boolean_overrides_fuzzy_score(self):
+        write_md(self.wiki_root / "papers/a.md", conformant_fm(title="A", source="sources/x.md"), PRIMARY_BODY)
+        write_md(self.wiki_root / "papers/b.md", conformant_fm(title="B", source="sources/x.md"), PRIMARY_BODY)
+        r = ev.check_disambiguation(
+            ev.load_pages(self.wiki_root),
+            stub('{"score":0.7,"distinct":true,"rationale":"Related but separate layers."}'),
+        )
+        self.assertEqual(r.score, 1.0)
+        self.assertTrue(r.passed)
+        self.assertEqual(r.extra["near_duplicates"], [])
+
+    def test_disambiguation_not_distinct_boolean_overrides_fuzzy_score(self):
+        write_md(self.wiki_root / "papers/a.md", conformant_fm(title="A", source="sources/x.md"), PRIMARY_BODY)
+        write_md(self.wiki_root / "papers/b.md", conformant_fm(title="B", source="sources/x.md"), PRIMARY_BODY)
+        r = ev.check_disambiguation(
+            ev.load_pages(self.wiki_root),
+            stub('{"score":1.0,"distinct":false,"rationale":"Same concept."}'),
+        )
+        self.assertEqual(r.score, 0.0)
+        self.assertFalse(r.passed)
 
     def test_disambiguation_candidate_not_distinct_fails(self):
         write_md(self.wiki_root / "papers/a.md", conformant_fm(title="A", source="sources/x.md"), PRIMARY_BODY)

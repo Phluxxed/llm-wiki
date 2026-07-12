@@ -1,0 +1,65 @@
+{
+  "kind": "context_pack",
+  "seed": {
+    "page": "notes/a.md",
+    "title": "A",
+    "type": "article",
+    "category": "X",
+    "tags": [
+      "agent"
+    ],
+    "source": "sources/a.md",
+    "description": "A test page.",
+    "content": "Seed body.\n\nSee [B](./b.md)\n\n> **Open question:** Does B matter?"
+  },
+  "budget": {
+    "requested_tokens": 500,
+    "approx_chars": 2000
+  },
+  "included_pages": [
+    {
+      "page": "notes/b.md",
+      "title": "B",
+      "type": "article",
+      "category": "X",
+      "tags": [
+        "agent"
+      ],
+      "source": "",
+      "description": "A test page.",
+      "reasons": [
+        "outlink:body_link",
+        "shared_tag:agent"
+      ],
+      "score": 1.3,
+      "content": "B body."
+    }
+  ],
+  "source_refs": [
+    {
+      "page": "notes/a.md",
+      "source": "sources/a.md"
+    }
+  ],
+  "source_excerpts": [
+    {
+      "source": "sources/a.md",
+      "content": "Raw source excerpt."
+    }
+  ],
+  "open_questions": [
+    {
+      "page": "notes/a.md",
+      "question": "Does B matter?"
+    }
+  ],
+  "open_risks": [],
+  "recent_log": [
+    {
+      "date": "2026-06-23",
+      "action": "init",
+      "detail": "Created wiki"
+    }
+  ],
+  "gaps": []
+}
