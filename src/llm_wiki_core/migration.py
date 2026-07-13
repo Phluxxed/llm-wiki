@@ -13,7 +13,13 @@ from typing import Any
 import uuid
 
 from .compiler import compile_context
-from .config import CURRENT_RUNTIME_CONTRACT, CURRENT_SCHEMA_VERSION, inspect_wiki_config
+from .config import (
+    CURRENT_RUNTIME_CONTRACT,
+    CURRENT_SCHEMA_VERSION,
+    DEFAULT_PROVIDERS,
+    LEGACY_DEFAULT_PROVIDERS,
+    inspect_wiki_config,
+)
 from .contracts import CompileRequest, ContractError
 from .doctor import inspect_runtime
 from .script_drift import ADAPTER_MARKER, inspect_scripts
@@ -125,6 +131,10 @@ def inspect_migration(wiki_root: str | Path) -> MigrationPlan:
     elif config.status == "legacy_missing":
         operations.append(
             _operation(root, ".llm-wiki.toml", _render_config(customizations))
+        )
+    elif config.config is not None and config.config.compiler.providers == LEGACY_DEFAULT_PROVIDERS:
+        operations.append(
+            _operation(root, ".llm-wiki.toml", _enable_loci_default(root / ".llm-wiki.toml"))
         )
 
     adapter_content = {
@@ -410,6 +420,7 @@ def _render_config(customizations: list[str]) -> str:
     if "exclude_directory:.agents" in customizations:
         excludes.append(".agents")
     rendered_excludes = ", ".join(json.dumps(value) for value in excludes)
+    rendered_providers = ", ".join(json.dumps(value) for value in DEFAULT_PROVIDERS)
     return f'''\
 schema_version = "{CURRENT_SCHEMA_VERSION}"
 runtime_contract = "{CURRENT_RUNTIME_CONTRACT}"
@@ -420,7 +431,7 @@ exclude_directories = [{rendered_excludes}]
 source_directory = "sources"
 
 [compiler]
-providers = ["seed", "frontmatter", "text", "graph", "source"]
+providers = [{rendered_providers}]
 target_bytes = 48000
 max_bytes = 192000
 target_items = 24
@@ -433,6 +444,32 @@ default = "unspecified"
 [stewardship]
 mode = "manual"
 '''
+
+
+def _enable_loci_default(path: Path) -> str:
+    content = path.read_text(encoding="utf-8")
+    section = re.search(r"(?ms)^\[compiler\][ \t]*\n(?P<body>.*?)(?=^\[|\Z)", content)
+    if section is None:
+        raise MigrationError(
+            "MIGRATION_CONFIG_UNSUPPORTED",
+            "Compatible config has no compiler section to upgrade",
+            {"path": ".llm-wiki.toml"},
+        )
+    body = section.group("body")
+    providers = re.search(
+        r"(?ms)^(?P<indent>[ \t]*)providers[ \t]*=[ \t]*\[.*?\](?P<suffix>[ \t]*(?:#.*)?)$",
+        body,
+    )
+    if providers is None:
+        raise MigrationError(
+            "MIGRATION_CONFIG_UNSUPPORTED",
+            "Compatible config provider list cannot be upgraded safely",
+            {"path": ".llm-wiki.toml"},
+        )
+    rendered = ", ".join(json.dumps(value) for value in DEFAULT_PROVIDERS)
+    replacement = f'{providers.group("indent")}providers = [{rendered}]{providers.group("suffix")}'
+    upgraded_body = body[: providers.start()] + replacement + body[providers.end() :]
+    return content[: section.start("body")] + upgraded_body + content[section.end("body") :]
 
 
 def _sha256(content: bytes) -> str:

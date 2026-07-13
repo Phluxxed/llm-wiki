@@ -9,7 +9,7 @@ from .providers.base import CandidateEvidence
 from .state import state_compatibility
 
 
-_PROVIDER_ORDER = {"seed": 0, "frontmatter": 1, "text": 2, "graph": 3, "source": 4, "loci": 5}
+_PROVIDER_ORDER = {"seed": 0, "loci": 1, "frontmatter": 2, "graph": 3, "source": 4, "text": 5}
 
 
 def select_candidates(
@@ -114,12 +114,14 @@ def _rank(candidate: CandidateEvidence, state_view: str, required: tuple[str, ..
     else:
         route_rank = 3
     coverage_rank = -len(set(candidate.roles) & set(required))
+    retrieval_rank = candidate.retrieval_rank if candidate.retrieval_rank is not None else 2**31
     return (
         _PROVIDER_ORDER.get(candidate.provider, 50),
         route_rank,
         state_rank,
         authority_rank,
         coverage_rank,
+        retrieval_rank,
         candidate.id,
     )
 

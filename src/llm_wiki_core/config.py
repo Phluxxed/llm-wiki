@@ -15,8 +15,9 @@ CURRENT_RUNTIME_CONTRACT = "2"
 CONFIG_FILENAME = ".llm-wiki.toml"
 
 DEFAULT_EXCLUDES = (".git", ".venv", "node_modules")
-DEFAULT_PROVIDERS = ("seed", "frontmatter", "text", "graph", "source")
-KNOWN_PROVIDERS = {*DEFAULT_PROVIDERS, "loci"}
+LEGACY_DEFAULT_PROVIDERS = ("seed", "frontmatter", "text", "graph", "source")
+DEFAULT_PROVIDERS = (*LEGACY_DEFAULT_PROVIDERS, "loci")
+KNOWN_PROVIDERS = set(DEFAULT_PROVIDERS)
 KNOWN_STATES = {
     "current",
     "historical",

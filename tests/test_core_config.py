@@ -9,7 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from llm_wiki_core.config import inspect_wiki_config
+from llm_wiki_core.config import DEFAULT_PROVIDERS, inspect_wiki_config
 
 
 VALID_CONFIG = """\
@@ -54,6 +54,9 @@ class WikiConfigTest(unittest.TestCase):
         self.assertEqual(result.status, "legacy_missing")
         self.assertIsNone(result.config)
         self.assertIsNone(result.error)
+
+    def test_loci_is_a_default_compiler_provider(self):
+        self.assertIn("loci", DEFAULT_PROVIDERS)
 
     def test_valid_config_is_typed_and_preserves_unknown_keys(self):
         self.write_config(VALID_CONFIG + "\n[extension]\nowner = \"local\"\n")

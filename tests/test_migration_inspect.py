@@ -93,6 +93,24 @@ class MigrationInspectTest(unittest.TestCase):
         self.assertEqual(plan["blockers"], [])
         self.assertEqual(plan["operations"], [])
 
+    def test_previous_generated_config_is_upgraded_without_losing_extensions(self):
+        initial = inspect_migration(self.root)
+        for operation in initial.operations:
+            path = self.root / operation.path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            content = operation.content
+            if operation.path == ".llm-wiki.toml":
+                content = content.replace(', "loci"]', "]") + '\n[extension]\nowner = "local"\n'
+            path.write_text(content, encoding="utf-8")
+
+        plan = inspect_migration(self.root).to_dict()
+
+        self.assertEqual(plan["blockers"], [])
+        self.assertEqual([item["path"] for item in plan["operations"]], [".llm-wiki.toml"])
+        upgraded = plan["operations"][0]["content"]
+        self.assertIn('providers = ["seed", "frontmatter", "text", "graph", "source", "loci"]', upgraded)
+        self.assertIn('[extension]\nowner = "local"', upgraded)
+
     def test_inspect_rejects_symlinked_tooling_outside_wiki(self):
         outside = Path(self._tmp.name) / "outside"
         outside.mkdir()

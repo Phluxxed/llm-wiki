@@ -12,6 +12,8 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from llm_wiki_core.compiler import compile_context
 from llm_wiki_core.contracts import CompileRequest
+from llm_wiki_core.providers.base import CandidateEvidence
+from llm_wiki_core.selection import select_candidates
 from tests.wiki_fixture import base_fm, write_md
 
 
@@ -117,6 +119,86 @@ class ProgressiveSelectionTest(unittest.TestCase):
         self.assertEqual(response["budget"]["envelope_bytes"], total - sum(serialized_items))
         self.assertEqual(response["budget"]["estimated_tokens"], (total + 3) // 4)
         self.assertIsNone(response["budget"]["limits"]["max_estimated_tokens"])
+
+    def test_loci_is_the_primary_non_seed_route_for_equivalent_coverage(self):
+        request = CompileRequest.from_mapping(
+            {"alias": "test", "question": "What owns traversal?", "seeds": []}
+        )
+        candidates = [
+            CandidateEvidence(
+                id="frontmatter:systems/wiki.md",
+                provider="frontmatter",
+                route="metadata_match",
+                page="systems/wiki.md",
+                source=None,
+                locator={"file": "systems/wiki.md"},
+                content="Broad page content.",
+                roles=("answer",),
+                selection_signals=("frontmatter_match",),
+                authored_state="current",
+                derived_flags=(),
+                authority_signals=(),
+            ),
+            CandidateEvidence(
+                id="loci:systems/wiki.md::Ownership#section",
+                provider="loci",
+                route="indexed_section",
+                page="systems/wiki.md",
+                source=None,
+                locator={"file": "systems/wiki.md", "start_line": 10, "end_line": 12},
+                content="Exact ownership section.",
+                roles=("answer",),
+                selection_signals=("indexed_symbol_match",),
+                authored_state="current",
+                derived_flags=(),
+                authority_signals=(),
+            ),
+        ]
+
+        selected, _ = select_candidates(candidates, request, ("answer",))
+
+        self.assertEqual([item.provider for item in selected], ["loci"])
+
+    def test_loci_retrieval_rank_beats_lexicographic_id_order(self):
+        request = CompileRequest.from_mapping(
+            {"alias": "test", "question": "What owns traversal?", "seeds": []}
+        )
+        candidates = [
+            CandidateEvidence(
+                id="loci:z-relevant#section",
+                provider="loci",
+                route="indexed_section",
+                page="systems/relevant.md",
+                source=None,
+                locator={"file": "systems/relevant.md"},
+                content="The exact traversal answer.",
+                roles=("answer",),
+                selection_signals=("indexed_symbol_match",),
+                authored_state="current",
+                derived_flags=(),
+                authority_signals=(),
+                retrieval_rank=0,
+            ),
+            CandidateEvidence(
+                id="loci:a-irrelevant#section",
+                provider="loci",
+                route="indexed_section",
+                page="systems/irrelevant.md",
+                source=None,
+                locator={"file": "systems/irrelevant.md"},
+                content="Alphabetically earlier but less relevant.",
+                roles=("answer",),
+                selection_signals=("indexed_symbol_match",),
+                authored_state="current",
+                derived_flags=(),
+                authority_signals=(),
+                retrieval_rank=1,
+            ),
+        ]
+
+        selected, _ = select_candidates(candidates, request, ("answer",))
+
+        self.assertEqual([item.id for item in selected], ["loci:z-relevant#section"])
 
 
 if __name__ == "__main__":

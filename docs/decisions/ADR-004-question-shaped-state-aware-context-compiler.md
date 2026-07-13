@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted; loci-specific provider posture superseded by ADR-005
 
 ## Date
 
@@ -34,7 +34,7 @@ Knowledge-state frontmatter is additive. Missing state normalizes to `unspecifie
 
 `wiki_context_pack` remains a compatibility surface for one deprecation window. The new compiler is additive because a seed-neighborhood pack and a question-shaped evidence compilation are not equivalent operations.
 
-The initial provider set is local and deterministic. `loci` is an optional navigation provider. Subagents, vector search, remote retrieval, and model-assisted classification are not required and may only be added behind the provider/query-shaping interfaces after separate review.
+The initial provider set is local and deterministic. The original optional posture for `loci` is superseded by [ADR-005](./ADR-005-loci-first-class-default-traversal.md). Subagents, vector search, remote retrieval, and model-assisted classification are not required and may only be added behind the provider/query-shaping interfaces after separate review.
 
 ## Alternatives Considered
 
@@ -70,7 +70,7 @@ Rejected as the production contract. Manual reads remain available for inspectio
 - Token counts remain estimates unless a tokenizer is configured.
 - Wiki authors may progressively adopt knowledge-state metadata without a destructive bulk migration.
 - The compiler must maintain deterministic provider, selection, and tie-breaking behavior for fixture tests.
-- Optional provider failure must be visible without discarding valid evidence from other providers.
+- Provider failure must be visible without discarding valid evidence from other providers.
 - A sufficiency flag describes deterministic evidence-role coverage, not final-answer correctness.
 - Content writes and Brain promotion remain outside MCP and under existing wiki governance.
 

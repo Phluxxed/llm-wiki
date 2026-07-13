@@ -14,7 +14,7 @@ Missing `knowledge_state` is `unspecified`, never inferred as `current`. Retriev
 
 Every current wiki declares `.llm-wiki.toml` with `schema_version = "1"` and `runtime_contract = "2"`. Content exclusions, source directory, providers, compiler targets/maximums, state field, and manual stewardship live there. Secrets, absolute registry identity, and machine-specific paths are rejected.
 
-The base provider set is `seed`, `frontmatter`, `text`, `graph`, and `source`. To opt into loci, install the compatible loci package in the same Python environment and add `"loci"` to `[compiler].providers`. Missing or stale loci state produces a structured diagnostic and deterministic local fallback; it is never a mandatory base dependency. See [loci provider](loci-provider.md).
+The default provider set is `seed`, `frontmatter`, `text`, `graph`, `source`, and `loci`. loci is the core section-navigation route for managed wikis and is invoked through its local `loci-mcp` stdio service; it does not need to share the `llm-wiki` Python environment. Missing, unindexed, stale, or failed loci state produces a structured diagnostic while the deterministic local providers continue. Removing `"loci"` from `[compiler].providers` is an explicit opt-out. See [loci provider](loci-provider.md).
 
 ## Migration and rollback
 

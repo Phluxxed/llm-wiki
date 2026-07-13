@@ -1,7 +1,7 @@
-# Optional loci provider
+# Core loci traversal provider
 
-loci is an optional section-navigation provider for the Context Compiler. It uses loci's supported read-only service boundary with freshness checks and converts current file/section results into ordinary compiler candidates with exact locators.
+loci is the default section-navigation provider for the Context Compiler. It searches the indexed wiki for the question, hydrates only the matched file/section ranges, and converts them into ordinary compiler candidates with exact locators.
 
-To enable it, install loci into the same Python environment as `llm-wiki` and add `"loci"` to `[compiler].providers` in `.llm-wiki.toml`. The base wheel deliberately has no loci dependency.
+The runtime calls the installed local `loci-mcp` stdio service. One compile performs a bounded `loci_search` followed by one batched `loci_get`, with a 15-second gateway timeout. This keeps the integration on loci's production MCP surface and avoids coupling the `llm-wiki` virtual environment to loci's parser dependencies. Fresh scaffolds and migrations include `"loci"` in `[compiler].providers`; removing it is an explicit opt-out. `LLM_WIKI_LOCI_MCP_COMMAND` may name an alternative executable, but command arguments and machine paths do not belong in wiki config.
 
-The provider validates that every returned path stays inside the wiki and that hydrated ranges resolve against current files. Unindexed, stale, absent, incompatible, or invalid results produce structured diagnostics; seed/frontmatter/text/graph/source retrieval continues deterministically. loci ranking is a retrieval signal, not authority or source support.
+The provider validates that every returned path stays inside the wiki before hydration. Unindexed, stale, absent, incompatible, or invalid results produce structured diagnostics; seed/frontmatter/text/graph/source retrieval continues deterministically. loci ranking is a retrieval signal, not authority or source support.

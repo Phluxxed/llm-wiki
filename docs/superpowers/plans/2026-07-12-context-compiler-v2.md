@@ -29,7 +29,7 @@ This is the complete production path, delivered in reversible slices. It is not 
 - `src/llm_wiki_mcp/registry.py::doctor` currently checks only basic wiki/tooling presence; it has no schema/runtime/drift status.
 - The existing MCP error boundary already uses the stable `{code, message, details}` envelope through `WikiMcpError`.
 - The current MCP tool registration and runtime tests provide stable seams for additive `wiki_compile_context` coverage.
-- `loci` exposes read-only `search_symbols` and `get_cached_file` service functions with optional freshness checks. Integration can therefore remain optional and fail explicitly without making `loci` a base dependency.
+- `loci` exposes read-only search and file hydration through local stdio MCP with freshness checks. Integration is default-on and degrades explicitly without coupling wiki virtual environments to loci's parser dependencies.
 - The working tree already contains unrelated user edits in `README.md`, `SKILL.md`, templates, eval/lint code, and tests. Implementation must not overwrite, stash, or absorb them accidentally.
 
 ## Dependency Graph
@@ -49,7 +49,7 @@ Local providers -> progressive selector -> compiled response
           |                 v
           |          MCP + canonical CLI
           v                 |
-Optional loci provider      v
+Default loci MCP provider   v
                       legacy adapter
                             |
                             v
@@ -228,15 +228,15 @@ The critical path is sequential through the public contracts, canonical core, fi
 
 **Estimated scope:** Medium (4 files).
 
-### Task 8: Add optional loci navigation
+### Task 8: Add core loci navigation
 
-**Description:** Implement `loci` as an optional read-only provider using its supported service boundary and freshness checks, while keeping the base install functional without it.
+**Description:** Implement `loci` as a default-on read-only provider using its supported local stdio MCP boundary and freshness checks, while keeping deterministic fallback functional without it.
 
 **Acceptance criteria:**
 
 - [x] When available and configured, loci results become section-level candidate evidence with exact file locators.
 - [x] Missing, stale, unindexed, or incompatible loci produces structured diagnostics and deterministic fallback.
-- [x] The base `llm-wiki` install has no mandatory loci dependency.
+- [x] The base `llm-wiki` install uses `loci-mcp` without a same-environment loci Python dependency.
 
 **Verification:**
 
@@ -518,7 +518,7 @@ The critical path is sequential through the public contracts, canonical core, fi
 | Contract | compiled response goldens, MCP/CLI parity, legacy pack goldens, error envelope |
 | Security/boundary | path traversal, source containment, unsafe config, registry separation, no MCP content writes |
 | Migration | no-write inspect/dry-run, drift blockers, idempotence, partial failure, receipt, verify, rollback |
-| Integration | fresh scaffold, missing runtime, incompatible runtime, optional loci degradation |
+| Integration | fresh scaffold, missing runtime, incompatible runtime, default loci degradation |
 | Cross-wiki | exact evidence spans and state/budget semantics for fixture, `ai_graph_ideas`, Brain |
 | Regression | full current test suite plus fixed generated-manifest bridge case |
 
@@ -533,7 +533,7 @@ Default verification is local and network-free. Live loci and real-wiki checks a
 | State metadata creates false certainty | High | Missing = `unspecified`; no bulk guessing; derived flags separate from authored state. |
 | Shared parser disagrees with lint/render | High | Differential fixtures first, then migrate consumers incrementally with full-suite checkpoints. |
 | Local wiki customization is overwritten | High | Semantic inspect/dry-run; unknown drift blocks; receipt-backed rollback. |
-| loci store is missing or stale | Medium | Optional provider, freshness check, structured degradation, deterministic local fallback. |
+| loci store is missing or stale | Medium | Default-on provider, freshness check, structured degradation, deterministic local fallback. |
 | Cross-wiki tests overfit implementation | High | Freeze questions and exact gold spans before grading implementation; include known bridge failure. |
 | Large response still exceeds a caller's real context | Medium | Caller/system hard maximum, exact bytes, uncovered roles, continuation guidance, no false sufficiency. |
 | Dirty worktree mixes unrelated changes | High | Clean feature worktree/branch; preserve user changes; inspect every staged diff before any commit. |

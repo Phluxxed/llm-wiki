@@ -115,6 +115,8 @@ llm-wiki compile-context --wiki . --alias my-wiki \
 
 The target size is an efficiency goal, not a recall ceiling. The compiler expands selected evidence while required roles remain uncovered, up to the explicit hard maximum, and reports provenance, authored state, omissions, exact byte use, uncovered roles, and its stop reason. See [Context Compiler and migration](docs/context-compiler.md).
 
+Managed wikis use the local `loci-mcp` stdio service as their default section-navigation route. If loci is unavailable or unindexed, the response reports that degradation and continues through frontmatter, text, graph, and source retrieval rather than silently pretending loci ran.
+
 ## MCP tools
 
 The MCP server is a context adapter over existing wiki folders. It does not

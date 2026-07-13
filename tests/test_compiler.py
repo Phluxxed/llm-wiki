@@ -96,9 +96,9 @@ class CompilerTest(unittest.TestCase):
         response = compile_context(self.root, self.request(), extra_providers=(FailingProvider(),)).to_dict()
 
         self.assertTrue(response["evidence"])
-        self.assertEqual(response["diagnostics"][0]["provider"], "broken")
-        self.assertEqual(response["diagnostics"][0]["code"], "PROVIDER_FAILED")
-        self.assertNotIn("provider exploded", response["diagnostics"][0]["message"])
+        diagnostic = next(item for item in response["diagnostics"] if item["provider"] == "broken")
+        self.assertEqual(diagnostic["code"], "PROVIDER_FAILED")
+        self.assertNotIn("provider exploded", diagnostic["message"])
 
     def test_unresolved_seed_is_structured_input_error(self):
         with self.assertRaises(ContractError) as raised:

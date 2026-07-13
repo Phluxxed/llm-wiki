@@ -8,7 +8,7 @@ Runtime contract: `2`
 
 - canonical page/graph/runtime core and strict versioned wiki config;
 - deterministic question shaping, local providers, progressive selection, exact budgeting, provenance/state/coverage/stop contracts;
-- optional read-only loci provider;
+- default-on, gracefully degradable loci MCP traversal provider;
 - MCP and CLI compiler parity;
 - frozen legacy context-pack behavior without wiki-local business-logic execution;
 - doctor and receipt-backed inspect/dry-run/apply/verify/rollback;

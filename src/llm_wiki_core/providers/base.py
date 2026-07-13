@@ -23,6 +23,7 @@ class CandidateEvidence:
     authored_state: str
     derived_flags: tuple[str, ...]
     authority_signals: tuple[str, ...]
+    retrieval_rank: int | None = None
     truncated: bool = False
 
 

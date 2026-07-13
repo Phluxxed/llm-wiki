@@ -54,7 +54,7 @@ Question + seed(s) + budget + state view
                     v
           Canonical Context Compiler
         /       |        |          \
-   exact     graph     source     optional loci
+   exact     graph     source     default loci MCP
         \       |        |          /
          candidate evidence records
                     |
@@ -117,7 +117,7 @@ exclude_directories = [".git", ".venv", "node_modules"]
 source_directory = "sources"
 
 [compiler]
-providers = ["seed", "frontmatter", "text", "graph", "source"]
+providers = ["seed", "frontmatter", "text", "graph", "source", "loci"]
 default_max_bytes = 48000
 default_max_items = 24
 
@@ -274,7 +274,7 @@ Initial providers:
 | `text` | bounded lexical matches with page/section locators | yes |
 | `graph` | links, backlinks, and bounded connecting paths | yes |
 | `source` | source references and bounded source excerpts | yes |
-| `loci` | indexed section/symbol navigation for Markdown and code references | optional; explicit diagnostic if unavailable/stale |
+| `loci` | indexed section/symbol navigation for Markdown and code references | default-on; explicit degradation if unavailable/stale |
 
 ## Selection and Budgeting
 
@@ -502,7 +502,7 @@ Default operation does not persist questions or evidence content outside the too
 - Existing `pyyaml`, `markdown`, and MCP dependencies.
 - Standard-library TOML read support on Python 3.11+; the Plan must choose and test the Python 3.10 compatibility path without silently raising the minimum supported version.
 - Existing `WikiMcpError` structured error boundary.
-- Optional `loci` integration through a provider boundary; no hard dependency in the base install.
+- Default-on `loci` integration through its local stdio MCP boundary; no same-environment Python dependency.
 
 No vector database, hosted service, model API, or new agent framework is required for v1.
 

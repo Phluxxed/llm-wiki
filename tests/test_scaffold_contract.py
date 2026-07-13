@@ -23,6 +23,14 @@ from tests.wiki_fixture import base_fm, create_wiki_root, write_md
 
 
 class ScaffoldContractTest(unittest.TestCase):
+    def test_fresh_scaffold_enables_loci_by_default(self):
+        config = (REPO_ROOT / "_templates" / "llm-wiki.toml").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'providers = ["seed", "frontmatter", "text", "graph", "source", "loci"]',
+            config,
+        )
+
     def test_scaffold_and_migration_install_the_same_adapters(self):
         self.assertEqual(
             (REPO_ROOT / "_templates" / "adapters" / "query.py").read_text(encoding="utf-8"),

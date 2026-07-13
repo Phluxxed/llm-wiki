@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from importlib.metadata import PackageNotFoundError, version
+import os
 from pathlib import Path
+import shutil
 import subprocess
 from typing import Any
 
@@ -122,8 +123,18 @@ def _adapter_runtime(root: Path, scripts: dict[str, dict]) -> dict[str, Any]:
 
 
 def _loci_status(config) -> dict[str, Any]:
-    if config.config is None or "loci" not in config.config.compiler.providers:
-        return {"status": "disabled"}
-    if importlib.util.find_spec("loci") is None:
-        return {"status": "unavailable", "freshness": "not_checked"}
-    return {"status": "ready", "freshness": "checked_on_provider_use"}
+    if config.config is not None and "loci" not in config.config.compiler.providers:
+        return {"status": "disabled", "opt_out": True, "transport": "mcp_stdio"}
+    command = os.environ.get("LLM_WIKI_LOCI_MCP_COMMAND", "loci-mcp")
+    if shutil.which(command) is None:
+        return {
+            "status": "degraded",
+            "code": "LOCI_MCP_UNAVAILABLE",
+            "transport": "mcp_stdio",
+            "freshness": "not_checked",
+        }
+    return {
+        "status": "ready",
+        "transport": "mcp_stdio",
+        "freshness": "checked_on_provider_use",
+    }

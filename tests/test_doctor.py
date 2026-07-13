@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -38,13 +39,23 @@ class DoctorTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_unmodified_legacy_wiki_is_migration_available(self):
-        result = doctor("test")
+        with patch("llm_wiki_core.doctor.shutil.which", return_value="/usr/local/bin/loci-mcp"):
+            result = doctor("test")
 
         self.assertEqual(result["compatibility"]["status"], "migration_available")
         self.assertEqual(result["config"]["status"], "legacy_missing")
         self.assertEqual(result["runtime"]["contract"], "2")
         self.assertEqual(result["scripts"]["scripts/query.py"]["status"], "canonical_legacy_copy")
-        self.assertEqual(result["providers"]["loci"]["status"], "disabled")
+        self.assertEqual(result["providers"]["loci"]["status"], "ready")
+        self.assertEqual(result["providers"]["loci"]["transport"], "mcp_stdio")
+
+    def test_default_loci_reports_explicit_degradation_when_mcp_is_missing(self):
+        with patch("llm_wiki_core.doctor.shutil.which", return_value=None):
+            result = doctor("test")
+
+        self.assertEqual(result["providers"]["loci"]["status"], "degraded")
+        self.assertEqual(result["providers"]["loci"]["code"], "LOCI_MCP_UNAVAILABLE")
+        self.assertEqual(result["compatibility"]["status"], "migration_available")
 
     def test_unknown_local_script_modification_blocks_automatic_migration(self):
         (self.wiki / "scripts" / "query.py").write_text("# private behavior\n", encoding="utf-8")
