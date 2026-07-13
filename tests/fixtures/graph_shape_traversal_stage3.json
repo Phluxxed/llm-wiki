@@ -1,0 +1,249 @@
+{
+  "schema_version": "1",
+  "approved_on": "2026-07-13",
+  "corpora": {
+    "ai_graph_ideas": {
+      "alias": "ai-graph-ideas",
+      "generic_hubs": [
+        "entities/llm-wiki.md",
+        "entities/loci.md",
+        "entities/anvil.md",
+        "entities/brain.md",
+        "synthesis/graph-as-governed-state.md",
+        "ledgers/graph-ai-ideas-ledger.md",
+        "ideas/governed-hybrid-retrieval-pipeline.md",
+        "ideas/graph-derived-eval-fixtures.md",
+        "ideas/compiled-context-fit-gate.md",
+        "ideas/graph-memory-fit-gate.md"
+      ]
+    },
+    "brain": {
+      "alias": "brain",
+      "generic_hubs": [
+        "projects/anvil-redux.md",
+        "patterns/anvil-mcp-boundary-model.md",
+        "self-model/brain-is-maintained-cognitive-wiki.md",
+        "projects/ai-graph-ideas.md"
+      ]
+    }
+  },
+  "fixtures": [
+    {
+      "id": "AI-D1",
+      "corpus": "ai_graph_ideas",
+      "shape": "direct_relation",
+      "question": "What source supports the faithfulness-before-connectivity rule, and what concrete rule does it propose for llm-wiki?",
+      "expected_pages": [
+        "papers/tactic-kg-faithful-small-agent-kg-construction.md",
+        "ideas/faithfulness-before-connectivity-graph-construction.md"
+      ],
+      "bridge_paths_any": [
+        [
+          "papers/tactic-kg-faithful-small-agent-kg-construction.md",
+          "ideas/faithfulness-before-connectivity-graph-construction.md"
+        ]
+      ],
+      "bridge_literals_any": [
+        "graph connectivity is not support",
+        "faithfulness before connectivity"
+      ],
+      "forbidden_paths": [],
+      "required_literals": [],
+      "answerable": true,
+      "graph_expected": true
+    },
+    {
+      "id": "AI-M1",
+      "corpus": "ai_graph_ideas",
+      "shape": "meaningful_bridge",
+      "question": "What evidence supports query-aware graph traversal for llm-wiki, and what still has to be proven locally before adoption?",
+      "expected_pages": [
+        "papers/query-aware-spreading-activation-multihop-retrieval.md",
+        "ideas/in-database-query-aware-traversal.md"
+      ],
+      "bridge_paths_any": [
+        [
+          "papers/query-aware-spreading-activation-multihop-retrieval.md",
+          "ideas/in-database-query-aware-traversal.md"
+        ]
+      ],
+      "bridge_literals_any": [
+        "first local experiment",
+        "exact search plus one-hop links"
+      ],
+      "forbidden_paths": [],
+      "required_literals": [],
+      "answerable": true,
+      "graph_expected": true
+    },
+    {
+      "id": "AI-F1",
+      "corpus": "ai_graph_ideas",
+      "shape": "false_hub_shortcut",
+      "question": "What evidence shows that Code-Graph-RAG improved Recall-Efficient Wiki Traversal?",
+      "expected_pages": [
+        "articles/code-graph-rag-repo.md",
+        "ideas/recall-efficient-wiki-traversal.md"
+      ],
+      "bridge_paths_any": [],
+      "bridge_literals_any": [],
+      "forbidden_paths": [
+        [
+          "articles/code-graph-rag-repo.md",
+          "entities/llm-wiki.md",
+          "ideas/recall-efficient-wiki-traversal.md"
+        ],
+        [
+          "articles/code-graph-rag-repo.md",
+          "entities/loci.md",
+          "ideas/recall-efficient-wiki-traversal.md"
+        ]
+      ],
+      "required_literals": [],
+      "answerable": false,
+      "graph_expected": true
+    },
+    {
+      "id": "AI-A1",
+      "corpus": "ai_graph_ideas",
+      "shape": "exact_attribute",
+      "question": "What were the exact recall, full-chain, total-model-input, and tool-round results of the link-attribution milestone?",
+      "expected_pages": [
+        "outcomes/recall-efficient-wiki-traversal-link-attribution-2026-07-12.md"
+      ],
+      "bridge_paths_any": [],
+      "bridge_literals_any": [],
+      "forbidden_paths": [],
+      "required_literals": [
+        "0.583",
+        "1/3",
+        "23.6%",
+        "50.0%"
+      ],
+      "answerable": true,
+      "graph_expected": false
+    },
+    {
+      "id": "AI-C1",
+      "corpus": "ai_graph_ideas",
+      "shape": "cannot_answer",
+      "question": "What measured recall improvement has query-aware traversal produced in Brain?",
+      "expected_pages": [
+        "ideas/in-database-query-aware-traversal.md"
+      ],
+      "bridge_paths_any": [],
+      "bridge_literals_any": [],
+      "forbidden_paths": [],
+      "required_literals": [],
+      "answerable": false,
+      "graph_expected": false
+    },
+    {
+      "id": "BR-D1",
+      "corpus": "brain",
+      "shape": "direct_relation",
+      "question": "How are Codex and Rowan related in this Brain?",
+      "expected_pages": [
+        "entities/codex.md",
+        "self-model/i-am-rowan.md"
+      ],
+      "bridge_paths_any": [
+        [
+          "entities/codex.md",
+          "self-model/i-am-rowan.md"
+        ]
+      ],
+      "bridge_literals_any": [
+        "I am Rowan in this collaboration with Vik"
+      ],
+      "forbidden_paths": [],
+      "required_literals": [],
+      "answerable": true,
+      "graph_expected": true
+    },
+    {
+      "id": "BR-M1",
+      "corpus": "brain",
+      "shape": "meaningful_bridge",
+      "question": "How can an idea incubated in AI Graph Ideas become durable Brain maintenance?",
+      "expected_pages": [
+        "projects/ai-graph-ideas.md",
+        "work-history/brain-steward-handoff-path.md"
+      ],
+      "bridge_paths_any": [
+        [
+          "projects/ai-graph-ideas.md",
+          "entities/anvil-mcp.md",
+          "work-history/brain-steward-handoff-path.md"
+        ],
+        [
+          "projects/ai-graph-ideas.md",
+          "projects/anvil-redux.md",
+          "work-history/brain-steward-handoff-path.md"
+        ]
+      ],
+      "bridge_literals_any": [
+        "bounded host-neutral packet",
+        "incubator and quarantine layer"
+      ],
+      "forbidden_paths": [],
+      "required_literals": [],
+      "answerable": true,
+      "graph_expected": true
+    },
+    {
+      "id": "BR-F1",
+      "corpus": "brain",
+      "shape": "false_hub_shortcut",
+      "question": "Does the Node Graph UI Layout pattern define how Rowan should work with Vik?",
+      "expected_pages": [
+        "patterns/node-graph-ui-layout.md",
+        "self-model/working-with-vik.md"
+      ],
+      "bridge_paths_any": [],
+      "bridge_literals_any": [],
+      "forbidden_paths": [
+        [
+          "patterns/node-graph-ui-layout.md",
+          "projects/anvil-redux.md",
+          "entities/vik.md",
+          "self-model/working-with-vik.md"
+        ]
+      ],
+      "required_literals": [],
+      "answerable": false,
+      "graph_expected": true
+    },
+    {
+      "id": "BR-A1",
+      "corpus": "brain",
+      "shape": "exact_attribute",
+      "question": "When Brain runs quality evals, which judge should it use and why?",
+      "expected_pages": [
+        "self-model/brain-eval-uses-owner-judge.md"
+      ],
+      "bridge_paths_any": [],
+      "bridge_literals_any": [],
+      "forbidden_paths": [],
+      "required_literals": [
+        "Codex as the LLM judge",
+        "owner-agent relationship"
+      ],
+      "answerable": true,
+      "graph_expected": false
+    },
+    {
+      "id": "BR-C1",
+      "corpus": "brain",
+      "shape": "cannot_answer",
+      "question": "What measured answer-quality improvement has three-hop traversal produced in Brain?",
+      "expected_pages": [],
+      "bridge_paths_any": [],
+      "bridge_literals_any": [],
+      "forbidden_paths": [],
+      "required_literals": [],
+      "answerable": false,
+      "graph_expected": false
+    }
+  ]
+}
