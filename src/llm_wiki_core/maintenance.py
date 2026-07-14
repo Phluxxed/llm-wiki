@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import date, datetime
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
 from typing import Any, Mapping
 
 from .config import ContentConfig, inspect_wiki_config
@@ -15,6 +16,97 @@ from .state import normalize_knowledge_state
 
 
 MAINTENANCE_CONTRACT_VERSION = "1"
+CANDIDATE_PROPOSAL_CONTRACT_VERSION = "1"
+
+MAINTENANCE_CANDIDATE_KINDS = (
+    "durable_outcome",
+    "explicit_contradiction",
+    "source_gap",
+    "stale_current_claim",
+    "supersession_gap",
+    "relationship_gap",
+    "relationship_revision",
+    "promotion_candidate",
+    "repeated_retrieval_gap",
+)
+SPECULATIVE_CANDIDATE_KINDS = frozenset(
+    {
+        "relationship_gap",
+        "relationship_revision",
+        "promotion_candidate",
+        "repeated_retrieval_gap",
+    }
+)
+ENDPOINT_DEDUPE_CANDIDATE_KINDS = frozenset(
+    {
+        "relationship_gap",
+        "relationship_revision",
+        "promotion_candidate",
+    }
+)
+
+_ALIAS_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def build_candidate_proposal(
+    *,
+    alias: str,
+    kind: str,
+    diagnostic: str,
+    review_question: str,
+    pages: list[str] | tuple[str, ...],
+    evidence: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+) -> dict[str, Any]:
+    """Build one canonical, read-only maintenance proposal for later steward review."""
+
+    target_wiki = _bounded_text(alias, "alias", max_chars=128)
+    if _ALIAS_PATTERN.fullmatch(target_wiki) is None:
+        raise ValueError("alias must contain only letters, numbers, dots, underscores, or hyphens")
+    if kind not in MAINTENANCE_CANDIDATE_KINDS:
+        raise ValueError(f"kind must be one of {', '.join(MAINTENANCE_CANDIDATE_KINDS)}")
+
+    normalized_pages = sorted({_normalize_page(page) for page in pages})
+    if kind in {"relationship_gap", "relationship_revision"} and len(normalized_pages) < 2:
+        raise ValueError(f"{kind} requires at least two distinct page endpoints")
+    if kind == "promotion_candidate" and not normalized_pages:
+        raise ValueError("promotion_candidate requires at least one page")
+
+    normalized_evidence = _normalize_proposal_evidence(evidence)
+    if not normalized_evidence:
+        raise ValueError("evidence must contain at least one item")
+
+    evidence_identities = sorted(
+        {str(item.get("content_hash") or item["ref"]) for item in normalized_evidence}
+    )
+    dedupe_identity: dict[str, Any] = {
+        "target_wiki": target_wiki,
+        "kind": kind,
+        "pages": normalized_pages,
+    }
+    if kind not in ENDPOINT_DEDUPE_CANDIDATE_KINDS:
+        dedupe_identity["evidence"] = evidence_identities
+    dedupe_key = f"maintenance-question:{_short_hash(dedupe_identity)}"
+    proposal_id = f"maintenance-observation:{_short_hash({'dedupe_key': dedupe_key, 'evidence': normalized_evidence})}"
+    signal = "speculative" if kind in SPECULATIVE_CANDIDATE_KINDS else "deterministic"
+
+    return {
+        "contract_version": CANDIDATE_PROPOSAL_CONTRACT_VERSION,
+        "id": proposal_id,
+        "dedupe_key": dedupe_key,
+        "kind": kind,
+        "target_wiki": target_wiki,
+        "diagnostic": _bounded_text(diagnostic, "diagnostic", max_chars=1_000),
+        "review_question": _bounded_text(review_question, "review_question", max_chars=1_000),
+        "pages": normalized_pages,
+        "evidence": normalized_evidence,
+        "signal": signal,
+        "eligibility": {
+            "mode": "recurrence_or_corroboration" if signal == "speculative" else "first_observation",
+            "independent_evidence_count": len(evidence_identities),
+        },
+        "disposition": "candidate_only",
+        "mutation": {"allowed": False, "commands": []},
+    }
 
 
 def build_maintenance_packet(
@@ -166,6 +258,66 @@ def _source_gap_candidates(root: Path, page: WikiPage, content: ContentConfig) -
             )
         )
     return candidates
+
+
+def _bounded_text(value: Any, field: str, *, max_chars: int) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{field} must be a non-empty string")
+    if "\x00" in text:
+        raise ValueError(f"{field} must not contain null bytes")
+    if len(text) > max_chars:
+        raise ValueError(f"{field} must be at most {max_chars} characters")
+    return text
+
+
+def _normalize_page(value: Any) -> str:
+    text = _bounded_text(value, "pages[]", max_chars=500).replace("\\", "/")
+    path = PurePosixPath(text)
+    if path.is_absolute() or ".." in path.parts or (path.parts and ":" in path.parts[0]):
+        raise ValueError("pages[] must be a relative path inside the target wiki")
+    normalized = path.as_posix()
+    if normalized in {"", "."}:
+        raise ValueError("pages[] must identify a wiki page")
+    return normalized
+
+
+def _normalize_proposal_evidence(
+    evidence: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+) -> list[dict[str, str]]:
+    if not isinstance(evidence, (list, tuple)):
+        raise ValueError("evidence must be a list")
+    normalized: dict[str, dict[str, str]] = {}
+    for index, item in enumerate(evidence):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"evidence[{index}] must be an object")
+        unknown = set(item) - {"ref", "note", "content_hash"}
+        if unknown:
+            raise ValueError(f"evidence[{index}] contains unsupported fields: {', '.join(sorted(unknown))}")
+        record = {"ref": _bounded_text(item.get("ref"), f"evidence[{index}].ref", max_chars=2_000)}
+        if item.get("note") is not None:
+            record["note"] = _bounded_text(item["note"], f"evidence[{index}].note", max_chars=1_000)
+        if item.get("content_hash") is not None:
+            record["content_hash"] = _bounded_text(
+                item["content_hash"],
+                f"evidence[{index}].content_hash",
+                max_chars=128,
+            )
+        normalized[_canonical_json(record)] = record
+    return sorted(
+        normalized.values(),
+        key=lambda item: (item["ref"], item.get("content_hash", ""), item.get("note", "")),
+    )
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _short_hash(value: Any) -> str:
+    return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()[:16]
 
 
 def _candidate(

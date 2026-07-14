@@ -10,7 +10,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from llm_wiki_core.maintenance import build_maintenance_packet
+from llm_wiki_core.maintenance import build_candidate_proposal, build_maintenance_packet
 from llm_wiki_core.migration import inspect_migration
 from tests.wiki_fixture import base_fm, create_wiki_root, write_md
 
@@ -89,6 +89,92 @@ class MaintenancePacketTest(unittest.TestCase):
         self.assertEqual(first["candidates"], [])
         self.assertTrue(first["unknowns"])
         self.assertNotEqual(first["status"], "clean")
+
+
+class MaintenanceCandidateProposalTest(unittest.TestCase):
+    def test_builds_strong_read_only_proposal_for_durable_outcome(self):
+        proposal = build_candidate_proposal(
+            alias="anvil-brain-codex",
+            kind="durable_outcome",
+            diagnostic="The approved implementation result is not represented in Brain.",
+            review_question="Should this verified outcome become durable Brain knowledge?",
+            pages=["projects/anvil-redux.md"],
+            evidence=[
+                {
+                    "ref": "docs/plans/implementation.md:42",
+                    "note": "approved result",
+                    "content_hash": "abc123",
+                }
+            ],
+        )
+
+        self.assertEqual(proposal["contract_version"], "1")
+        self.assertEqual(proposal["kind"], "durable_outcome")
+        self.assertEqual(proposal["target_wiki"], "anvil-brain-codex")
+        self.assertEqual(proposal["signal"], "deterministic")
+        self.assertEqual(proposal["eligibility"]["mode"], "first_observation")
+        self.assertEqual(proposal["eligibility"]["independent_evidence_count"], 1)
+        self.assertEqual(proposal["disposition"], "candidate_only")
+        self.assertEqual(proposal["mutation"], {"allowed": False, "commands": []})
+        self.assertRegex(proposal["id"], r"^maintenance-observation:[0-9a-f]{16}$")
+        self.assertRegex(proposal["dedupe_key"], r"^maintenance-question:[0-9a-f]{16}$")
+
+    def test_relationship_proposal_is_order_invariant_and_requires_review_threshold(self):
+        common = {
+            "alias": "anvil-brain-codex",
+            "kind": "relationship_gap",
+            "diagnostic": "Repeated retrieval evidence suggests a missing route.",
+            "review_question": "Should these Brain pages be connected?",
+        }
+        first = build_candidate_proposal(
+            **common,
+            pages=["patterns/graph.md", "projects/anvil-redux.md"],
+            evidence=[
+                {"ref": "trace:b", "content_hash": "hash-b"},
+                {"ref": "trace:a", "content_hash": "hash-a"},
+            ],
+        )
+        second = build_candidate_proposal(
+            **common,
+            pages=["./projects/anvil-redux.md", "patterns\\graph.md"],
+            evidence=[
+                {"ref": "trace:a", "content_hash": "hash-a"},
+                {"ref": "trace:b", "content_hash": "hash-b"},
+            ],
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["signal"], "speculative")
+        self.assertEqual(first["eligibility"]["mode"], "recurrence_or_corroboration")
+        self.assertEqual(first["eligibility"]["independent_evidence_count"], 2)
+        self.assertEqual(
+            first["pages"],
+            ["patterns/graph.md", "projects/anvil-redux.md"],
+        )
+
+    def test_rejects_invalid_or_unsupported_proposals(self):
+        valid = {
+            "alias": "anvil-brain-codex",
+            "kind": "relationship_gap",
+            "diagnostic": "A route may be missing.",
+            "review_question": "Should these pages be connected?",
+            "pages": ["a.md", "b.md"],
+            "evidence": [{"ref": "trace:1"}],
+        }
+        invalid_cases = [
+            {**valid, "alias": ""},
+            {**valid, "kind": "invented_kind"},
+            {**valid, "review_question": ""},
+            {**valid, "pages": ["../outside.md", "b.md"]},
+            {**valid, "pages": ["a.md"]},
+            {**valid, "evidence": []},
+            {**valid, "evidence": [{"ref": ""}]},
+        ]
+
+        for case in invalid_cases:
+            with self.subTest(case=case):
+                with self.assertRaises(ValueError):
+                    build_candidate_proposal(**case)
 
 
 if __name__ == "__main__":
