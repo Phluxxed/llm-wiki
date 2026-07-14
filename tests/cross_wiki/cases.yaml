@@ -42,7 +42,7 @@
     - page: projects/anvil-redux.md
       provider: seed
       role: endpoint
-      source_line: 28
+      source_line: 39
       authored_state: unspecified
       text: The current Brain shape is intentionally plain llm-wiki. Anvil owns setup metadata, routing, bootstrap, and tool orchestration. llm-wiki owns the scaffold, page contract, graph/context tooling, lint, render, and wiki operating rules.
   forbidden_text:
