@@ -498,11 +498,41 @@ def _content_blob(pages: list[dict], limit: int = 60000) -> str:
     return "\n\n".join(f"### {p['file']}\n{_body(p['text'])}" for p in pages)[:limit]
 
 
-def check_contradictions(pages: list[dict], judge: Judge) -> MetricResult:
+def check_contradictions(
+    pages: list[dict], judge: Judge, focus_files: set[str] | None = None,
+) -> MetricResult:
     """Conflicting claims about the same tool/service/credential/behaviour across
-    pages. Unparseable judge output self-skips (None), never a silent 0."""
+    pages. When focus_files is supplied, unchanged-only findings are reported but
+    cannot fail the metric. Unparseable judge output fails loudly."""
     if not pages:
         return MetricResult("absence_of_contradictions", None, True, "no pages to compare")
+    scoped = focus_files is not None
+    focus = set(focus_files or ())
+    if scoped and not any(p["file"] in focus for p in pages):
+        raise ValueError("contradiction scope contains no loaded wiki pages")
+    ordered_pages = (
+        [p for p in pages if p["file"] in focus]
+        + [p for p in pages if p["file"] not in focus]
+        if scoped else pages
+    )
+    scope_instruction = ""
+    conflict_schema = (
+        '{"description":"<specific conflict>",'
+        '"classification":"unresolved|documented_source_drift"}'
+    )
+    if scoped:
+        focus_list = ", ".join(sorted(focus))
+        scope_instruction = (
+            "The candidate scope is CHANGED PAGES: " + focus_list + ". Inspect all "
+            "pages for context, but set changed_page to the exact changed-page path "
+            "involved in each finding, or null when the conflict is entirely between "
+            "unchanged pages. Do not attribute an unchanged-only conflict to a changed page. "
+        )
+        conflict_schema = (
+            '{"description":"<specific conflict>",'
+            '"classification":"unresolved|documented_source_drift",'
+            '"changed_page":"<exact changed-page path>|null"}'
+        )
     prompt = (
         "You are a rigorous consistency auditor. Find CONTRADICTIONS within or "
         "across the wiki pages below — conflicting claims about the same tool, "
@@ -512,23 +542,32 @@ def check_contradictions(pages: list[dict], judge: Judge) -> MetricResult:
         "a finding as documented_source_drift only when the wiki explicitly presents "
         "both versions, identifies which source/version/time each belongs to, and does "
         "not assert the stale version as current truth. Otherwise classify it unresolved.\n\n"
-        f"PAGES:\n{_content_blob(pages)}\n\n"
+        f"{scope_instruction}\n\nPAGES:\n{_content_blob(ordered_pages)}\n\n"
         'Return STRICT JSON: {"score":<0..1, 1=no contradictions 0=explicit conflict>,'
-        '"conflicts":[{"description":"<specific conflict>",'
-        '"classification":"unresolved|documented_source_drift"}],'
+        f'"conflicts":[{conflict_schema}],'
         '"rationale":"<one sentence>"}')
     try:
         res = _judge_json(judge, prompt, label="absence_of_contradictions")
+        raw_conflicts = res.get("conflicts") or []
+        if scoped:
+            for item in raw_conflicts:
+                if not isinstance(item, dict) or "changed_page" not in item:
+                    raise JudgeError(
+                        "scoped contradiction finding omitted required changed_page attribution"
+                    )
     except JudgeError as e:
         return _judge_error_result("absence_of_contradictions", e)
     score = float(res.get("score") or 0.0)
-    raw_conflicts = res.get("conflicts") or []
     conflicts = []
     documented_drift = []
+    out_of_scope = []
     for item in raw_conflicts:
         if isinstance(item, dict):
             description = str(item.get("description") or item.get("conflict") or item)
             classification = str(item.get("classification") or "unresolved").strip().lower()
+            if scoped and item.get("changed_page") not in focus:
+                out_of_scope.append(description)
+                continue
             if classification == "documented_source_drift":
                 documented_drift.append(description)
             else:
@@ -556,11 +595,14 @@ def check_contradictions(pages: list[dict], judge: Judge) -> MetricResult:
         )
     else:
         detail = "No contradictions found."
+    if out_of_scope:
+        detail += f" {len(out_of_scope)} unchanged-only conflict(s) reported outside candidate scope."
     return MetricResult("absence_of_contradictions", score,
                         score >= DEFAULT_THRESHOLDS["absence_of_contradictions"],
                         _clip(detail, 1500), extra={
                             "conflicts": conflicts[:20],
                             "documented_source_drift": documented_drift[:20],
+                            "out_of_scope_conflicts": out_of_scope[:20],
                         })
 
 
@@ -588,10 +630,15 @@ def check_redundancy(pages: list[dict], judge: Judge) -> MetricResult:
                         insights=res.get("insights", "") or "")
 
 
-def check_disambiguation(pages: list[dict], judge: Judge) -> MetricResult:
+def check_disambiguation(
+    pages: list[dict], judge: Judge, focus_files: set[str] | None = None,
+) -> MetricResult:
     """For each near-duplicate candidate pair, the judge confirms whether the pages
     are genuinely distinct or should merge. No candidates → nothing ambiguous (1.0)."""
     pairs = near_duplicate_candidates(pages)
+    if focus_files is not None:
+        focus = set(focus_files)
+        pairs = [pair for pair in pairs if pair[0] in focus or pair[1] in focus]
     if not pairs:
         return MetricResult("disambiguation", 1.0, True, "no near-duplicate candidates")
     by_file = {p["file"]: p for p in pages}
@@ -704,20 +751,76 @@ JUDGE_METRIC_NAMES = ["grounding", "absence_of_contradictions",
                       "redundancy_index", "disambiguation"]
 
 
-def run_once(wiki_root: Path, judge: Judge | None) -> list[MetricResult]:
+def changed_page_files(wiki_root: Path, base_ref: str, pages: list[dict]) -> set[str]:
+    """Return loaded wiki pages changed from base_ref, including untracked pages.
+
+    Git output is intersected with the loader's page set, so sources, rendered
+    artifacts, logs, and other non-page files cannot enter the judge scope.
+    """
+    root = Path(wiki_root).resolve()
+    ref = str(base_ref or "").strip()
+    if not ref:
+        raise ValueError("--changed-since requires a non-empty Git ref")
+
+    verify = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+    if verify.returncode != 0:
+        detail = _trim_process_output(verify.stderr) or "unknown Git error"
+        raise ValueError(f"cannot diff Git ref {ref!r}: {detail}")
+    base_commit = verify.stdout.strip()
+
+    commands = [
+        ["git", "-C", str(root), "diff", "--name-only", "--diff-filter=ACMR", "-z", base_commit, "--"],
+        ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "-z", "--"],
+    ]
+    changed: set[str] = set()
+    for command in commands:
+        proc = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            detail = _trim_process_output(proc.stderr) or "unknown Git error"
+            raise ValueError(f"cannot determine changed wiki pages: {detail}")
+        changed.update(path for path in proc.stdout.split("\0") if path)
+
+    loaded = {p["file"] for p in pages}
+    selected = changed & loaded
+    if not selected:
+        raise ValueError(f"no changed wiki pages found since {ref!r}")
+    return selected
+
+
+def run_once(
+    wiki_root: Path, judge: Judge | None, focus_files: set[str] | None = None,
+) -> list[MetricResult]:
     """One eval pass: deterministic metrics always; judge metrics if a judge is
-    available, else skipped (None) placeholders so the report is complete."""
+    available, else skipped (None) placeholders so the report is complete.
+    Structural validity always covers the full wiki; focus_files scopes only the
+    judge-backed candidate checks."""
     pages = load_pages(wiki_root)
     results = [check_structural(pages, wiki_root)]
+    focused_pages = pages
+    if focus_files is not None:
+        focus = set(focus_files)
+        focused_pages = [p for p in pages if p["file"] in focus]
+        if not focused_pages:
+            raise ValueError("evaluation scope contains no loaded wiki pages")
     if judge is None:
         results += [MetricResult(n, None, True,
                                  "no judge available — not scored (use an agent CLI on PATH or --judge)")
                     for n in JUDGE_METRIC_NAMES]
         return results
-    results.append(check_grounding(pages, wiki_root, judge))
-    results.append(check_contradictions(pages, judge))
-    results.append(check_redundancy(pages, judge))
-    results.append(check_disambiguation(pages, judge))
+    results.append(check_grounding(focused_pages, wiki_root, judge))
+    results.append(check_contradictions(pages, judge, focus_files=focus_files))
+    results.append(check_redundancy(focused_pages, judge))
+    results.append(check_disambiguation(pages, judge, focus_files=focus_files))
     return results
 
 
@@ -726,13 +829,17 @@ def _avg(aggregated: list[dict]) -> float | None:
     return round(sum(scores) / len(scores), 4) if scores else None
 
 
-def write_run_record(wiki_root: Path, aggregated: list[dict], judge_label: str) -> Path:
+def write_run_record(
+    wiki_root: Path, aggregated: list[dict], judge_label: str, scope: dict | None = None,
+) -> Path:
     eval_dir = Path(wiki_root) / ".eval"
     (eval_dir / "runs").mkdir(parents=True, exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     record = {"timestamp": ts, "judge": judge_label,
               "overall_passed": overall_passed(aggregated),
               "average": _avg(aggregated), "metrics": aggregated}
+    if scope is not None:
+        record["scope"] = scope
     path = eval_dir / "runs" / f"{ts}.json"
     path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -743,8 +850,11 @@ def write_run_record(wiki_root: Path, aggregated: list[dict], judge_label: str) 
             entries = json.loads(hist.read_text(encoding="utf-8")) or []
         except (ValueError, json.JSONDecodeError):
             entries = []
-    entries.append({"timestamp": ts, "judge": judge_label,
-                    "overall_passed": record["overall_passed"], "average": record["average"]})
+    history_entry = {"timestamp": ts, "judge": judge_label,
+                     "overall_passed": record["overall_passed"], "average": record["average"]}
+    if scope is not None:
+        history_entry["scope"] = scope
+    entries.append(history_entry)
     hist.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
 
@@ -753,8 +863,14 @@ def fmt_score(s) -> str:
     return "n/a" if s is None else f"{float(s) * 100:.0f}"
 
 
-def build_report(aggregated: list[dict], judge_label: str) -> str:
+def build_report(
+    aggregated: list[dict], judge_label: str, scope: dict | None = None,
+) -> str:
     lines = [f"# Wiki Quality Eval\n", f"Judge: `{judge_label}`\n"]
+    if scope and scope.get("kind") == "changed_since":
+        pages = ", ".join(f"`{path}`" for path in scope.get("pages", []))
+        lines.append(f"Changed since: `{scope.get('base')}`")
+        lines.append(f"Candidate pages ({len(scope.get('pages', []))}): {pages}\n")
     for row in aggregated:
         verdict = "ERROR" if row.get("error") else ("PASS" if row["passed"] else "FAIL")
         th = row.get("threshold")
@@ -811,12 +927,15 @@ def load_verdicts(run_dir: Path) -> list[MetricResult]:
             for d in data]
 
 
-def _report_or_json(aggregated, judge_label, as_json):
+def _report_or_json(aggregated, judge_label, as_json, scope=None):
     if as_json:
-        print(json.dumps({"judge": judge_label, "overall_passed": overall_passed(aggregated),
-                          "metrics": aggregated}, indent=2, ensure_ascii=False))
+        payload = {"judge": judge_label, "overall_passed": overall_passed(aggregated),
+                   "metrics": aggregated}
+        if scope is not None:
+            payload["scope"] = scope
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        print(build_report(aggregated, judge_label))
+        print(build_report(aggregated, judge_label, scope=scope))
 
 
 def main():
@@ -828,10 +947,31 @@ def main():
     parser.add_argument("--runs", type=int, default=1, help="judge runs to average (default 1)")
     parser.add_argument("--gate", action="store_true", help="exit non-zero on regression")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    parser.add_argument(
+        "--changed-since",
+        metavar="GIT_REF",
+        help="scope judge metrics to tracked and untracked wiki pages changed since GIT_REF",
+    )
     args = parser.parse_args()
 
     wiki_root = WIKI_ROOT
     thresholds = load_thresholds(wiki_root)
+
+    if args.changed_since and args.command is not None:
+        parser.error("--changed-since is only supported for live evals, not collect or score")
+
+    focus_files = None
+    scope = None
+    if args.changed_since:
+        try:
+            focus_files = changed_page_files(wiki_root, args.changed_since, load_pages(wiki_root))
+        except ValueError as e:
+            sys.exit(f"[eval] {e}")
+        scope = {
+            "kind": "changed_since",
+            "base": args.changed_since,
+            "pages": sorted(focus_files),
+        }
 
     if args.command == "collect":
         print(f"Wrote judging brief: {emit_brief(wiki_root)}")
@@ -849,16 +989,17 @@ def main():
         sys.exit(f"[eval] {e}")
     if judge is None:
         brief = emit_brief(wiki_root)
-        agg = aggregate([run_once(wiki_root, None)], thresholds)
-        _report_or_json(agg, label, args.json)
+        agg = aggregate([run_once(wiki_root, None, focus_files=focus_files)], thresholds)
+        _report_or_json(agg, label, args.json, scope=scope)
         if not args.json:
             print(f"\nNo judge available — judge metrics not scored. Brief: {brief}")
         return
 
-    runs = [run_once(wiki_root, judge) for _ in range(max(1, args.runs))]
+    runs = [run_once(wiki_root, judge, focus_files=focus_files)
+            for _ in range(max(1, args.runs))]
     agg = aggregate(runs, thresholds)
-    record = write_run_record(wiki_root, agg, label)
-    _report_or_json(agg, label, args.json)
+    record = write_run_record(wiki_root, agg, label, scope=scope)
+    _report_or_json(agg, label, args.json, scope=scope)
     if not args.json:
         print(f"\nRun record: {record}")
     if args.gate:

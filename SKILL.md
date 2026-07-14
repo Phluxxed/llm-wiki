@@ -107,7 +107,7 @@ This file is the agent's operating manual. Include all of these:
 
    **After every ingest, also run `.venv/bin/python3 scripts/render.py`** to regenerate `wiki.html`. The artifact must always reflect the current state of the wiki — this is non-optional.
 
-   **Run `.venv/bin/python3 scripts/eval.py --gate` only for risk-triggered audits**: self-model or operating-rule changes, ownership-boundary changes, major source ingests, rebuilds, suspected contradictions, page merge/split decisions, weak grounding concerns, near-duplicate concept cleanup, or eval tooling changes. Do not run judge eval for routine page/log/index maintenance.
+   **Run `.venv/bin/python3 scripts/eval.py --gate` only for risk-triggered audits**: self-model or operating-rule changes, ownership-boundary changes, major source ingests, rebuilds, suspected contradictions, page merge/split decisions, weak grounding concerns, near-duplicate concept cleanup, or eval tooling changes. For a pending candidate, add `--changed-since HEAD` so tracked and untracked changed pages are gated against full-wiki context without unrelated whole-wiki judge debt failing the candidate; omit it only for a deliberate whole-wiki audit. Do not run judge eval for routine page/log/index maintenance.
 
    **Ingest completeness protocol (deep):**
    - **ToC first**: For any structured document (paper, standard, report, spec), extract or identify the table of contents before writing the wiki page. Use it as a checklist.
@@ -233,6 +233,7 @@ YAML frontmatter block (title, type: entity|concept, category: Entities & Concep
   - `.venv/bin/python3 scripts/query.py --agent-overview --json` → agent-oriented first pass over wiki structure, hubs, orphans, risks, questions, and recent log context
   - `.venv/bin/python3 scripts/query.py --context-pack <page> --tokens 12000 --json` → deterministic working context for an agent, with inclusion reasons
   - `.venv/bin/python3 scripts/render.py` → generates `wiki.html` (open in browser, or view as a Claude artifact)
-  - `.venv/bin/python3 scripts/eval.py --gate` → risk-triggered LLM-as-judge quality audit (grounding, contradictions, redundancy, disambiguation) with regression gating; run records in `.eval/`
+  - `.venv/bin/python3 scripts/eval.py --gate` → deliberate whole-wiki, risk-triggered LLM-as-judge quality audit (grounding, contradictions, redundancy, disambiguation) with regression gating; run records in `.eval/`
+  - `.venv/bin/python3 scripts/eval.py --gate --changed-since HEAD` → risk-triggered candidate gate for tracked and untracked changed wiki pages, evaluated against full-wiki context
 - Offer `git init && echo '.env' >> .gitignore` if this looks like a standalone repo
 - Confirm page type and categories look right before the user adds their first page

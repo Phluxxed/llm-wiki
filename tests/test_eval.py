@@ -4,10 +4,12 @@ The judge is injected as a stub (Callable[[str], str] returning canned JSON), so
 every metric and the gating layer is exercised with zero tokens/network. Adapter
 tests mock subprocess.
 """
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
@@ -330,6 +332,47 @@ class JudgeMetricsTest(unittest.TestCase):
         self.assertFalse(r.passed)
         self.assertIn("Page A says X", r.detail)
 
+    def test_scoped_contradictions_report_but_do_not_fail_unchanged_conflicts(self):
+        write_md(self.wiki_root / "papers/changed.md", conformant_fm(title="Changed"), PRIMARY_BODY)
+        write_md(self.wiki_root / "papers/old-a.md", conformant_fm(title="Old A"), PRIMARY_BODY)
+        write_md(self.wiki_root / "papers/old-b.md", conformant_fm(title="Old B"), PRIMARY_BODY)
+        payload = (
+            '{"score":0.0,"conflicts":[{"description":"Old A says X; Old B says Y",'
+            '"classification":"unresolved","changed_page":null}]}'
+        )
+        r = ev.check_contradictions(
+            ev.load_pages(self.wiki_root), stub(payload), focus_files={"papers/changed.md"},
+        )
+        self.assertTrue(r.passed)
+        self.assertEqual(r.score, 1.0)
+        self.assertEqual(r.extra["conflicts"], [])
+        self.assertEqual(r.extra["out_of_scope_conflicts"], ["Old A says X; Old B says Y"])
+
+    def test_scoped_contradictions_fail_when_changed_page_is_involved(self):
+        write_md(self.wiki_root / "papers/changed.md", conformant_fm(title="Changed"), PRIMARY_BODY)
+        write_md(self.wiki_root / "papers/old.md", conformant_fm(title="Old"), PRIMARY_BODY)
+        payload = (
+            '{"score":1.0,"conflicts":[{"description":"Changed says X; Old says Y",'
+            '"classification":"unresolved","changed_page":"papers/changed.md"}]}'
+        )
+        r = ev.check_contradictions(
+            ev.load_pages(self.wiki_root), stub(payload), focus_files={"papers/changed.md"},
+        )
+        self.assertFalse(r.passed)
+        self.assertEqual(r.extra["conflicts"], ["Changed says X; Old says Y"])
+
+    def test_scoped_contradictions_fail_loudly_on_missing_scope_attribution(self):
+        write_md(self.wiki_root / "papers/changed.md", conformant_fm(title="Changed"), PRIMARY_BODY)
+        payload = (
+            '{"score":0.0,"conflicts":[{"description":"Unattributed conflict",'
+            '"classification":"unresolved"}]}'
+        )
+        r = ev.check_contradictions(
+            ev.load_pages(self.wiki_root), stub(payload), focus_files={"papers/changed.md"},
+        )
+        self.assertTrue(r.error)
+        self.assertFalse(r.passed)
+
     def test_malformed_judge_is_loud_error_not_silent_pass(self):
         # A judge that was expected to produce a verdict but returns garbage is an
         # ERROR (loud, fail-closed) — never a silent skip that passes the gate.
@@ -410,6 +453,29 @@ class JudgeMetricsTest(unittest.TestCase):
         r = ev.check_disambiguation(ev.load_pages(self.wiki_root), stub('{"score":0.0,"distinct":false}'))
         self.assertLess(r.score, 1.0)
         self.assertFalse(r.passed)
+
+    def test_scoped_disambiguation_only_judges_pairs_touching_changed_pages(self):
+        for path, title, source in [
+            ("papers/changed.md", "Changed Alpha", "sources/alpha.md"),
+            ("papers/alpha-peer.md", "Alpha Peer", "sources/alpha.md"),
+            ("papers/old-one.md", "Old Gamma", "sources/gamma.md"),
+            ("papers/old-two.md", "Old Delta", "sources/gamma.md"),
+        ]:
+            write_md(self.wiki_root / path, conformant_fm(title=title, source=source), PRIMARY_BODY)
+        prompts = []
+
+        def judge(prompt):
+            prompts.append(prompt)
+            return '{"distinct":true,"rationale":"separate"}'
+
+        r = ev.check_disambiguation(
+            ev.load_pages(self.wiki_root), judge, focus_files={"papers/changed.md"},
+        )
+        self.assertTrue(r.passed)
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("papers/changed.md", prompts[0])
+        self.assertIn("papers/alpha-peer.md", prompts[0])
+        self.assertNotIn("papers/old-one.md", prompts[0])
 
 
 class AdapterTest(unittest.TestCase):
@@ -559,6 +625,90 @@ class OrchestrationTest(unittest.TestCase):
         self.assertIsNone(results["grounding"].score)                 # judge metric skipped
         self.assertIsNone(results["absence_of_contradictions"].score)
 
+    def test_run_once_scopes_judge_metrics_but_keeps_structural_global(self):
+        (self.wiki_root / "sources/a.md").write_text("Alpha evidence.\n", encoding="utf-8")
+        (self.wiki_root / "sources/b.md").write_text("Beta evidence.\n", encoding="utf-8")
+        write_md(
+            self.wiki_root / "papers/changed.md",
+            conformant_fm(title="Changed Alpha", type="paper", source="sources/a.md"),
+            PRIMARY_BODY + "Alpha claim.\n",
+        )
+        write_md(
+            self.wiki_root / "papers/unchanged.md",
+            conformant_fm(title="Stable Beta", type="paper", source="sources/b.md"),
+            PRIMARY_BODY + "Beta claim.\n",
+        )
+        prompts = []
+
+        def judge(prompt):
+            prompts.append(prompt)
+            if "strict groundedness judge" in prompt:
+                return '{"score":1.0,"unsupported":[]}'
+            if "consistency auditor" in prompt:
+                return '{"score":1.0,"conflicts":[]}'
+            if "documentation quality auditor" in prompt:
+                return '{"score":0.8}'
+            self.fail(f"unexpected judge prompt: {prompt[:80]}")
+
+        with patch.object(ev, "check_structural", wraps=ev.check_structural) as structural:
+            results = ev.run_once(
+                self.wiki_root, judge, focus_files={"papers/changed.md"},
+            )
+
+        self.assertTrue(all(result.passed for result in results))
+        self.assertEqual(len(structural.call_args.args[0]), 2)
+        grounding = next(prompt for prompt in prompts if "strict groundedness judge" in prompt)
+        redundancy = next(prompt for prompt in prompts if "documentation quality auditor" in prompt)
+        contradictions = next(prompt for prompt in prompts if "consistency auditor" in prompt)
+        self.assertIn("Alpha claim", grounding)
+        self.assertNotIn("Beta claim", grounding)
+        self.assertIn("Alpha claim", redundancy)
+        self.assertNotIn("Beta claim", redundancy)
+        self.assertIn("Alpha claim", contradictions)
+        self.assertIn("Beta claim", contradictions)
+        self.assertLess(contradictions.index("Alpha claim"), contradictions.index("Beta claim"))
+        self.assertIn("papers/changed.md", contradictions)
+
+    def test_changed_page_files_includes_tracked_and_untracked_pages(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.wiki_root, check=True)
+        write_md(self.wiki_root / "papers/tracked.md", conformant_fm(title="Tracked"), PRIMARY_BODY)
+        (self.wiki_root / "index.md").write_text("# Index\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=self.wiki_root, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"],
+            cwd=self.wiki_root,
+            check=True,
+        )
+        with (self.wiki_root / "papers/tracked.md").open("a", encoding="utf-8") as handle:
+            handle.write("Tracked change.\n")
+        write_md(self.wiki_root / "papers/untracked.md", conformant_fm(title="Untracked"), PRIMARY_BODY)
+        (self.wiki_root / "sources/ignored.md").write_text("evidence\n", encoding="utf-8")
+        (self.wiki_root / "index.md").write_text("# Changed index\n", encoding="utf-8")
+
+        pages = ev.load_pages(self.wiki_root)
+        self.assertEqual(
+            ev.changed_page_files(self.wiki_root, "HEAD", pages),
+            {"papers/tracked.md", "papers/untracked.md"},
+        )
+
+    def test_changed_page_files_rejects_invalid_ref(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.wiki_root, check=True)
+        write_md(self.wiki_root / "papers/a.md", conformant_fm(title="A"), PRIMARY_BODY)
+        with self.assertRaisesRegex(ValueError, "cannot diff Git ref"):
+            ev.changed_page_files(self.wiki_root, "not-a-ref", ev.load_pages(self.wiki_root))
+
+    def test_changed_page_files_rejects_empty_changed_slice(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.wiki_root, check=True)
+        write_md(self.wiki_root / "papers/a.md", conformant_fm(title="A"), PRIMARY_BODY)
+        subprocess.run(["git", "add", "."], cwd=self.wiki_root, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"],
+            cwd=self.wiki_root,
+            check=True,
+        )
+        with self.assertRaisesRegex(ValueError, "no changed wiki pages"):
+            ev.changed_page_files(self.wiki_root, "HEAD", ev.load_pages(self.wiki_root))
+
     def test_write_run_record_creates_eval_dir(self):
         self._wiki_with_derived()
         runs = [ev.run_once(self.wiki_root, stub('{"score":1.0}'))]
@@ -566,6 +716,21 @@ class OrchestrationTest(unittest.TestCase):
         path = ev.write_run_record(self.wiki_root, agg, "stub")
         self.assertTrue(path.exists())
         self.assertTrue((self.wiki_root / ".eval" / "history.json").exists())
+
+    def test_write_run_record_preserves_changed_slice_scope(self):
+        self._wiki_with_derived()
+        agg = ev.aggregate(
+            [ev.run_once(self.wiki_root, stub('{"score":1.0}'))],
+            ev.load_thresholds(self.wiki_root),
+        )
+        scope = {"kind": "changed_since", "base": "HEAD", "pages": ["papers/a.md"]}
+        path = ev.write_run_record(self.wiki_root, agg, "stub", scope=scope)
+        record = __import__("json").loads(path.read_text(encoding="utf-8"))
+        history = __import__("json").loads(
+            (self.wiki_root / ".eval" / "history.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(record["scope"], scope)
+        self.assertEqual(history[-1]["scope"], scope)
 
     def test_eval_dir_excluded_from_lint_and_render(self):
         import lint
@@ -579,6 +744,14 @@ class OrchestrationTest(unittest.TestCase):
         report = ev.build_report(agg, "codex")
         self.assertIn("grounding", report)
         self.assertIn("FAIL", report)
+
+    def test_build_report_names_changed_slice(self):
+        agg = [{"name": "grounding", "score": 1.0, "threshold": 0.95, "passed": True,
+                "runs": 1, "runs_passed": 1, "rationale": "x", "insights": ""}]
+        scope = {"kind": "changed_since", "base": "HEAD", "pages": ["papers/a.md"]}
+        report = ev.build_report(agg, "codex", scope=scope)
+        self.assertIn("Changed since: `HEAD`", report)
+        self.assertIn("`papers/a.md`", report)
 
     def test_build_report_shows_error_loudly(self):
         agg = [{"name": "absence_of_contradictions", "score": None, "threshold": 1.0,
