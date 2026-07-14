@@ -49,6 +49,8 @@ Receipts live under `.llm-wiki/migrations/`. Migration does not edit pages, sour
 
 `wiki_maintenance_candidates` reports deterministic signals for runtime drift, missing source paths, explicit contradictions, missing supersession links, and explicitly current pages beyond a review-age threshold. Every candidate contains exact evidence and a review question. The packet has `mutation.allowed = false` and no commands.
 
+`wiki_build_maintenance_candidate` canonicalizes one task-derived observation for a registered target wiki. It normalizes page endpoints and evidence, produces stable observation and dedupe identities, and marks whether the candidate is deterministic or requires recurrence/corroboration. It is also read-only: the result is a proposal for an external operational queue and target steward, not permission to edit the wiki.
+
 Zero candidates means `no_candidates_observed`, not `clean`. Semantic contradiction, semantic staleness, and live external-source drift remain explicit unknowns without a semantic/source review. Brain changes still go through Brain Steward and the target `wiki-agent.md`; see [Brain Steward integration](brain-steward-integration.md).
 
 ## Legacy compatibility policy

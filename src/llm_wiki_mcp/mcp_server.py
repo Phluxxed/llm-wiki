@@ -17,6 +17,7 @@ from llm_wiki_mcp.wiki_runtime import (
     get_source_excerpt,
     graph_health,
     links,
+    maintenance_candidate_proposal,
     maintenance_candidates,
     overview,
     query_pages,
@@ -154,6 +155,27 @@ def create_server() -> FastMCP:
         """Return read-only, evidence-backed candidates for steward review."""
         return _handle_wiki_error(
             lambda: maintenance_candidates(alias, stale_after_days=stale_after_days)
+        )
+
+    @mcp.tool()
+    def wiki_build_maintenance_candidate(
+        alias: str,
+        kind: str,
+        diagnostic: str,
+        review_question: str,
+        pages: list[str],
+        evidence: list[dict[str, str]],
+    ) -> CallToolResult:
+        """Build one canonical read-only maintenance proposal for later steward review."""
+        return _handle_wiki_error(
+            lambda: maintenance_candidate_proposal(
+                alias,
+                kind=kind,
+                diagnostic=diagnostic,
+                review_question=review_question,
+                pages=pages,
+                evidence=evidence,
+            )
         )
 
     @mcp.tool()

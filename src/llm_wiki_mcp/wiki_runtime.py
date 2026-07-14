@@ -8,7 +8,7 @@ from llm_wiki_core.config import ContentConfig, inspect_wiki_config
 from llm_wiki_core.compiler import compile_context as compile_wiki_context
 from llm_wiki_core.contracts import CompileRequest, ContractError
 from llm_wiki_core.legacy import LegacyRuntime
-from llm_wiki_core.maintenance import build_maintenance_packet
+from llm_wiki_core.maintenance import build_candidate_proposal, build_maintenance_packet
 from llm_wiki_mcp.errors import WikiMcpError
 from llm_wiki_mcp.registry import doctor, get_wiki
 
@@ -143,6 +143,33 @@ def maintenance_candidates(alias: str, *, stale_after_days: int = 180) -> dict[s
         alias=record["alias"],
         stale_after_days=threshold,
     )
+
+
+def maintenance_candidate_proposal(
+    alias: str,
+    *,
+    kind: str,
+    diagnostic: str,
+    review_question: str,
+    pages: list[str],
+    evidence: list[dict[str, str]],
+) -> dict[str, Any]:
+    record = get_wiki(alias)
+    try:
+        return build_candidate_proposal(
+            alias=record["alias"],
+            kind=kind,
+            diagnostic=diagnostic,
+            review_question=review_question,
+            pages=pages,
+            evidence=evidence,
+        )
+    except ValueError as exc:
+        raise WikiMcpError(
+            "INVALID_INPUT",
+            str(exc),
+            {"surface": "wiki_build_maintenance_candidate"},
+        ) from exc
 
 
 def get_page(alias: str, page: str, max_chars: int = 4_000) -> dict[str, Any]:

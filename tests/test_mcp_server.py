@@ -30,6 +30,7 @@ class McpServerTest(unittest.TestCase):
         self.assertIn("wiki_register", result["tools"])
         self.assertIn("wiki_context_pack", result["tools"])
         self.assertIn("wiki_maintenance_candidates", result["tools"])
+        self.assertIn("wiki_build_maintenance_candidate", result["tools"])
         self.assertEqual(result["registered"]["alias"], "brain")
         self.assertEqual(result["listed"]["wikis"][0]["alias"], "brain")
         self.assertEqual(result["overview"]["kind"], "agent_overview")
@@ -38,6 +39,11 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(result["links"]["links"][0]["page"], "b.md")
         self.assertEqual(result["maintenance"]["kind"], "maintenance_candidate_packet")
         self.assertFalse(result["maintenance"]["mutation"]["allowed"])
+        self.assertEqual(result["proposal"]["target_wiki"], "brain")
+        self.assertEqual(result["proposal"]["kind"], "durable_outcome")
+        self.assertFalse(result["proposal"]["mutation"]["allowed"])
+        self.assertTrue(result["invalid_proposal_is_error"])
+        self.assertEqual(result["invalid_proposal_error"]["code"], "INVALID_INPUT")
 
     def test_stdio_server_returns_structured_error_without_home(self):
         result = asyncio.run(_missing_home_error())
@@ -85,6 +91,28 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
                 "wiki_maintenance_candidates",
                 arguments={"alias": "brain", "stale_after_days": 180},
             )
+            proposal = await session.call_tool(
+                "wiki_build_maintenance_candidate",
+                arguments={
+                    "alias": "brain",
+                    "kind": "durable_outcome",
+                    "diagnostic": "A verified outcome is not represented.",
+                    "review_question": "Should this become durable Brain knowledge?",
+                    "pages": ["a.md"],
+                    "evidence": [{"ref": "test:result", "content_hash": "abc123"}],
+                },
+            )
+            invalid_proposal = await session.call_tool(
+                "wiki_build_maintenance_candidate",
+                arguments={
+                    "alias": "brain",
+                    "kind": "relationship_gap",
+                    "diagnostic": "A route may be missing.",
+                    "review_question": "Should these pages be connected?",
+                    "pages": ["a.md"],
+                    "evidence": [{"ref": "test:result"}],
+                },
+            )
 
     return {
         "tools": tool_names,
@@ -94,6 +122,9 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
         "manual": manual.structuredContent,
         "links": links.structuredContent,
         "maintenance": maintenance.structuredContent,
+        "proposal": proposal.structuredContent,
+        "invalid_proposal_is_error": invalid_proposal.isError,
+        "invalid_proposal_error": invalid_proposal.structuredContent["error"],
     }
 
 

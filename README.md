@@ -134,6 +134,7 @@ author pages, mutate sources, or replace `/wikime`.
 | `wiki_context_pack` | Return bounded task context around a seed page. |
 | `wiki_compile_context` | Compile question-shaped evidence with progressive targets, hard limits, provenance, state, coverage, and stop semantics. |
 | `wiki_maintenance_candidates` | Return evidence-backed review candidates and explicit unknowns; never mutate wiki content. |
+| `wiki_build_maintenance_candidate` | Canonicalize one evidence-backed task observation for later steward review; never mutate wiki content. |
 | `wiki_get_page` / `wiki_get_source_excerpt` | Read bounded page content and source excerpts. |
 
 Existing wikis migrate only through the explicit receipt-backed flow:
