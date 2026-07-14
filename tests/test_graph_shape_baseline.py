@@ -83,6 +83,27 @@ class FixtureContractTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "corpus changed during benchmark"):
                 self.baseline._assert_corpora_unchanged({"brain": corpus})
 
+    def test_deterministic_digest_ignores_machine_paths_and_timing(self):
+        first = {
+            "roots": {"brain": "/private/tmp/first/brain"},
+            "fixtures": [
+                {"routes": {"current_compiler": {"trace": {"latency_ms": 10.0}}}}
+            ],
+            "summary": {"current_compiler": {"mean_latency_ms": 10.0}},
+        }
+        second = {
+            "roots": {"brain": "/private/tmp/second/brain"},
+            "fixtures": [
+                {"routes": {"current_compiler": {"trace": {"latency_ms": 20.0}}}}
+            ],
+            "summary": {"current_compiler": {"mean_latency_ms": 20.0}},
+        }
+
+        self.assertEqual(
+            self.baseline._deterministic_digest(first),
+            self.baseline._deterministic_digest(second),
+        )
+
 
 class TraceScoringTests(unittest.TestCase):
     def setUp(self):

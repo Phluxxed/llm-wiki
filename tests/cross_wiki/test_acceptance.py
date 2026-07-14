@@ -20,6 +20,38 @@ CASES = yaml.safe_load((Path(__file__).with_name("cases.yaml")).read_text(encodi
 
 
 class CrossWikiAcceptanceTest(unittest.TestCase):
+    def test_atomic_graph_path_locator_matches_frozen_source_span(self):
+        locator = {
+            "steps": [
+                {
+                    "evidence": {
+                        "file": "papers/example.md",
+                        "start_line": 29,
+                        "end_line": 29,
+                    }
+                }
+            ]
+        }
+
+        self.assertTrue(
+            _locator_matches_source_span(
+                locator,
+                {"page": "papers/example.md", "locator_start_line": 29},
+            )
+        )
+        self.assertTrue(
+            _locator_matches_source_span(
+                {"file": "papers/example.md", "start_line": 29},
+                {"page": "papers/example.md", "locator_start_line": 29},
+            )
+        )
+        self.assertFalse(
+            _locator_matches_source_span(
+                locator,
+                {"page": "papers/other.md", "locator_start_line": 29},
+            )
+        )
+
     def test_live_gold_spans_resolve_before_grading_compiler_output(self):
         for case in CASES:
             with self.subTest(case=case["id"]):
@@ -90,10 +122,7 @@ def _assert_case(test: unittest.TestCase, case: dict, response: dict) -> None:
         test.assertTrue(matches, f"missing required evidence for {case['id']}: {required}")
         if "locator_start_line" in required:
             test.assertTrue(
-                any(
-                    item["locator"].get("start_line") == required["locator_start_line"]
-                    for item in matches
-                ),
+                any(_locator_matches_source_span(item["locator"], required) for item in matches),
                 f"wrong locator for {case['id']}: {required}",
             )
         if "authored_state" in required:
@@ -111,6 +140,22 @@ def _assert_case(test: unittest.TestCase, case: dict, response: dict) -> None:
         expected["target_exceeded_for_coverage"],
     )
     test.assertEqual(response["coverage"]["uncovered_roles"], expected["uncovered_roles"])
+
+
+def _locator_matches_source_span(locator: dict, required: dict) -> bool:
+    expected_file = required["page"]
+    expected_start = required["locator_start_line"]
+    if locator.get("file") == expected_file and locator.get("start_line") == expected_start:
+        return True
+    for step in locator.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        evidence = step.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        if evidence.get("file") == expected_file and evidence.get("start_line") == expected_start:
+            return True
+    return False
 
 
 if __name__ == "__main__":

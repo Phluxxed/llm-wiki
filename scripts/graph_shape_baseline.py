@@ -762,6 +762,7 @@ def _mean(values: Any) -> float | None:
 def _deterministic_digest(result: Mapping[str, Any]) -> str:
     stable = json.loads(json.dumps(result))
     stable.pop("deterministic_digest", None)
+    stable.pop("roots", None)
     for fixture in stable.get("fixtures", []):
         for route in fixture.get("routes", {}).values():
             route.get("trace", {}).pop("latency_ms", None)
