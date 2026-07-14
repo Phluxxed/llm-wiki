@@ -23,6 +23,7 @@ See docs/superpowers/specs/2026-06-17-eval-metrics-design.md.
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import itertools
 import json
 import os
@@ -500,6 +501,7 @@ def _content_blob(pages: list[dict], limit: int = 60000) -> str:
 
 def check_contradictions(
     pages: list[dict], judge: Judge, focus_files: set[str] | None = None,
+    focus_diffs: dict[str, str] | None = None,
 ) -> MetricResult:
     """Conflicting claims about the same tool/service/credential/behaviour across
     pages. When focus_files is supplied, unchanged-only findings are reported but
@@ -516,6 +518,7 @@ def check_contradictions(
         if scoped else pages
     )
     scope_instruction = ""
+    diff_instruction = ""
     conflict_schema = (
         '{"description":"<specific conflict>",'
         '"classification":"unresolved|documented_source_drift"}'
@@ -533,6 +536,36 @@ def check_contradictions(
             '"classification":"unresolved|documented_source_drift",'
             '"changed_page":"<exact changed-page path>|null"}'
         )
+    diff_scoped = focus_diffs is not None
+    diff_lines: dict[str, set[str]] = {}
+    if diff_scoped:
+        if not scoped:
+            raise ValueError("focus_diffs requires focus_files")
+        diff_blob = "\n\n".join(
+            f"### {file}\n{focus_diffs.get(file, '')}" for file in sorted(focus)
+        )
+        if len(diff_blob) > 48000:
+            raise ValueError("candidate page diffs exceed the 48000-character judge budget")
+        diff_lines = {
+            file: {
+                line for index, line in enumerate(focus_diffs.get(file, "").splitlines())
+                if index >= 2 and line.startswith(("+", "-"))
+            }
+            for file in focus
+        }
+        diff_instruction = (
+            "Only findings caused by a CANDIDATE DIFF may fail this gate. Unchanged "
+            "page text is context only. For each finding, copy one exact added (+) "
+            "or removed (-) line from the relevant candidate diff into "
+            "candidate_diff_line. Use null when no candidate diff line causes the "
+            "conflict.\n\nCANDIDATE DIFFS:\n" + diff_blob
+        )
+        conflict_schema = (
+            '{"description":"<specific conflict>",'
+            '"classification":"unresolved|documented_source_drift",'
+            '"changed_page":"<exact changed-page path>|null",'
+            '"candidate_diff_line":"<exact +/- diff line>|null"}'
+        )
     prompt = (
         "You are a rigorous consistency auditor. Find CONTRADICTIONS within or "
         "across the wiki pages below — conflicting claims about the same tool, "
@@ -542,7 +575,8 @@ def check_contradictions(
         "a finding as documented_source_drift only when the wiki explicitly presents "
         "both versions, identifies which source/version/time each belongs to, and does "
         "not assert the stale version as current truth. Otherwise classify it unresolved.\n\n"
-        f"{scope_instruction}\n\nPAGES:\n{_content_blob(ordered_pages)}\n\n"
+        f"{scope_instruction}\n\n{diff_instruction}\n\n"
+        f"PAGES (unchanged text is context only):\n{_content_blob(ordered_pages)}\n\n"
         'Return STRICT JSON: {"score":<0..1, 1=no contradictions 0=explicit conflict>,'
         f'"conflicts":[{conflict_schema}],'
         '"rationale":"<one sentence>"}')
@@ -554,6 +588,10 @@ def check_contradictions(
                 if not isinstance(item, dict) or "changed_page" not in item:
                     raise JudgeError(
                         "scoped contradiction finding omitted required changed_page attribution"
+                    )
+                if diff_scoped and "candidate_diff_line" not in item:
+                    raise JudgeError(
+                        "diff-scoped contradiction finding omitted required candidate_diff_line"
                     )
     except JudgeError as e:
         return _judge_error_result("absence_of_contradictions", e)
@@ -568,6 +606,12 @@ def check_contradictions(
             if scoped and item.get("changed_page") not in focus:
                 out_of_scope.append(description)
                 continue
+            if diff_scoped:
+                page = item.get("changed_page")
+                candidate_line = item.get("candidate_diff_line")
+                if not isinstance(candidate_line, str) or candidate_line not in diff_lines.get(page, set()):
+                    out_of_scope.append(description)
+                    continue
             if classification == "documented_source_drift":
                 documented_drift.append(description)
             else:
@@ -596,7 +640,8 @@ def check_contradictions(
     else:
         detail = "No contradictions found."
     if out_of_scope:
-        detail += f" {len(out_of_scope)} unchanged-only conflict(s) reported outside candidate scope."
+        detail += f" {len(out_of_scope)} conflict(s) reported outside the candidate diff: "
+        detail += "; ".join(_clip(c, 160) for c in out_of_scope[:3])
     return MetricResult("absence_of_contradictions", score,
                         score >= DEFAULT_THRESHOLDS["absence_of_contradictions"],
                         _clip(detail, 1500), extra={
@@ -751,17 +796,21 @@ JUDGE_METRIC_NAMES = ["grounding", "absence_of_contradictions",
                       "redundancy_index", "disambiguation"]
 
 
-def changed_page_files(wiki_root: Path, base_ref: str, pages: list[dict]) -> set[str]:
-    """Return loaded wiki pages changed from base_ref, including untracked pages.
+@dataclasses.dataclass(frozen=True)
+class PageChange:
+    """Candidate-owned portion of one changed wiki page."""
 
-    Git output is intersected with the loader's page set, so sources, rendered
-    artifacts, logs, and other non-page files cannot enter the judge scope.
-    """
-    root = Path(wiki_root).resolve()
+    file: str
+    diff: str
+    added_text: str
+    is_new: bool
+    duplicate_signals_changed: bool
+
+
+def _resolve_git_commit(root: Path, base_ref: str) -> tuple[str, str]:
     ref = str(base_ref or "").strip()
     if not ref:
         raise ValueError("--changed-since requires a non-empty Git ref")
-
     verify = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
         stdin=subprocess.DEVNULL,
@@ -771,7 +820,17 @@ def changed_page_files(wiki_root: Path, base_ref: str, pages: list[dict]) -> set
     if verify.returncode != 0:
         detail = _trim_process_output(verify.stderr) or "unknown Git error"
         raise ValueError(f"cannot diff Git ref {ref!r}: {detail}")
-    base_commit = verify.stdout.strip()
+    return ref, verify.stdout.strip()
+
+
+def changed_page_files(wiki_root: Path, base_ref: str, pages: list[dict]) -> set[str]:
+    """Return loaded wiki pages changed from base_ref, including untracked pages.
+
+    Git output is intersected with the loader's page set, so sources, rendered
+    artifacts, logs, and other non-page files cannot enter the judge scope.
+    """
+    root = Path(wiki_root).resolve()
+    ref, base_commit = _resolve_git_commit(root, base_ref)
 
     commands = [
         ["git", "-C", str(root), "diff", "--name-only", "--diff-filter=ACMR", "-z", base_commit, "--"],
@@ -797,8 +856,66 @@ def changed_page_files(wiki_root: Path, base_ref: str, pages: list[dict]) -> set
     return selected
 
 
+def changed_page_scope(
+    wiki_root: Path, base_ref: str, pages: list[dict],
+) -> dict[str, PageChange]:
+    """Build candidate diffs and added prose for every changed loaded page."""
+    root = Path(wiki_root).resolve()
+    _ref, base_commit = _resolve_git_commit(root, base_ref)
+    selected = changed_page_files(root, base_ref, pages)
+    by_file = {p["file"]: p for p in pages}
+    duplicate_fields = ("title", "source", "category", "tags", "type")
+    changes: dict[str, PageChange] = {}
+
+    for file in sorted(selected):
+        page = by_file[file]
+        current_text = page["text"]
+        show = subprocess.run(
+            ["git", "-C", str(root), "show", f"{base_commit}:{file}"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+        )
+        is_new = show.returncode != 0
+        base_text = "" if is_new else show.stdout
+        base_body = _body(base_text).strip()
+        current_body = _body(current_text).strip()
+        diff_lines = list(difflib.unified_diff(
+            base_body.splitlines(),
+            current_body.splitlines(),
+            fromfile=f"a/{file}" if not is_new else "/dev/null",
+            tofile=f"b/{file}",
+            n=2,
+            lineterm="",
+        ))
+        added_lines = [
+            line[1:] for line in diff_lines[2:] if line.startswith("+")
+        ]
+        base_fm = lint.parse_frontmatter(base_text) if not is_new else {}
+        duplicate_signals_changed = is_new or any(
+            base_fm.get(field) != page["fm"].get(field) for field in duplicate_fields
+        )
+        changes[file] = PageChange(
+            file=file,
+            diff="\n".join(diff_lines),
+            added_text="\n".join(added_lines).strip(),
+            is_new=is_new,
+            duplicate_signals_changed=duplicate_signals_changed,
+        )
+    diff_size = sum(len(change.diff) for change in changes.values())
+    if diff_size > 48000:
+        raise ValueError(
+            "candidate page diffs exceed the 48000-character judge budget; "
+            "split the candidate into smaller reviewable changes"
+        )
+    return changes
+
+
 def run_once(
-    wiki_root: Path, judge: Judge | None, focus_files: set[str] | None = None,
+    wiki_root: Path,
+    judge: Judge | None,
+    focus_files: set[str] | None = None,
+    page_changes: dict[str, PageChange] | None = None,
 ) -> list[MetricResult]:
     """One eval pass: deterministic metrics always; judge metrics if a judge is
     available, else skipped (None) placeholders so the report is complete.
@@ -807,20 +924,40 @@ def run_once(
     pages = load_pages(wiki_root)
     results = [check_structural(pages, wiki_root)]
     focused_pages = pages
+    contradiction_diffs = None
+    duplicate_focus = focus_files
+    if page_changes is not None:
+        change_files = set(page_changes)
+        if focus_files is not None and set(focus_files) != change_files:
+            raise ValueError("focus_files and page_changes must identify the same pages")
+        focus_files = change_files
+        duplicate_focus = {
+            file for file, change in page_changes.items()
+            if change.duplicate_signals_changed
+        }
+        contradiction_diffs = {file: change.diff for file, change in page_changes.items()}
     if focus_files is not None:
         focus = set(focus_files)
         focused_pages = [p for p in pages if p["file"] in focus]
         if not focused_pages:
             raise ValueError("evaluation scope contains no loaded wiki pages")
+        if page_changes is not None:
+            focused_pages = [
+                {**p, "text": page_changes[p["file"]].added_text}
+                for p in focused_pages
+                if page_changes[p["file"]].added_text
+            ]
     if judge is None:
         results += [MetricResult(n, None, True,
                                  "no judge available — not scored (use an agent CLI on PATH or --judge)")
                     for n in JUDGE_METRIC_NAMES]
         return results
     results.append(check_grounding(focused_pages, wiki_root, judge))
-    results.append(check_contradictions(pages, judge, focus_files=focus_files))
+    results.append(check_contradictions(
+        pages, judge, focus_files=focus_files, focus_diffs=contradiction_diffs,
+    ))
     results.append(check_redundancy(focused_pages, judge))
-    results.append(check_disambiguation(pages, judge, focus_files=focus_files))
+    results.append(check_disambiguation(pages, judge, focus_files=duplicate_focus))
     return results
 
 
@@ -961,16 +1098,25 @@ def main():
         parser.error("--changed-since is only supported for live evals, not collect or score")
 
     focus_files = None
+    page_changes = None
     scope = None
     if args.changed_since:
         try:
-            focus_files = changed_page_files(wiki_root, args.changed_since, load_pages(wiki_root))
+            page_changes = changed_page_scope(wiki_root, args.changed_since, load_pages(wiki_root))
+            focus_files = set(page_changes)
         except ValueError as e:
             sys.exit(f"[eval] {e}")
         scope = {
             "kind": "changed_since",
+            "mode": "candidate_diff",
             "base": args.changed_since,
             "pages": sorted(focus_files),
+            "new_pages": sorted(
+                file for file, change in page_changes.items() if change.is_new
+            ),
+            "modified_pages": sorted(
+                file for file, change in page_changes.items() if not change.is_new
+            ),
         }
 
     if args.command == "collect":
@@ -989,13 +1135,17 @@ def main():
         sys.exit(f"[eval] {e}")
     if judge is None:
         brief = emit_brief(wiki_root)
-        agg = aggregate([run_once(wiki_root, None, focus_files=focus_files)], thresholds)
+        agg = aggregate([run_once(
+            wiki_root, None, focus_files=focus_files, page_changes=page_changes,
+        )], thresholds)
         _report_or_json(agg, label, args.json, scope=scope)
         if not args.json:
             print(f"\nNo judge available — judge metrics not scored. Brief: {brief}")
         return
 
-    runs = [run_once(wiki_root, judge, focus_files=focus_files)
+    runs = [run_once(
+        wiki_root, judge, focus_files=focus_files, page_changes=page_changes,
+    )
             for _ in range(max(1, args.runs))]
     agg = aggregate(runs, thresholds)
     record = write_run_record(wiki_root, agg, label, scope=scope)

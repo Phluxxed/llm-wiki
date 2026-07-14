@@ -373,6 +373,41 @@ class JudgeMetricsTest(unittest.TestCase):
         self.assertTrue(r.error)
         self.assertFalse(r.passed)
 
+    def test_diff_scoped_contradictions_ignore_conflicts_without_candidate_diff_evidence(self):
+        write_md(self.wiki_root / "papers/changed.md", conformant_fm(title="Changed"), "Old claim X.")
+        write_md(self.wiki_root / "papers/old.md", conformant_fm(title="Old"), "Old claim Y.")
+        payload = (
+            '{"score":0.0,"conflicts":[{"description":"Old X conflicts with old Y",'
+            '"classification":"unresolved","changed_page":"papers/changed.md",'
+            '"candidate_diff_line":null}]}'
+        )
+        r = ev.check_contradictions(
+            ev.load_pages(self.wiki_root),
+            stub(payload),
+            focus_files={"papers/changed.md"},
+            focus_diffs={"papers/changed.md": "--- a/papers/changed.md\n+++ b/papers/changed.md\n@@\n+New unrelated claim."},
+        )
+        self.assertTrue(r.passed)
+        self.assertEqual(r.extra["out_of_scope_conflicts"], ["Old X conflicts with old Y"])
+        self.assertIn("Old X conflicts with old Y", r.detail)
+
+    def test_diff_scoped_contradictions_fail_on_exact_candidate_diff_line(self):
+        write_md(self.wiki_root / "papers/changed.md", conformant_fm(title="Changed"), "New claim X.")
+        write_md(self.wiki_root / "papers/old.md", conformant_fm(title="Old"), "Old claim Y.")
+        payload = (
+            '{"score":0.0,"conflicts":[{"description":"New X conflicts with old Y",'
+            '"classification":"unresolved","changed_page":"papers/changed.md",'
+            '"candidate_diff_line":"+New claim X."}]}'
+        )
+        r = ev.check_contradictions(
+            ev.load_pages(self.wiki_root),
+            stub(payload),
+            focus_files={"papers/changed.md"},
+            focus_diffs={"papers/changed.md": "--- a/papers/changed.md\n+++ b/papers/changed.md\n@@\n+New claim X."},
+        )
+        self.assertFalse(r.passed)
+        self.assertEqual(r.extra["conflicts"], ["New X conflicts with old Y"])
+
     def test_malformed_judge_is_loud_error_not_silent_pass(self):
         # A judge that was expected to produce a verdict but returns garbage is an
         # ERROR (loud, fail-closed) — never a silent skip that passes the gate.
@@ -690,6 +725,140 @@ class OrchestrationTest(unittest.TestCase):
             ev.changed_page_files(self.wiki_root, "HEAD", pages),
             {"papers/tracked.md", "papers/untracked.md"},
         )
+
+        scope = ev.changed_page_scope(self.wiki_root, "HEAD", pages)
+        self.assertEqual(set(scope), {"papers/tracked.md", "papers/untracked.md"})
+        self.assertEqual(scope["papers/tracked.md"].added_text, "Tracked change.")
+        self.assertNotIn("## What This Is", scope["papers/tracked.md"].added_text)
+        self.assertFalse(scope["papers/tracked.md"].is_new)
+        self.assertTrue(scope["papers/untracked.md"].is_new)
+        self.assertIn("## What This Is", scope["papers/untracked.md"].added_text)
+
+    def test_changed_page_scope_marks_only_duplicate_signal_changes(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.wiki_root, check=True)
+        write_md(
+            self.wiki_root / "papers/body.md",
+            conformant_fm(title="Stable Title", source="sources/a.md"),
+            PRIMARY_BODY,
+        )
+        write_md(
+            self.wiki_root / "papers/title.md",
+            conformant_fm(title="Old Title", source="sources/b.md"),
+            PRIMARY_BODY,
+        )
+        subprocess.run(["git", "add", "."], cwd=self.wiki_root, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"],
+            cwd=self.wiki_root,
+            check=True,
+        )
+        with (self.wiki_root / "papers/body.md").open("a", encoding="utf-8") as handle:
+            handle.write("New body claim.\n")
+        write_md(
+            self.wiki_root / "papers/title.md",
+            conformant_fm(title="New Title", source="sources/b.md"),
+            PRIMARY_BODY,
+        )
+
+        scope = ev.changed_page_scope(self.wiki_root, "HEAD", ev.load_pages(self.wiki_root))
+        self.assertFalse(scope["papers/body.md"].duplicate_signals_changed)
+        self.assertTrue(scope["papers/title.md"].duplicate_signals_changed)
+
+    def test_changed_page_scope_rejects_oversized_candidate_diff(self):
+        subprocess.run(["git", "init", "-q"], cwd=self.wiki_root, check=True)
+        (self.wiki_root / "index.md").write_text("# Index\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=self.wiki_root, check=True)
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"],
+            cwd=self.wiki_root,
+            check=True,
+        )
+        write_md(
+            self.wiki_root / "papers/large.md",
+            conformant_fm(title="Large"),
+            "x" * 49000,
+        )
+        with self.assertRaisesRegex(ValueError, "split the candidate"):
+            ev.changed_page_scope(self.wiki_root, "HEAD", ev.load_pages(self.wiki_root))
+
+    def test_run_once_with_page_changes_judges_only_candidate_additions(self):
+        (self.wiki_root / "sources/a.md").write_text("New supported claim.\n", encoding="utf-8")
+        write_md(
+            self.wiki_root / "papers/changed.md",
+            conformant_fm(title="Stable", type="paper", source="sources/a.md"),
+            PRIMARY_BODY + "Old unsupported claim.\nNew supported claim.\n",
+        )
+        prompts = []
+
+        def judge(prompt):
+            prompts.append(prompt)
+            if "strict groundedness judge" in prompt:
+                return '{"score":1.0,"unsupported":[]}'
+            if "consistency auditor" in prompt:
+                return '{"score":1.0,"conflicts":[]}'
+            if "documentation quality auditor" in prompt:
+                return '{"score":0.8}'
+            self.fail(f"unexpected judge prompt: {prompt[:80]}")
+
+        changes = {
+            "papers/changed.md": ev.PageChange(
+                file="papers/changed.md",
+                diff="@@ -1 +1,2 @@\n Old unsupported claim.\n+New supported claim.",
+                added_text="New supported claim.",
+                is_new=False,
+                duplicate_signals_changed=False,
+            )
+        }
+        results = ev.run_once(self.wiki_root, judge, page_changes=changes)
+
+        self.assertTrue(all(result.passed for result in results))
+        grounding = next(prompt for prompt in prompts if "strict groundedness judge" in prompt)
+        redundancy = next(prompt for prompt in prompts if "documentation quality auditor" in prompt)
+        contradictions = next(prompt for prompt in prompts if "consistency auditor" in prompt)
+        self.assertIn("New supported claim", grounding)
+        self.assertNotIn("Old unsupported claim", grounding)
+        self.assertIn("New supported claim", redundancy)
+        self.assertNotIn("Old unsupported claim", redundancy)
+        self.assertIn("CANDIDATE DIFFS", contradictions)
+        self.assertIn("+New supported claim", contradictions)
+        self.assertIn("Old unsupported claim", contradictions)
+
+    def test_run_once_with_page_changes_ignores_preexisting_duplicate_pairs(self):
+        (self.wiki_root / "sources/shared.md").write_text("New supported claim.\n", encoding="utf-8")
+        for path, title, body in [
+            ("papers/changed.md", "Changed", PRIMARY_BODY + "New supported claim.\n"),
+            ("papers/peer.md", "Peer", PRIMARY_BODY),
+        ]:
+            write_md(
+                self.wiki_root / path,
+                conformant_fm(title=title, type="paper", source="sources/shared.md"),
+                body,
+            )
+        prompts = []
+
+        def judge(prompt):
+            prompts.append(prompt)
+            if "strict groundedness judge" in prompt:
+                return '{"score":1.0,"unsupported":[]}'
+            if "consistency auditor" in prompt:
+                return '{"score":1.0,"conflicts":[]}'
+            if "documentation quality auditor" in prompt:
+                return '{"score":0.8}'
+            self.fail("pre-existing duplicate pair should not be judged")
+
+        changes = {
+            "papers/changed.md": ev.PageChange(
+                file="papers/changed.md",
+                diff="@@ -1 +1,2 @@\n old\n+New supported claim.",
+                added_text="New supported claim.",
+                is_new=False,
+                duplicate_signals_changed=False,
+            )
+        }
+        results = ev.run_once(self.wiki_root, judge, page_changes=changes)
+
+        self.assertTrue(all(result.passed for result in results))
+        self.assertFalse(any("Two wiki pages look similar" in prompt for prompt in prompts))
 
     def test_changed_page_files_rejects_invalid_ref(self):
         subprocess.run(["git", "init", "-q"], cwd=self.wiki_root, check=True)
