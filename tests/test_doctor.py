@@ -55,7 +55,27 @@ class DoctorTest(unittest.TestCase):
 
         self.assertEqual(result["providers"]["loci"]["status"], "degraded")
         self.assertEqual(result["providers"]["loci"]["code"], "LOCI_MCP_UNAVAILABLE")
+        self.assertEqual(result["providers"]["graph"]["backend"], "loci")
+        self.assertEqual(result["providers"]["graph"]["status"], "degraded")
+        self.assertEqual(result["providers"]["graph"]["code"], "LOCI_MCP_UNAVAILABLE")
+        self.assertTrue(result["providers"]["graph"]["rollback_available"])
         self.assertEqual(result["compatibility"]["status"], "migration_available")
+
+    def test_legacy_graph_backend_is_ready_without_loci_transport(self):
+        (self.wiki / ".llm-wiki.toml").write_text(
+            VALID_CONFIG
+            + '[compiler]\nproviders = ["graph"]\ngraph_backend = "legacy"\n',
+            encoding="utf-8",
+        )
+
+        with patch("llm_wiki_core.doctor.shutil.which", return_value=None):
+            result = doctor("test")
+
+        self.assertEqual(
+            result["providers"]["graph"],
+            {"status": "ready", "backend": "legacy", "rollback_available": True},
+        )
+        self.assertEqual(result["providers"]["loci"]["status"], "disabled")
 
     def test_unknown_local_script_modification_blocks_automatic_migration(self):
         (self.wiki / "scripts" / "query.py").write_text("# private behavior\n", encoding="utf-8")

@@ -58,6 +58,39 @@ class WikiConfigTest(unittest.TestCase):
     def test_loci_is_a_default_compiler_provider(self):
         self.assertIn("loci", DEFAULT_PROVIDERS)
 
+    def test_loci_is_the_default_graph_backend(self):
+        self.write_config(VALID_CONFIG)
+
+        result = inspect_wiki_config(self.root)
+
+        self.assertEqual(result.config.compiler.graph_backend, "loci")
+
+    def test_legacy_graph_backend_is_an_explicit_rollback(self):
+        self.write_config(
+            VALID_CONFIG.replace(
+                "[compiler]\n",
+                '[compiler]\ngraph_backend = "legacy"\n',
+            )
+        )
+
+        result = inspect_wiki_config(self.root)
+
+        self.assertEqual(result.config.compiler.graph_backend, "legacy")
+
+    def test_unknown_graph_backend_is_rejected(self):
+        self.write_config(
+            VALID_CONFIG.replace(
+                "[compiler]\n",
+                '[compiler]\ngraph_backend = "automatic"\n',
+            )
+        )
+
+        result = inspect_wiki_config(self.root)
+
+        self.assertEqual(result.status, "invalid")
+        self.assertEqual(result.error.details["key"], "compiler.graph_backend")
+        self.assertEqual(result.error.details["value"], "automatic")
+
     def test_valid_config_is_typed_and_preserves_unknown_keys(self):
         self.write_config(VALID_CONFIG + "\n[extension]\nowner = \"local\"\n")
 

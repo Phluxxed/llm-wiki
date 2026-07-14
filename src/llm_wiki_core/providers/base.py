@@ -25,6 +25,7 @@ class CandidateEvidence:
     authority_signals: tuple[str, ...]
     retrieval_rank: int | None = None
     truncated: bool = False
+    atomic: bool = False
 
 
 @dataclass(frozen=True)

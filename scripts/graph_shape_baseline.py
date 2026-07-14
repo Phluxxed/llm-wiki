@@ -7,12 +7,16 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import tempfile
 from collections import deque
 from itertools import combinations
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping
+from unittest.mock import patch
 
+from mcp import ClientSession
 from llm_wiki_core.compiler import _effective_config, compile_context
 from llm_wiki_core.contracts import CompileRequest, Diagnostic
 from llm_wiki_core.documents import WikiPage, collect_pages
@@ -133,16 +137,20 @@ def record_trace(
     classified_shapes: list[str],
     diagnostics: list[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    graph_edges = _graph_edges(records)
+    paths = _selected_graph_paths(records, fixture)
+    legacy_edges = _graph_edges(
+        [record for record in records if record.get("route") != "evidence_backed_path"]
+    )
     pages = {
         str(record["page"])
         for record in records
         if isinstance(record.get("page"), str) and record.get("page")
     }
-    for source, target in graph_edges:
+    for source, target in legacy_edges:
         pages.update((source, target))
+    for path in paths:
+        pages.update(path)
 
-    paths = _fixture_paths(graph_edges, fixture)
     content = "\n".join(str(record.get("content") or "") for record in records)
     evidence_bytes = sum(len(str(record.get("content") or "").encode("utf-8")) for record in records)
     hub_paths = [
@@ -165,9 +173,45 @@ def record_trace(
     }
 
 
+def _selected_graph_paths(
+    records: list[Mapping[str, Any]],
+    fixture: Mapping[str, Any],
+) -> list[list[str]]:
+    selected: list[list[str]] = []
+    legacy: list[Mapping[str, Any]] = []
+    for record in records:
+        if record.get("route") != "evidence_backed_path":
+            legacy.append(record)
+            continue
+        locator = record.get("locator")
+        nodes = locator.get("nodes") if isinstance(locator, Mapping) else None
+        if not isinstance(nodes, list):
+            continue
+        path = [
+            node.get("file")
+            for node in nodes
+            if isinstance(node, Mapping) and isinstance(node.get("file"), str)
+        ]
+        if len(path) == len(nodes) and len(path) >= 2:
+            selected.append(path)
+    selected.extend(_fixture_paths(_graph_edges(legacy), fixture))
+    return [list(path) for path in dict.fromkeys(tuple(path) for path in selected)]
+
+
 def _graph_edges(records: list[Mapping[str, Any]]) -> list[tuple[str, str]]:
     edges: set[tuple[str, str]] = set()
     for record in records:
+        locator = record.get("locator")
+        nodes = locator.get("nodes") if isinstance(locator, Mapping) else None
+        if record.get("route") == "evidence_backed_path" and isinstance(nodes, list):
+            files = [
+                node.get("file")
+                for node in nodes
+                if isinstance(node, Mapping) and isinstance(node.get("file"), str)
+            ]
+            if len(files) == len(nodes) and len(files) >= 2:
+                edges.update(zip(files, files[1:]))
+            continue
         record_id = record.get("id")
         if not isinstance(record_id, str) or not record_id.startswith("graph:"):
             continue
@@ -266,47 +310,54 @@ def run_baseline(
         for name, root in roots.items()
     }
     fixture_results: list[dict[str, Any]] = []
-    for fixture in contract["fixtures"]:
-        corpus_name = fixture["corpus"]
-        corpus = corpora[corpus_name]
-        hubs = set(contract["corpora"][corpus_name]["generic_hubs"])
-        request = CompileRequest.from_mapping(
-            {
-                "alias": contract["corpora"][corpus_name]["alias"],
-                "question": fixture["question"],
-            }
-        )
+    with tempfile.TemporaryDirectory(prefix="llm-wiki-graph-benchmark-") as cache_dir:
+        with patch.dict(os.environ, {"LLM_WIKI_GRAPH_CACHE_DIR": cache_dir}):
+            for fixture in contract["fixtures"]:
+                corpus_name = fixture["corpus"]
+                corpus = corpora[corpus_name]
+                hubs = set(contract["corpora"][corpus_name]["generic_hubs"])
+                request = CompileRequest.from_mapping(
+                    {
+                        "alias": contract["corpora"][corpus_name]["alias"],
+                        "question": fixture["question"],
+                    }
+                )
 
-        no_graph = _run_without_graph(corpus, request, fixture, hubs)
-        routes = {
-            "no_graph": no_graph,
-            "direct_links": _run_graph_depth(corpus, request, fixture, hubs, max_depth=1),
-            "graph_depth_2": _run_graph_depth(corpus, request, fixture, hubs, max_depth=2),
-            "graph_depth_3": _run_graph_depth(corpus, request, fixture, hubs, max_depth=3),
-            "current_compiler": _run_current_compiler(
-                corpus,
-                request,
-                fixture,
-                hubs,
-                loci_tool_calls=no_graph["trace"]["tool_calls"],
-            ),
-        }
-        fixture_results.append(
-            {
-                "id": fixture["id"],
-                "corpus": corpus_name,
-                "shape": fixture["shape"],
-                "question": fixture["question"],
-                "expected_pages": list(fixture["expected_pages"]),
-                "answerable": bool(fixture["answerable"]),
-                "routes": routes,
-            }
-        )
+                no_graph = _run_without_graph(corpus, request, fixture, hubs)
+                routes = {
+                    "no_graph": no_graph,
+                    "direct_links": _run_graph_depth(corpus, request, fixture, hubs, max_depth=1),
+                    "graph_depth_2": _run_graph_depth(corpus, request, fixture, hubs, max_depth=2),
+                    "graph_depth_3": _run_graph_depth(corpus, request, fixture, hubs, max_depth=3),
+                    "current_compiler": _run_current_compiler(
+                        corpus,
+                        request,
+                        fixture,
+                        hubs,
+                    ),
+                }
+                fixture_results.append(
+                    {
+                        "id": fixture["id"],
+                        "corpus": corpus_name,
+                        "shape": fixture["shape"],
+                        "question": fixture["question"],
+                        "expected_pages": list(fixture["expected_pages"]),
+                        "answerable": bool(fixture["answerable"]),
+                        "routes": routes,
+                    }
+                )
+
+    _assert_corpora_unchanged(corpora)
 
     result = {
         "schema_version": "1",
         "contract_approved_on": contract["approved_on"],
         "roots": {name: str(path) for name, path in roots.items()},
+        "corpus_digests": {
+            name: corpus["input_digest"]
+            for name, corpus in corpora.items()
+        },
         "fixtures": fixture_results,
     }
     result["summary"] = summarize_results(fixture_results)
@@ -323,7 +374,24 @@ def _load_corpus(root: Path) -> dict[str, Any]:
         "config": config,
         "pages": pages,
         "edges": collect_typed_edges(pages),
+        "input_digest": _corpus_digest(pages),
     }
+
+
+def _corpus_digest(pages: Mapping[str, WikiPage]) -> str:
+    payload = [
+        [path, hashlib.sha256(page.text.encode("utf-8")).hexdigest()]
+        for path, page in sorted(pages.items())
+    ]
+    encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _assert_corpora_unchanged(corpora: Mapping[str, Mapping[str, Any]]) -> None:
+    for name, corpus in corpora.items():
+        current = collect_pages(corpus["root"], content=corpus["config"].content)
+        if _corpus_digest(current) != corpus["input_digest"]:
+            raise RuntimeError(f"{name} corpus changed during benchmark")
 
 
 def _run_without_graph(
@@ -601,17 +669,24 @@ def _run_current_compiler(
     request: CompileRequest,
     fixture: Mapping[str, Any],
     hubs: set[str],
-    *,
-    loci_tool_calls: int,
 ) -> dict[str, Any]:
+    tool_calls = 0
+    original_call_tool = ClientSession.call_tool
+
+    async def counted_call_tool(session, *args, **kwargs):
+        nonlocal tool_calls
+        tool_calls += 1
+        return await original_call_tool(session, *args, **kwargs)
+
     start = perf_counter()
-    response = compile_context(corpus["root"], request).to_dict()
+    with patch.object(ClientSession, "call_tool", new=counted_call_tool):
+        response = compile_context(corpus["root"], request).to_dict()
     trace = record_trace(
         response["evidence"],
         fixture=fixture,
         generic_hubs=hubs,
         sufficient=bool(response["stop"]["sufficient"]),
-        tool_calls=loci_tool_calls,
+        tool_calls=tool_calls,
         latency_ms=(perf_counter() - start) * 1000,
         classified_shapes=compiled_response_shapes(response),
         diagnostics=list(response["diagnostics"]),

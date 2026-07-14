@@ -82,7 +82,7 @@ class TextProvider:
         terms = question_terms(context.request.question)
         ranked: list[tuple[int, str, int, CandidateEvidence]] = []
         for path, page in context.pages.items():
-            for section in _sections(page):
+            for section in page_sections(page):
                 lowered = section.content.lower()
                 matched = sorted(term for term in terms if term in lowered)
                 if not matched:
@@ -117,7 +117,7 @@ def _candidate(
 ) -> CandidateEvidence:
     state = normalize_knowledge_state(page.frontmatter)
     authority = _authority_signals(page, state.normalized)
-    bounded, truncated = _bounded_content(content)
+    bounded, truncated = bounded_content(content)
     section = locator.get("section") or "body"
     return CandidateEvidence(
         id=f"{provider}:{page.path}#{section}",
@@ -176,7 +176,7 @@ def _whole_body(page: WikiPage) -> dict:
     }
 
 
-def _sections(page: WikiPage) -> list[_Section]:
+def page_sections(page: WikiPage) -> list[_Section]:
     lines = page.text.splitlines()
     body_start = _body_start_line(page.text)
     starts = [index for index in range(body_start - 1, len(lines)) if lines[index].startswith("#")]
@@ -208,7 +208,7 @@ def _body_start_line(text: str) -> int:
     return 1
 
 
-def _bounded_content(content: str) -> tuple[str, bool]:
+def bounded_content(content: str) -> tuple[str, bool]:
     if len(content) <= MAX_CANDIDATE_CHARS:
         return content.strip(), False
     return content[:MAX_CANDIDATE_CHARS].rstrip() + "\n\n[truncated]", True

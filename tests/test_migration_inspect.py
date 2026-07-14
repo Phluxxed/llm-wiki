@@ -109,6 +109,7 @@ class MigrationInspectTest(unittest.TestCase):
         self.assertEqual([item["path"] for item in plan["operations"]], [".llm-wiki.toml"])
         upgraded = plan["operations"][0]["content"]
         self.assertIn('providers = ["seed", "frontmatter", "text", "graph", "source", "loci"]', upgraded)
+        self.assertIn('graph_backend = "loci"', upgraded)
         self.assertIn('[extension]\nowner = "local"', upgraded)
 
     def test_inspect_rejects_symlinked_tooling_outside_wiki(self):

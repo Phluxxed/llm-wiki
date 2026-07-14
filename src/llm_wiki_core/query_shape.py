@@ -8,7 +8,12 @@ _SHAPE_PATTERNS = (
     ("lookup", re.compile(r"\b(who|what|where|which|owner|command|definition|define)\b", re.IGNORECASE)),
     (
         "relationship",
-        re.compile(r"\b(how does|connect|relationship|between|depend|propagat|interact|link)\w*\b", re.IGNORECASE),
+        re.compile(
+            r"\b(?:how does|between|connect\w*|relationships?|relat(?:e|ed|es|ing)|"
+            r"depend\w*|propagat\w*|interact\w*|support\w*|becom\w*|improv\w*|"
+            r"define\w*|link(?:s|ed|ing)?(?![-\w]))\b",
+            re.IGNORECASE,
+        ),
     ),
     ("state", re.compile(r"\b(current|currently|now|latest|status|still true)\b", re.IGNORECASE)),
     ("history", re.compile(r"\b(history|historical|previous|formerly|used to|changed|timeline)\b", re.IGNORECASE)),

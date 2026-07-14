@@ -2,6 +2,8 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 def load_baseline_module():
@@ -43,6 +45,43 @@ class FixtureContractTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "duplicate fixture id"):
             self.baseline.validate_contract(contract)
+
+    def test_corpus_digest_is_content_and_path_stable(self):
+        first = {
+            "b.md": SimpleNamespace(text="beta"),
+            "a.md": SimpleNamespace(text="alpha"),
+        }
+        reordered = {
+            "a.md": SimpleNamespace(text="alpha"),
+            "b.md": SimpleNamespace(text="beta"),
+        }
+
+        self.assertEqual(
+            self.baseline._corpus_digest(first),
+            self.baseline._corpus_digest(reordered),
+        )
+        reordered["b.md"] = SimpleNamespace(text="changed")
+        self.assertNotEqual(
+            self.baseline._corpus_digest(first),
+            self.baseline._corpus_digest(reordered),
+        )
+
+    def test_benchmark_rejects_corpus_drift_during_a_run(self):
+        corpus = {
+            "root": Path("/wiki"),
+            "config": SimpleNamespace(content=object()),
+            "input_digest": self.baseline._corpus_digest(
+                {"page.md": SimpleNamespace(text="before")}
+            ),
+        }
+
+        with patch.object(
+            self.baseline,
+            "collect_pages",
+            return_value={"page.md": SimpleNamespace(text="after")},
+        ):
+            with self.assertRaisesRegex(RuntimeError, "corpus changed during benchmark"):
+                self.baseline._assert_corpora_unchanged({"brain": corpus})
 
 
 class TraceScoringTests(unittest.TestCase):
@@ -177,6 +216,91 @@ class TraceScoringTests(unittest.TestCase):
         self.assertEqual(trace["evidence_bytes"], 30)
         self.assertEqual(trace["estimated_tokens"], 8)
         self.assertEqual(trace["generic_hub_path_rate"], 1.0)
+
+    def test_record_trace_reconstructs_loci_evidence_backed_path(self):
+        fixture = {
+            "expected_pages": ["left.md", "right.md"],
+            "bridge_paths_any": [["left.md", "hub.md", "right.md"]],
+            "bridge_literals_any": ["authored bridge"],
+            "forbidden_paths": [],
+            "required_literals": [],
+            "answerable": True,
+        }
+        records = [
+            {
+                "id": "graph:loci:opaque-hash",
+                "provider": "graph",
+                "route": "evidence_backed_path",
+                "page": "hub.md",
+                "source": None,
+                "locator": {
+                    "nodes": [
+                        {"id": "left", "file": "left.md"},
+                        {"id": "hub", "file": "hub.md"},
+                        {"id": "right", "file": "right.md"},
+                    ]
+                },
+                "content": "authored bridge",
+            }
+        ]
+
+        trace = self.baseline.record_trace(
+            records,
+            fixture=fixture,
+            generic_hubs={"hub.md"},
+            sufficient=True,
+            tool_calls=4,
+            latency_ms=2.5,
+            classified_shapes=["relationship"],
+            diagnostics=[],
+        )
+
+        self.assertEqual(trace["pages"], ["hub.md", "left.md", "right.md"])
+        self.assertEqual(trace["paths"], [["left.md", "hub.md", "right.md"]])
+        self.assertEqual(trace["tool_calls"], 4)
+
+    def test_record_trace_does_not_stitch_separate_loci_paths(self):
+        fixture = {
+            "shape": "false_hub_shortcut",
+            "expected_pages": ["left.md", "right.md"],
+            "bridge_paths_any": [],
+            "bridge_literals_any": [],
+            "forbidden_paths": [["left.md", "hub.md", "right.md"]],
+            "required_literals": [],
+            "answerable": False,
+        }
+
+        def path_record(record_id, nodes):
+            return {
+                "id": record_id,
+                "provider": "graph",
+                "route": "evidence_backed_path",
+                "page": nodes[0],
+                "locator": {
+                    "nodes": [
+                        {"id": f"{file_path}::root", "file": file_path}
+                        for file_path in nodes
+                    ]
+                },
+                "content": "exact edge evidence",
+            }
+
+        trace = self.baseline.record_trace(
+            [
+                path_record("graph:loci:first", ["left.md", "hub.md"]),
+                path_record("graph:loci:second", ["hub.md", "right.md"]),
+            ],
+            fixture=fixture,
+            generic_hubs={"hub.md"},
+            sufficient=False,
+            tool_calls=1,
+            latency_ms=1.0,
+            classified_shapes=["relationship"],
+            diagnostics=[],
+        )
+
+        self.assertNotIn(["left.md", "hub.md", "right.md"], trace["paths"])
+        self.assertFalse(self.baseline.score_trace(fixture, trace)["unsupported_shortcut"])
 
     def test_compiled_response_shapes_uses_public_query_envelope(self):
         response = {"query": {"shapes": ["lookup", "relationship"]}}

@@ -432,6 +432,7 @@ source_directory = "sources"
 
 [compiler]
 providers = [{rendered_providers}]
+graph_backend = "loci"
 target_bytes = 48000
 max_bytes = 192000
 target_items = 24

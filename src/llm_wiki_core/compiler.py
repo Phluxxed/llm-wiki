@@ -24,6 +24,7 @@ from .documents import collect_pages
 from .providers import (
     FrontmatterProvider,
     GraphProvider,
+    LociGraphProvider,
     LociProvider,
     Provider,
     ProviderContext,
@@ -35,6 +36,9 @@ from .providers import (
 from .providers.base import CandidateEvidence
 from .query_shape import classify_question, required_roles
 from .selection import coverage, finalize_response_budget, select_candidates
+
+
+_NON_DEGRADING_DIAGNOSTICS = {"LOCI_GRAPH_PATH_REJECTED"}
 
 
 def compile_context(
@@ -57,11 +61,16 @@ def compile_context(
     roles = required_roles(shapes)
     context = ProviderContext(root, config, request, pages, shapes, roles, resolved_seeds)
 
+    graph_provider: Provider = (
+        LociGraphProvider()
+        if config.compiler.graph_backend == "loci"
+        else GraphProvider()
+    )
     built_in: tuple[Provider, ...] = (
         SeedProvider(),
         FrontmatterProvider(),
         TextProvider(),
-        GraphProvider(),
+        graph_provider,
         SourceProvider(),
         LociProvider(),
     )
@@ -92,13 +101,17 @@ def compile_context(
     coverage_state = coverage(roles, selected)
     evidence_bytes = sum(item.byte_cost for item in selected)
     sufficient = not coverage_state.uncovered_roles
+    provider_degraded = any(
+        item.code not in _NON_DEGRADING_DIAGNOSTICS
+        for item in diagnostics
+    )
     byte_limited = any(item.reason == "byte_limit" for item in omissions)
     item_limited = any(item.reason == "item_limit" for item in omissions)
     if sufficient:
         stop_reason = "sufficient"
         stop_detail = "All required roles covered"
     elif not candidates:
-        stop_reason = "provider_degraded" if diagnostics else "no_evidence"
+        stop_reason = "provider_degraded" if provider_degraded else "no_evidence"
         stop_detail = "No candidate evidence was available"
     elif byte_limited:
         stop_reason = "byte_budget_exhausted"
@@ -106,7 +119,7 @@ def compile_context(
     elif item_limited:
         stop_reason = "item_budget_exhausted"
         stop_detail = "Hard item ceiling was reached before coverage was complete"
-    elif diagnostics:
+    elif provider_degraded:
         stop_reason = "provider_degraded"
         stop_detail = "Provider degradation may have left required roles uncovered"
     else:

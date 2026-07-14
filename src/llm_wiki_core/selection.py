@@ -10,6 +10,7 @@ from .state import state_compatibility
 
 
 _PROVIDER_ORDER = {"seed": 0, "loci": 1, "frontmatter": 2, "graph": 3, "source": 4, "text": 5}
+_MIN_LOCI_RESULTS = 3
 
 
 def select_candidates(
@@ -22,7 +23,6 @@ def select_candidates(
     omissions: list[Omission] = []
     seen: set[tuple] = set()
     used_bytes = 0
-    seed_count = sum(item.provider == "seed" for item in ordered)
 
     for candidate in ordered:
         locator_identity = json.dumps(candidate.locator, sort_keys=True, separators=(",", ":"))
@@ -38,7 +38,18 @@ def select_candidates(
 
         record = _to_record(candidate, required)
         uncovered = set(coverage(required, selected).uncovered_roles)
-        if candidate.provider != "seed" and not (set(record.roles) & uncovered):
+        within_target = (
+            len(selected) < request.budget.target_items
+            and record.byte_cost <= request.budget.target_bytes - used_bytes
+        )
+        supplementary_retrieval = (
+            _is_query_selected_graph_evidence(candidate) or _is_top_loci_result(candidate)
+        ) and within_target
+        if (
+            candidate.provider != "seed"
+            and not (set(record.roles) & uncovered)
+            and not supplementary_retrieval
+        ):
             omissions.append(Omission(candidate.id, "lower_marginal_value", record.byte_cost))
             continue
         if len(selected) >= request.budget.max_items:
@@ -46,6 +57,9 @@ def select_candidates(
             continue
         remaining_bytes = request.budget.max_bytes - used_bytes
         if record.byte_cost > remaining_bytes:
+            if candidate.atomic:
+                omissions.append(Omission(candidate.id, "byte_limit", record.byte_cost))
+                continue
             fitted = _fit_record(record, remaining_bytes)
             if fitted is None:
                 omissions.append(Omission(candidate.id, "byte_limit", record.byte_cost))
@@ -53,10 +67,6 @@ def select_candidates(
             record = fitted
         selected.append(record)
         used_bytes += record.byte_cost
-        if candidate.provider == "seed":
-            seed_count -= 1
-        if seed_count == 0 and not coverage(required, selected).uncovered_roles:
-            break
 
     selected_ids = {item.id for item in selected}
     omitted_ids = {item.candidate_id for item in omissions}
@@ -64,6 +74,32 @@ def select_candidates(
         if candidate.id not in selected_ids and candidate.id not in omitted_ids:
             omissions.append(Omission(candidate.id, "lower_marginal_value", _candidate_cost(candidate)))
     return tuple(selected), tuple(omissions)
+
+
+def _is_query_selected_graph_evidence(candidate: CandidateEvidence) -> bool:
+    return (
+        candidate.provider == "graph"
+        and (
+            (
+                candidate.route == "evidence_backed_path"
+                and "loci_evidence_backed_path" in candidate.selection_signals
+            )
+            or (
+                candidate.route == "path_node_section"
+                and "loci_path_node" in candidate.selection_signals
+            )
+        )
+    )
+
+
+def _is_top_loci_result(candidate: CandidateEvidence) -> bool:
+    return (
+        candidate.provider == "loci"
+        and candidate.route == "indexed_section"
+        and "indexed_symbol_match" in candidate.selection_signals
+        and candidate.retrieval_rank is not None
+        and candidate.retrieval_rank < _MIN_LOCI_RESULTS
+    )
 
 
 def coverage(required: tuple[str, ...], selected: Iterable[EvidenceRecord]) -> Coverage:

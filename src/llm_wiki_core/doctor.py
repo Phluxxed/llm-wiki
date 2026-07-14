@@ -18,7 +18,9 @@ def inspect_runtime(wiki_root: str | Path) -> dict[str, Any]:
     scripts = inspect_scripts(root)
     blockers = [path for path, result in scripts.items() if result["status"] == "modified_unknown"]
     adapter_runtime = _adapter_runtime(root, scripts)
-    loci = _loci_status(config)
+    loci_transport = _loci_transport_status()
+    loci = _loci_status(config, loci_transport)
+    graph = _graph_status(config, loci_transport)
 
     if config.error is not None:
         compatibility_status = "incompatible"
@@ -39,6 +41,7 @@ def inspect_runtime(wiki_root: str | Path) -> dict[str, Any]:
                 "schema_version": config.config.schema_version,
                 "runtime_contract": config.config.runtime_contract,
                 "profile": config.config.profile,
+                "graph_backend": config.config.compiler.graph_backend,
             }
         )
     if config.error is not None:
@@ -65,7 +68,7 @@ def inspect_runtime(wiki_root: str | Path) -> dict[str, Any]:
             "seed": {"status": "ready"},
             "frontmatter": {"status": "ready"},
             "text": {"status": "ready"},
-            "graph": {"status": "ready"},
+            "graph": graph,
             "source": {"status": "ready"},
             "loci": loci,
         },
@@ -122,9 +125,35 @@ def _adapter_runtime(root: Path, scripts: dict[str, dict]) -> dict[str, Any]:
     return {"status": "ready", "python": str(python.relative_to(root))}
 
 
-def _loci_status(config) -> dict[str, Any]:
+def _loci_status(config, transport: dict[str, Any]) -> dict[str, Any]:
     if config.config is not None and "loci" not in config.config.compiler.providers:
         return {"status": "disabled", "opt_out": True, "transport": "mcp_stdio"}
+    return dict(transport)
+
+
+def _graph_status(config, transport: dict[str, Any]) -> dict[str, Any]:
+    backend = config.config.compiler.graph_backend if config.config is not None else "loci"
+    if config.config is not None and "graph" not in config.config.compiler.providers:
+        return {
+            "status": "disabled",
+            "backend": backend,
+            "rollback_available": True,
+        }
+    if backend == "legacy":
+        return {
+            "status": "ready",
+            "backend": "legacy",
+            "rollback_available": True,
+        }
+    return {
+        **transport,
+        "backend": "loci",
+        "rollback_available": True,
+        "cache": "external_read_only_mirror",
+    }
+
+
+def _loci_transport_status() -> dict[str, Any]:
     command = os.environ.get("LLM_WIKI_LOCI_MCP_COMMAND", "loci-mcp")
     if shutil.which(command) is None:
         return {

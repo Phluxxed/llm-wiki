@@ -1,22 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-import json
-import os
 from pathlib import Path
-import shutil
-from threading import Thread
 from typing import Any, Protocol
 
-from anyio import fail_after
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession
 
 from ..contracts import Diagnostic
 from ..state import normalize_knowledge_state
 from .base import CandidateEvidence, ProviderContext, ProviderResult
+from .loci_transport import LociGatewayError, LociMcpClient, tool_payload
 from .utils import question_terms
 
 
@@ -24,13 +18,6 @@ SearchFn = Callable[..., list[dict[str, Any]]]
 FileFn = Callable[..., dict[str, Any]]
 MAX_RESULTS = 40
 MAX_CONTENT_CHARS = 4_000
-
-
-class LociGatewayError(RuntimeError):
-    def __init__(self, code: str, message: str, details: Mapping[str, Any] | None = None):
-        super().__init__(message)
-        self.code = code
-        self.details = dict(details or {})
 
 
 @dataclass(frozen=True)
@@ -53,63 +40,25 @@ class LociMcpGateway:
         args: tuple[str, ...] = (),
         timeout_seconds: float = 15.0,
     ):
-        if timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be greater than zero")
-        self._command = command
-        self._args = args
-        self._timeout_seconds = timeout_seconds
+        self._client = LociMcpClient(
+            command=command,
+            args=args,
+            timeout_seconds=timeout_seconds,
+        )
 
     def retrieve(self, wiki_root: Path, query: str, *, limit: int) -> LociRetrieval:
-        command = self._resolve_command()
-        return _run_coroutine(
-            self._retrieve(command, wiki_root, query, limit=limit)
-        )
-
-    def _resolve_command(self) -> str:
-        configured = self._command or os.environ.get("LLM_WIKI_LOCI_MCP_COMMAND", "loci-mcp")
-        resolved = shutil.which(configured)
-        if resolved is None:
-            raise LociGatewayError(
-                "LOCI_MCP_UNAVAILABLE",
-                "The core loci MCP traversal service is not available",
-                {"transport": "mcp_stdio"},
+        return self._client.run(
+            lambda session: self._retrieve_session(
+                session,
+                wiki_root,
+                query,
+                limit=limit,
             )
-        return resolved
-
-    async def _retrieve(
-        self,
-        command: str,
-        wiki_root: Path,
-        query: str,
-        *,
-        limit: int,
-    ) -> LociRetrieval:
-        params = StdioServerParameters(
-            command=command,
-            args=list(self._args),
-            env=os.environ.copy(),
         )
-        try:
-            with fail_after(self._timeout_seconds):
-                return await self._retrieve_session(params, wiki_root, query, limit=limit)
-        except TimeoutError as exc:
-            raise LociGatewayError(
-                "LOCI_MCP_TIMEOUT",
-                "The core loci MCP traversal service timed out",
-                {"transport": "mcp_stdio"},
-            ) from exc
-        except LociGatewayError:
-            raise
-        except Exception as exc:
-            raise LociGatewayError(
-                "LOCI_MCP_FAILED",
-                "The core loci MCP traversal service failed",
-                {"type": type(exc).__name__, "transport": "mcp_stdio"},
-            ) from exc
 
     async def _retrieve_session(
         self,
-        params: StdioServerParameters,
+        session: ClientSession,
         wiki_root: Path,
         query: str,
         *,
@@ -117,72 +66,68 @@ class LociMcpGateway:
     ) -> LociRetrieval:
         results: list[Mapping[str, Any]] = []
         failures: list[LociGatewayError] = []
-        with open(os.devnull, "w", encoding="utf-8") as errlog:
-            async with stdio_client(params, errlog=errlog) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    search = await session.call_tool(
-                        "loci_search",
-                        arguments={
-                            "repo": str(wiki_root),
-                            "query": query,
-                            "limit": limit,
-                        },
-                    )
-                    symbols = _tool_payload(search, "symbols")
-                    if not isinstance(symbols, list):
-                        raise LociGatewayError(
+        search = await session.call_tool(
+            "loci_search",
+            arguments={
+                "repo": str(wiki_root),
+                "query": query,
+                "limit": limit,
+            },
+        )
+        symbols = tool_payload(search, "symbols")
+        if not isinstance(symbols, list):
+            raise LociGatewayError(
+                "LOCI_RESULT_INVALID",
+                "loci_search returned an invalid symbols payload",
+            )
+        valid: list[tuple[Mapping[str, Any], tuple[str, str, int, int]]] = []
+        for symbol in symbols:
+            validated = _validate_result(symbol, wiki_root)
+            if isinstance(validated, Diagnostic):
+                results.append(symbol if isinstance(symbol, Mapping) else {})
+                continue
+            valid.append((symbol, validated))
+        if valid:
+            fetched = await session.call_tool(
+                "loci_get",
+                arguments={
+                    "repo": str(wiki_root),
+                    "symbol_ids": [item[1][0] for item in valid],
+                    "context": 0,
+                },
+            )
+            hydrated_symbols = tool_payload(fetched, "symbols")
+            if not isinstance(hydrated_symbols, list):
+                raise LociGatewayError(
+                    "LOCI_RESULT_INVALID",
+                    "loci_get returned an invalid symbols payload",
+                )
+            by_id = {
+                item.get("id"): item
+                for item in hydrated_symbols
+                if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+            }
+            for symbol, validated in valid:
+                symbol_id, file_path, _, _ = validated
+                hydrated_symbol = by_id.get(symbol_id)
+                source = hydrated_symbol.get("source") if hydrated_symbol is not None else None
+                if not isinstance(source, str):
+                    failures.append(
+                        LociGatewayError(
                             "LOCI_RESULT_INVALID",
-                            "loci_search returned an invalid symbols payload",
+                            "loci_get did not return exact symbol source",
+                            {"file": file_path},
                         )
-                    valid: list[tuple[Mapping[str, Any], tuple[str, str, int, int]]] = []
-                    for symbol in symbols:
-                        validated = _validate_result(symbol, wiki_root)
-                        if isinstance(validated, Diagnostic):
-                            results.append(symbol if isinstance(symbol, Mapping) else {})
-                            continue
-                        valid.append((symbol, validated))
-                    if valid:
-                        fetched = await session.call_tool(
-                            "loci_get",
-                            arguments={
-                                "repo": str(wiki_root),
-                                "symbol_ids": [item[1][0] for item in valid],
-                                "context": 0,
-                            },
-                        )
-                        hydrated_symbols = _tool_payload(fetched, "symbols")
-                        if not isinstance(hydrated_symbols, list):
-                            raise LociGatewayError(
-                                "LOCI_RESULT_INVALID",
-                                "loci_get returned an invalid symbols payload",
-                            )
-                        by_id = {
-                            item.get("id"): item
-                            for item in hydrated_symbols
-                            if isinstance(item, Mapping) and isinstance(item.get("id"), str)
-                        }
-                        for symbol, validated in valid:
-                            symbol_id, file_path, _, _ = validated
-                            hydrated_symbol = by_id.get(symbol_id)
-                            source = hydrated_symbol.get("source") if hydrated_symbol is not None else None
-                            if not isinstance(source, str):
-                                failures.append(
-                                    LociGatewayError(
-                                        "LOCI_RESULT_INVALID",
-                                        "loci_get did not return exact symbol source",
-                                        {"file": file_path},
-                                    )
-                                )
-                                continue
-                            hydrated = dict(symbol)
-                            hydrated["content"] = source
-                            hydrated["hydrated_locator"] = {
-                                "file_path": hydrated_symbol.get("file_path"),
-                                "line": hydrated_symbol.get("line"),
-                                "end_line": hydrated_symbol.get("end_line"),
-                            }
-                            results.append(hydrated)
+                    )
+                    continue
+                hydrated = dict(symbol)
+                hydrated["content"] = source
+                hydrated["hydrated_locator"] = {
+                    "file_path": hydrated_symbol.get("file_path"),
+                    "line": hydrated_symbol.get("line"),
+                    "end_line": hydrated_symbol.get("end_line"),
+                }
+                results.append(hydrated)
         return LociRetrieval(tuple(results), tuple(failures))
 
 
@@ -305,59 +250,6 @@ class LociProvider:
                 )
             )
         return ProviderResult(tuple(candidates), tuple(diagnostics))
-
-
-def _run_coroutine(coroutine):
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coroutine)
-
-    result: list[Any] = []
-    failure: list[BaseException] = []
-
-    def run() -> None:
-        try:
-            result.append(asyncio.run(coroutine))
-        except BaseException as exc:  # propagated in the caller's thread
-            failure.append(exc)
-
-    thread = Thread(target=run, daemon=True)
-    thread.start()
-    thread.join()
-    if failure:
-        raise failure[0]
-    return result[0]
-
-
-def _tool_payload(result: Any, key: str) -> Any:
-    structured = getattr(result, "structuredContent", None)
-    if getattr(result, "isError", False):
-        error = structured.get("error") if isinstance(structured, Mapping) else None
-        if isinstance(error, Mapping):
-            raise LociGatewayError(
-                str(error.get("code") or "LOCI_MCP_FAILED"),
-                str(error.get("message") or "loci MCP tool call failed"),
-                error.get("details") if isinstance(error.get("details"), Mapping) else None,
-            )
-        raise LociGatewayError("LOCI_MCP_FAILED", "loci MCP tool call failed")
-
-    if isinstance(structured, Mapping) and key in structured:
-        return structured[key]
-    for block in getattr(result, "content", ()):
-        text = getattr(block, "text", None)
-        if not isinstance(text, str):
-            continue
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, Mapping) and key in parsed:
-            return parsed[key]
-    raise LociGatewayError(
-        "LOCI_RESULT_INVALID",
-        f"loci MCP response has no {key} payload",
-    )
 
 
 def _validate_result(

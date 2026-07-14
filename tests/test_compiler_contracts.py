@@ -123,6 +123,24 @@ class QueryShapeTest(unittest.TestCase):
     def test_unclassified_question_defaults_to_synthesis(self):
         self.assertEqual(classify_question("Explain the architecture in useful terms"), ("synthesis",))
 
+    def test_relationship_language_covers_supported_related_and_transition_phrasings(self):
+        questions = (
+            "What evidence supports Alpha through Beta?",
+            "How are Alpha and Beta related?",
+            "How can Alpha become durable Beta?",
+            "What improvement did Alpha make to Beta?",
+            "Does Alpha define how Beta should work?",
+        )
+
+        for question in questions:
+            with self.subTest(question=question):
+                self.assertIn("relationship", classify_question(question))
+
+    def test_hyphenated_link_attribute_is_not_a_relationship(self):
+        shapes = classify_question("What were the exact link-attribution results?")
+
+        self.assertEqual(shapes, ("lookup",))
+
 
 class CompiledContextTest(unittest.TestCase):
     def test_response_serialization_matches_v1_fixture(self):

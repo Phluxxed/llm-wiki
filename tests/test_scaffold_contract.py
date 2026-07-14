@@ -30,6 +30,7 @@ class ScaffoldContractTest(unittest.TestCase):
             'providers = ["seed", "frontmatter", "text", "graph", "source", "loci"]',
             config,
         )
+        self.assertIn('graph_backend = "loci"', config)
 
     def test_scaffold_and_migration_install_the_same_adapters(self):
         self.assertEqual(

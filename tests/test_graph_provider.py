@@ -18,6 +18,14 @@ class GraphProviderTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
+        (self.root / ".llm-wiki.toml").write_text(
+            'schema_version = "1"\n'
+            'runtime_contract = "2"\n'
+            '[compiler]\n'
+            'providers = ["seed", "frontmatter", "text", "graph", "source"]\n'
+            'graph_backend = "legacy"\n',
+            encoding="utf-8",
+        )
         write_md(
             self.root / "projects" / "brain.md",
             base_fm(title="Brain", knowledge_state="current"),

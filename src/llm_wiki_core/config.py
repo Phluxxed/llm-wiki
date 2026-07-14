@@ -18,6 +18,7 @@ DEFAULT_EXCLUDES = (".git", ".venv", "node_modules")
 LEGACY_DEFAULT_PROVIDERS = ("seed", "frontmatter", "text", "graph", "source")
 DEFAULT_PROVIDERS = (*LEGACY_DEFAULT_PROVIDERS, "loci")
 KNOWN_PROVIDERS = set(DEFAULT_PROVIDERS)
+GRAPH_BACKENDS = {"loci", "legacy"}
 KNOWN_STATES = {
     "current",
     "historical",
@@ -45,6 +46,7 @@ class ContentConfig:
 @dataclass(frozen=True)
 class CompilerConfig:
     providers: tuple[str, ...] = DEFAULT_PROVIDERS
+    graph_backend: str = "loci"
     target_bytes: int = 48_000
     max_bytes: int = 192_000
     target_items: int = 24
@@ -163,6 +165,13 @@ def _compiler_config(raw: Mapping[str, Any]) -> CompilerConfig:
             key="compiler.providers",
             value=unknown_providers,
         )
+    graph_backend = _optional_string(raw, "graph_backend", "loci", prefix="compiler")
+    if graph_backend not in GRAPH_BACKENDS:
+        raise _InvalidConfig(
+            "Unknown compiler graph backend",
+            key="compiler.graph_backend",
+            value=graph_backend,
+        )
     target_bytes = _positive_int(raw, "target_bytes", 48_000, prefix="compiler")
     max_bytes = _positive_int(raw, "max_bytes", 192_000, prefix="compiler")
     target_items = _positive_int(raw, "target_items", 24, prefix="compiler")
@@ -179,7 +188,14 @@ def _compiler_config(raw: Mapping[str, Any]) -> CompilerConfig:
             key="compiler.target_items",
             value=target_items,
         )
-    return CompilerConfig(providers, target_bytes, max_bytes, target_items, max_items)
+    return CompilerConfig(
+        providers=providers,
+        graph_backend=graph_backend,
+        target_bytes=target_bytes,
+        max_bytes=max_bytes,
+        target_items=target_items,
+        max_items=max_items,
+    )
 
 
 def _state_config(raw: Mapping[str, Any]) -> StateConfig:
