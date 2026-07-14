@@ -1,6 +1,6 @@
 # Plan: Extensible Graph Retrieval Stage 6
 
-**Status:** implemented; technical validation passed; ready for owner review
+**Status:** approved on 2026-07-14; Stage 7 rollout authorized
 
 **Date:** 2026-07-14
 
@@ -179,8 +179,8 @@ contain corpus excerpts and machine-local diagnostic roots.
 
 ## Review Gate
 
-The technical verdict is **approve Stage 6 and present Stage 7 shared-default
-rollout for owner approval**.
+The technical verdict was **approve Stage 6 and present Stage 7 shared-default
+rollout for owner approval**. Vik approved the Stage 7 rollout on 2026-07-14.
 
-Do not start Stage 7, migrate the live wikis, remove the legacy provider, commit,
-or push from this gate without separate explicit approval.
+Stage 7 is recorded separately in
+[`2026-07-14-extensible-graph-retrieval-stage-7.md`](./2026-07-14-extensible-graph-retrieval-stage-7.md).

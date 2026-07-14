@@ -1,9 +1,9 @@
 # Plan: Graph Shape and Traversal Audit
 
-Status: **Stage 3 baseline completed 2026-07-13; Stage 4 paused by architecture pivot.**
-The next implementation owner is loci. Resume this plan only after the loci
-graph-retrieval layer passes the frozen Stage 3 benchmark and receives explicit
-human approval.
+Status: **Stage 7 implemented, verified, and published 2026-07-14.** The Stage 4
+architecture pivot moved generic graph retrieval into Loci; the resulting
+substrate, llm-wiki integration, isolated cross-wiki validation, approved live
+rollout, and durable records are complete.
 
 ## Outcome
 
@@ -414,19 +414,27 @@ is recorded in
 
 ## Stage 7: Rollout and Durable Recording
 
+**Status:** implemented, fully verified, and published on 2026-07-14 after the
+separate final review gate was approved.
+
 **Description:** After approval, release the shared behavior to the two wiki
 corpora and record the observed outcome.
 
 **Acceptance criteria:**
 
-- [ ] Apply only required migrations or package updates.
-- [ ] Update the existing idea dispositions and add one outcome page; do not add
+- [x] Apply only required migrations or package updates.
+- [x] Update the existing idea dispositions and add one outcome page; do not add
   a duplicate idea.
-- [ ] Update docs and write a new ADR only if a durable graph policy was adopted.
-- [ ] Run complete repository and cross-wiki verification.
-- [ ] Commit and push only after separate explicit approval.
+- [x] Update docs and write a new ADR only if a durable graph policy was adopted.
+- [x] Run complete repository and cross-wiki verification.
+- [x] Commit and push only after separate explicit approval.
 
-**Review gate:** Final release and publication approval.
+**Review gate:** Final release and publication approval — satisfied 2026-07-14.
+
+The exact package evidence, zero-operation migration plans, canary order, live
+probes, durable-recording decision, rollback, verification results, and final
+publication boundary are recorded in
+[`2026-07-14-extensible-graph-retrieval-stage-7.md`](./2026-07-14-extensible-graph-retrieval-stage-7.md).
 
 ## Dependency Order
 
