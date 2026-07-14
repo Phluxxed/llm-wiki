@@ -42,6 +42,20 @@ class DocumentationContractTest(unittest.TestCase):
         self.assertIn("doctor", commands)
         self.assertIn("migrate", commands)
 
+    def test_judge_workflow_docs_require_preview_and_hard_cap(self):
+        files = [
+            REPO_ROOT / "README.md",
+            REPO_ROOT / "SKILL.md",
+            REPO_ROOT / "_templates" / "CONVENTIONS.md",
+        ]
+
+        for path in files:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.name):
+                self.assertIn("--plan-judge-calls", text)
+                self.assertIn("--max-judge-calls", text)
+                self.assertNotIn("scripts/eval.py --gate`", text)
+
 
 if __name__ == "__main__":
     unittest.main()

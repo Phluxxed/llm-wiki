@@ -2,6 +2,8 @@
 
 Status: **Phase 1 — Specify (awaiting review).** Do not advance to Plan/Tasks/Implement until approved.
 
+> **Historical record:** This original design predates the accepted live-judge circuit breaker. Current execution requires a zero-model preview, an explicit hard call cap, and a per-wiki lock as recorded in [ADR-006](../../decisions/ADR-006-budget-and-lock-live-judge-evals.md). Do not copy the uncapped example commands below into current automation.
+
 Related intel: [`docs/okf-steal-list.md`](../../okf-steal-list.md) idea #2. Source patterns: Google `knowledge-catalog` `agents/enrichment/eval/`.
 
 ## Objective

@@ -2,6 +2,8 @@
 
 Implements [`specs/2026-06-17-eval-metrics-design.md`](../specs/2026-06-17-eval-metrics-design.md). **Status: implemented 2026-06-17** — 127 tests green; live smoke verified (clean→PASS/0, contradiction→FAIL/1, no-judge→deterministic+brief).
 
+> **Historical record:** This implementation plan predates the accepted live-judge circuit breaker. Current execution requires a zero-model preview, an explicit hard call cap, and a per-wiki lock as recorded in [ADR-006](../../decisions/ADR-006-budget-and-lock-live-judge-evals.md). The uncapped live-smoke commands below are not current operating instructions.
+
 > **Mid-build course-correction (E1 revised):** the judge started as `claude -p` CLI; the live smoke (T8) exposed it as a *full agentic session* that intermittently invoked tools and returned empty output on large prompts. On Vik's steer it was rebuilt on the **Claude Agent SDK** (tools-off, single-turn, keyless) — now reliable (3/3). Codex stayed on its CLI. The T8 smoke also caught a real grounding bug (frontmatter judged as claims) and drove the E8 loud-failure / fail-closed semantics. The layered design held: only the T5 adapter changed.
 
 ## Grounding facts (verified)

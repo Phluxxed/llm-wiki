@@ -75,7 +75,7 @@ Before creating any files, check whether `wiki-agent.md` already exists in the d
 | `scripts/render.py` | Copy from skill bundle (`skills/wikime/scripts/render.py`); generates `wiki.html` — single-file reader artifact with nine views (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities, Sources) |
 | `scripts/query.py` | Copy from `skills/wikime/_templates/adapters/query.py`; thin compatibility entrypoint preserving the existing query/context CLI through the canonical runtime. |
 | `scripts/lint.py` | Copy from skill bundle (`skills/wikime/scripts/lint.py`); structural lint — missing sections, frontmatter, broken refs, open risks, index consistency |
-| `scripts/eval.py` | Copy from skill bundle (`skills/wikime/scripts/eval.py`); risk-triggered LLM-as-judge quality eval — grounding, cross-page contradictions, redundancy, near-duplicate disambiguation; per-metric thresholds + regression gating. Auto-detects the agent CLI (`claude`/`codex`) as a keyless judge; writes run records to `.eval/` |
+| `scripts/eval.py` | Copy from skill bundle (`skills/wikime/scripts/eval.py`); deterministic structural eval plus risk-triggered judge metrics. Live judging requires a planned, explicit hard call cap; writes scores and judge-call usage to `.eval/` |
 
 The scripts require the canonical `llm-wiki` package (which includes `pyyaml` and `markdown`); `eval.py`'s claude judge also needs `claude-agent-sdk`. Install via `uv` into a project-local venv — see Step 5.
 
@@ -107,7 +107,7 @@ This file is the agent's operating manual. Include all of these:
 
    **After every ingest, also run `.venv/bin/python3 scripts/render.py`** to regenerate `wiki.html`. The artifact must always reflect the current state of the wiki — this is non-optional.
 
-   **Run `.venv/bin/python3 scripts/eval.py --gate` only for risk-triggered audits**: self-model or operating-rule changes, ownership-boundary changes, major source ingests, rebuilds, suspected contradictions, page merge/split decisions, weak grounding concerns, near-duplicate concept cleanup, or eval tooling changes. For a pending candidate, add `--changed-since HEAD` so tracked and untracked candidate diffs are gated against full-wiki context without unchanged page text or unrelated whole-wiki judge debt affecting the score; omit it only for a deliberate whole-wiki audit. Do not run judge eval for routine page/log/index maintenance.
+   **Judge eval is opt-in and budgeted.** Do not run a live judge for routine page/log/index maintenance; lint, render, and diff review are sufficient. For a genuinely high-risk candidate, first run `.venv/bin/python3 scripts/eval.py --plan-judge-calls --changed-since HEAD`, which invokes no model. Use `--metric <name> --max-judge-calls <small-N>` only for a bounded iteration question. A targeted metric cannot be a gate. Run the complete final gate at most once with `.venv/bin/python3 scripts/eval.py --judge <owner> --gate --changed-since HEAD --max-judge-calls <N>`, choosing `N` from the preview plus only deliberate retry headroom. Omit `--changed-since` only for a deliberate, previewed whole-wiki audit. Never run an unscoped audit or repeat a full gate automatically.
 
    **Ingest completeness protocol (deep):**
    - **ToC first**: For any structured document (paper, standard, report, spec), extract or identify the table of contents before writing the wiki page. Use it as a checklist.
@@ -233,7 +233,8 @@ YAML frontmatter block (title, type: entity|concept, category: Entities & Concep
   - `.venv/bin/python3 scripts/query.py --agent-overview --json` → agent-oriented first pass over wiki structure, hubs, orphans, risks, questions, and recent log context
   - `.venv/bin/python3 scripts/query.py --context-pack <page> --tokens 12000 --json` → deterministic working context for an agent, with inclusion reasons
   - `.venv/bin/python3 scripts/render.py` → generates `wiki.html` (open in browser, or view as a Claude artifact)
-  - `.venv/bin/python3 scripts/eval.py --gate` → deliberate whole-wiki, risk-triggered LLM-as-judge quality audit (grounding, contradictions, redundancy, disambiguation) with regression gating; run records in `.eval/`
-  - `.venv/bin/python3 scripts/eval.py --gate --changed-since HEAD` → risk-triggered candidate-diff gate for tracked and untracked wiki pages, with unchanged text used only as comparison context
+  - `.venv/bin/python3 scripts/eval.py --judge none` → deterministic structural eval and optional judging brief; no model calls
+  - `.venv/bin/python3 scripts/eval.py --plan-judge-calls --changed-since HEAD` → zero-model preview of exact first-attempt judge fan-out
+  - `.venv/bin/python3 scripts/eval.py --judge <owner> --gate --changed-since HEAD --max-judge-calls <N>` → one deliberate final candidate gate, with `N` chosen from the preview and covering retries
 - Offer `git init && echo '.env' >> .gitignore` if this looks like a standalone repo
 - Confirm page type and categories look right before the user adds their first page

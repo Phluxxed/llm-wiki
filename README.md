@@ -92,11 +92,33 @@ The skill asks two questions — what the wiki is for, and what the primary page
 | `scripts/lint.py` | `.venv/bin/python3 scripts/lint.py` | Structural health check — template-required sections, broken refs, open risks, index consistency |
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --help` | Frontmatter queries plus agent graph commands: `--agent-overview`, `--links`, `--backlinks`, `--around`, `--graph-health`, `--context-pack`; add `--json` for machine-readable output |
 | `scripts/render.py` | `.venv/bin/python3 scripts/render.py` | Generates `wiki.html` — single-file reader (Home, Page, Search, Graph, Risks, Recent changes, Open questions, Entities, Sources). Open in a browser or view as a Claude artifact |
-| `scripts/eval.py` | `.venv/bin/python3 scripts/eval.py --gate` | Risk-triggered LLM-as-judge quality audit — grounding against source evidence, typed cross-page contradictions, redundancy, and boolean near-duplicate disambiguation; per-metric thresholds + regression gating (exit code). Auto-detects your agent CLI (`claude`/`codex`) as a keyless judge; run records in `.eval/` |
+| `scripts/eval.py` | `.venv/bin/python3 scripts/eval.py --judge none` | Deterministic structural eval plus an optional judging brief. Live judge runs are risk-triggered and require an explicit call cap; run records in `.eval/` |
 
-Run `lint.py` and `render.py` for routine wiki maintenance. Reserve `eval.py --gate` for high-risk changes such as self-model or operating-rule changes, ownership-boundary changes, major source ingests, rebuilds, suspected contradictions, page merge/split decisions, weak grounding concerns, near-duplicate concept cleanup, or eval tooling changes.
+Run `lint.py`, `render.py`, and ordinary diff review for routine wiki maintenance. Do not invoke a live judge for ordinary page, log, or index updates. Reserve judge-backed eval for high-risk changes such as self-model or operating-rule changes, ownership-boundary changes, major source ingests, rebuilds, suspected contradictions, page merge/split decisions, weak grounding concerns, near-duplicate concept cleanup, or eval tooling changes.
 
-For a pending candidate edit, use `.venv/bin/python3 scripts/eval.py --gate --changed-since HEAD` (plus an explicit `--judge` when the wiki is owner-locked). The evaluator includes both tracked and untracked wiki pages changed from that Git ref. Structural validity still covers the whole wiki; grounding and redundancy score only candidate-added or replacement prose; contradictions receive full-wiki context but fail only with an exact added/removed diff line; and near-duplicate checks run only for new pages or changed title/source/category/tag/type signals. Scoped runs fail loudly for an invalid ref, an empty page slice, or an oversized candidate diff, and record the base ref and exact page list in `.eval/`. Omit `--changed-since` for a deliberate whole-wiki audit.
+Before any live run, preview the exact first-attempt fan-out without invoking a model:
+
+```bash
+.venv/bin/python3 scripts/eval.py --plan-judge-calls --changed-since HEAD
+```
+
+If one semantic question needs iteration, run only that metric with a deliberately small hard cap:
+
+```bash
+.venv/bin/python3 scripts/eval.py --judge codex --metric redundancy_index \
+  --changed-since HEAD --max-judge-calls 1
+```
+
+`--metric` is intentionally forbidden with `--gate`: a final gate must cover the complete judge set. When a pending candidate genuinely needs a final semantic gate, run it once with an explicit judge and a cap chosen from the preview:
+
+```bash
+.venv/bin/python3 scripts/eval.py --judge codex --gate \
+  --changed-since HEAD --max-judge-calls N
+```
+
+Set `N` to at least the planned call count; use the exact count for no retry headroom or a small, consciously chosen higher cap. The cap covers every actual attempt, including retries. The evaluator refuses a live judge without it, refuses a known first-attempt overspend before calling the model, and uses a per-wiki process lock so overlapping evals cannot silently double-spend. Run records retain planned, actual, and maximum call counts.
+
+The candidate evaluator includes both tracked and untracked wiki pages changed from the Git ref. Structural validity still covers the whole wiki; grounding and redundancy score only candidate-added or replacement prose; contradictions receive full-wiki context but fail only with an exact added/removed diff line; and near-duplicate checks run only for new pages or changed title/source/category/tag/type signals. Scoped runs fail loudly for an invalid ref, an empty page slice, or an oversized candidate diff, and record the base ref and exact page list in `.eval/`. Omit `--changed-since` only for a deliberate whole-wiki audit, preview that audit first, and never rerun a full gate automatically.
 
 Grounding requires judge-readable evidence. A full text/markdown source works directly. A page whose `source:` is a URL/identity manifest must set `source_mode: manifest` and point `evidence:` at one or more immutable evidence packs in `sources/`; binary sources such as PDFs also require text evidence. Eval fails before spending judge calls when required evidence is absent, the primary source is missing, or the combined evidence exceeds the 48,000-character budget; oversized extractions must be curated into bounded, claim-complete packs instead of being silently truncated. Documented source drift remains visible in contradiction results without failing the gate; unresolved contradictions still fail. Disambiguation treats the judge's `distinct` boolean as authoritative.
 

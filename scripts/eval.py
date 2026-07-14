@@ -10,7 +10,8 @@ The judge is the host agent CLI, auto-detected on PATH (claude, codex) by
 default, driven via subprocess and inheriting the user's existing login — no new
 API key. A generated wiki can set OWNER_JUDGE to owner-lock evals to a specific
 agent CLI. Falls back to deterministic-only + an emitted brief when no allowed
-agent CLI is present.
+agent CLI is present. Live judging requires an explicit hard call cap and is
+serialized per wiki; use the zero-model planner before choosing that cap.
 
 Layers:
   deterministic  — structural validity, near-duplicate candidates (no judge)
@@ -22,8 +23,12 @@ See docs/superpowers/specs/2026-06-17-eval-metrics-design.md.
 
 from __future__ import annotations
 
+import argparse
+import concurrent.futures
 import dataclasses
+import datetime
 import difflib
+import fcntl
 import itertools
 import json
 import os
@@ -33,6 +38,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Callable
@@ -63,6 +69,77 @@ class JudgeError(Exception):
     """Raised when a judge that was expected to return a verdict fails (garbage,
     empty, or raised) after retries. Distinct from a legitimate N/A skip — this
     must be loud and fail the gate (fail-closed)."""
+
+
+class JudgeBudgetExceeded(JudgeError):
+    """Raised before a judge call would exceed the declared hard cap."""
+
+
+class JudgeRunLocked(Exception):
+    """Raised when another judge-backed eval already owns the wiki lock."""
+
+
+@dataclasses.dataclass(frozen=True)
+class JudgeCallPlan:
+    calls_by_metric: dict[str, int]
+    total_calls: int
+
+
+class BudgetedJudge:
+    """Thread-safe hard cap around a judge callable, including retry attempts."""
+
+    def __init__(self, judge: Judge, max_calls: int):
+        if max_calls < 1:
+            raise ValueError("max judge calls must be at least 1")
+        self._judge = judge
+        self.max_calls = max_calls
+        self.actual_calls = 0
+        self._lock = threading.Lock()
+
+    def __call__(self, prompt: str) -> str:
+        with self._lock:
+            if self.actual_calls >= self.max_calls:
+                raise JudgeBudgetExceeded(
+                    f"judge call budget exhausted at {self.max_calls} call(s)"
+                )
+            self.actual_calls += 1
+        return self._judge(prompt)
+
+
+class JudgeRunLock:
+    """Cross-process lock preventing overlapping judge-backed evals per wiki."""
+
+    def __init__(self, wiki_root: Path):
+        self.path = Path(wiki_root) / ".eval" / "judge.lock"
+        self._handle = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._handle = self.path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self._handle.seek(0)
+            owner = self._handle.read().strip() or "unknown owner"
+            self._handle.close()
+            self._handle = None
+            raise JudgeRunLocked(
+                f"another judge-backed eval is already active ({owner})"
+            ) from None
+        self._handle.seek(0)
+        self._handle.truncate()
+        self._handle.write(json.dumps({
+            "pid": os.getpid(),
+            "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }))
+        self._handle.flush()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._handle is not None:
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+            self._handle.close()
+            self._handle = None
 
 
 def parse_json(text: str):
@@ -294,8 +371,6 @@ def near_duplicate_candidates(pages: list[dict]) -> list[tuple[str, str, str]]:
 
 # ── judge metrics ───────────────────────────────────────────────────────────────
 
-import concurrent.futures  # noqa: E402
-
 _JUDGE_WORKERS = 3
 _JUDGE_RETRY_BACKOFF = 1.0  # seconds, scaled per attempt (0 in tests)
 
@@ -323,19 +398,22 @@ def _judge_json(judge: Judge, prompt: str, retries: int = 2, label: str = "",
     on every attempt is a judge ERROR (not a skip): raise JudgeError loudly so the
     caller fails the gate (fail-closed). Never silently degrades to a pass."""
     reason = "no response"
+    log_progress = bool(label) and not getattr(judge, "_is_planning_judge", False)
     for attempt in range(retries + 1):
-        if label:
+        if log_progress:
             sys.stderr.write(f"[eval] judge start: {label} "
                              f"(attempt {attempt + 1}/{retries + 1})\n")
             sys.stderr.flush()
         try:
             res = parse_json_obj(judge(prompt))
+        except JudgeBudgetExceeded:
+            raise
         except Exception as e:  # SDK/CLI failure (auth, network, not-installed, …)
             reason = f"{type(e).__name__}: {e}"
             res = {}
         else:
             if res and require in res:
-                if label:
+                if log_progress:
                     sys.stderr.write(f"[eval] judge ok: {label}\n")
                     sys.stderr.flush()
                 return res
@@ -789,9 +867,6 @@ def overall_passed(aggregated: list[dict]) -> bool:
 
 # ── orchestration ───────────────────────────────────────────────────────────────
 
-import argparse  # noqa: E402
-import datetime  # noqa: E402
-
 JUDGE_METRIC_NAMES = ["grounding", "absence_of_contradictions",
                       "redundancy_index", "disambiguation"]
 
@@ -916,11 +991,18 @@ def run_once(
     judge: Judge | None,
     focus_files: set[str] | None = None,
     page_changes: dict[str, PageChange] | None = None,
+    judge_metrics: set[str] | None = None,
 ) -> list[MetricResult]:
     """One eval pass: deterministic metrics always; judge metrics if a judge is
     available, else skipped (None) placeholders so the report is complete.
     Structural validity always covers the full wiki; focus_files scopes only the
     judge-backed candidate checks."""
+    selected_metrics = set(JUDGE_METRIC_NAMES if judge_metrics is None else judge_metrics)
+    unknown_metrics = selected_metrics.difference(JUDGE_METRIC_NAMES)
+    if unknown_metrics:
+        raise ValueError(
+            "unknown judge metric(s): " + ", ".join(sorted(unknown_metrics))
+        )
     pages = load_pages(wiki_root)
     results = [check_structural(pages, wiki_root)]
     focused_pages = pages
@@ -947,18 +1029,94 @@ def run_once(
                 for p in focused_pages
                 if page_changes[p["file"]].added_text
             ]
-    if judge is None:
-        results += [MetricResult(n, None, True,
-                                 "no judge available — not scored (use an agent CLI on PATH or --judge)")
-                    for n in JUDGE_METRIC_NAMES]
-        return results
-    results.append(check_grounding(focused_pages, wiki_root, judge))
-    results.append(check_contradictions(
-        pages, judge, focus_files=focus_files, focus_diffs=contradiction_diffs,
-    ))
-    results.append(check_redundancy(focused_pages, judge))
-    results.append(check_disambiguation(pages, judge, focus_files=duplicate_focus))
+    checks = {
+        "grounding": lambda: check_grounding(focused_pages, wiki_root, judge),
+        "absence_of_contradictions": lambda: check_contradictions(
+            pages, judge, focus_files=focus_files, focus_diffs=contradiction_diffs,
+        ),
+        "redundancy_index": lambda: check_redundancy(focused_pages, judge),
+        "disambiguation": lambda: check_disambiguation(
+            pages, judge, focus_files=duplicate_focus,
+        ),
+    }
+    for name in JUDGE_METRIC_NAMES:
+        if name not in selected_metrics:
+            results.append(MetricResult(name, None, True, "judge metric not selected"))
+        elif judge is None:
+            results.append(MetricResult(
+                name,
+                None,
+                True,
+                "no judge available — not scored (use an agent CLI on PATH or --judge)",
+            ))
+        else:
+            results.append(checks[name]())
     return results
+
+
+class _PlanningJudge:
+    """Zero-model judge that counts the exact prompts produced by an eval pass."""
+
+    _is_planning_judge = True
+
+    def __init__(self):
+        self.calls_by_metric = {name: 0 for name in JUDGE_METRIC_NAMES}
+        self._lock = threading.Lock()
+
+    def __call__(self, prompt: str) -> str:
+        if "strict groundedness judge" in prompt:
+            metric = "grounding"
+            response = {"score": 1.0, "unsupported": [], "rationale": "plan"}
+        elif "consistency auditor" in prompt:
+            metric = "absence_of_contradictions"
+            response = {"score": 1.0, "conflicts": [], "rationale": "plan"}
+        elif "documentation quality auditor" in prompt:
+            metric = "redundancy_index"
+            response = {"score": 1.0, "boilerplate": [], "rationale": "plan"}
+        elif "Two wiki pages look similar" in prompt:
+            metric = "disambiguation"
+            response = {"distinct": True, "rationale": "plan"}
+        else:
+            raise RuntimeError("planner encountered an unknown judge prompt")
+        with self._lock:
+            self.calls_by_metric[metric] += 1
+        return json.dumps(response)
+
+
+def plan_judge_calls(
+    wiki_root: Path,
+    focus_files: set[str] | None = None,
+    page_changes: dict[str, PageChange] | None = None,
+    judge_metrics: set[str] | None = None,
+    runs: int = 1,
+) -> JudgeCallPlan:
+    """Count first-attempt judge calls by running real metric paths locally."""
+    if runs < 1:
+        raise ValueError("runs must be at least 1")
+    planner = _PlanningJudge()
+    for _ in range(runs):
+        run_once(
+            wiki_root,
+            planner,
+            focus_files=focus_files,
+            page_changes=page_changes,
+            judge_metrics=judge_metrics,
+        )
+    counts = dict(planner.calls_by_metric)
+    return JudgeCallPlan(calls_by_metric=counts, total_calls=sum(counts.values()))
+
+
+def validate_judge_budget(plan: JudgeCallPlan, max_calls: int | None) -> None:
+    """Require an explicit hard cap and refuse a known first-attempt overspend."""
+    if max_calls is None:
+        raise ValueError("live judge requires --max-judge-calls N")
+    if max_calls < 1:
+        raise ValueError("--max-judge-calls must be at least 1")
+    if plan.total_calls > max_calls:
+        raise ValueError(
+            f"planned {plan.total_calls} judge call(s) exceed "
+            f"--max-judge-calls {max_calls}"
+        )
 
 
 def _avg(aggregated: list[dict]) -> float | None:
@@ -967,7 +1125,11 @@ def _avg(aggregated: list[dict]) -> float | None:
 
 
 def write_run_record(
-    wiki_root: Path, aggregated: list[dict], judge_label: str, scope: dict | None = None,
+    wiki_root: Path,
+    aggregated: list[dict],
+    judge_label: str,
+    scope: dict | None = None,
+    judge_usage: dict | None = None,
 ) -> Path:
     eval_dir = Path(wiki_root) / ".eval"
     (eval_dir / "runs").mkdir(parents=True, exist_ok=True)
@@ -977,6 +1139,8 @@ def write_run_record(
               "average": _avg(aggregated), "metrics": aggregated}
     if scope is not None:
         record["scope"] = scope
+    if judge_usage is not None:
+        record["judge_usage"] = judge_usage
     path = eval_dir / "runs" / f"{ts}.json"
     path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -991,6 +1155,8 @@ def write_run_record(
                      "overall_passed": record["overall_passed"], "average": record["average"]}
     if scope is not None:
         history_entry["scope"] = scope
+    if judge_usage is not None:
+        history_entry["judge_usage"] = judge_usage
     entries.append(history_entry)
     hist.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
@@ -1064,12 +1230,16 @@ def load_verdicts(run_dir: Path) -> list[MetricResult]:
             for d in data]
 
 
-def _report_or_json(aggregated, judge_label, as_json, scope=None):
+def _report_or_json(
+    aggregated, judge_label, as_json, scope=None, judge_usage=None,
+):
     if as_json:
         payload = {"judge": judge_label, "overall_passed": overall_passed(aggregated),
                    "metrics": aggregated}
         if scope is not None:
             payload["scope"] = scope
+        if judge_usage is not None:
+            payload["judge_usage"] = judge_usage
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         print(build_report(aggregated, judge_label, scope=scope))
@@ -1085,6 +1255,23 @@ def main():
     parser.add_argument("--gate", action="store_true", help="exit non-zero on regression")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument(
+        "--metric",
+        action="append",
+        choices=JUDGE_METRIC_NAMES,
+        help="run one judge metric (repeatable; cannot be combined with --gate)",
+    )
+    parser.add_argument(
+        "--max-judge-calls",
+        type=int,
+        metavar="N",
+        help="hard cap on all live judge attempts, including retries",
+    )
+    parser.add_argument(
+        "--plan-judge-calls",
+        action="store_true",
+        help="print exact first-attempt call fan-out without invoking a model",
+    )
+    parser.add_argument(
         "--changed-since",
         metavar="GIT_REF",
         help="scope judge metrics to tracked and untracked wiki pages changed since GIT_REF",
@@ -1094,8 +1281,24 @@ def main():
     wiki_root = WIKI_ROOT
     thresholds = load_thresholds(wiki_root)
 
-    if args.changed_since and args.command is not None:
-        parser.error("--changed-since is only supported for live evals, not collect or score")
+    if args.runs < 1:
+        parser.error("--runs must be at least 1")
+    if args.metric and args.gate:
+        parser.error(
+            "--metric cannot be combined with --gate; final gates must run the complete judge set"
+        )
+    if args.plan_judge_calls and args.gate:
+        parser.error("--plan-judge-calls cannot be combined with --gate")
+    if args.command is not None and any((
+        args.changed_since,
+        args.metric,
+        args.max_judge_calls is not None,
+        args.plan_judge_calls,
+    )):
+        parser.error(
+            "--changed-since, --metric, --max-judge-calls, and --plan-judge-calls "
+            "are only supported for live evals, not collect or score"
+        )
 
     focus_files = None
     page_changes = None
@@ -1129,6 +1332,39 @@ def main():
         _report_or_json(agg, "external", args.json)
         sys.exit(gate_exit_code(agg) if args.gate else 0)
 
+    judge_metrics = set(args.metric) if args.metric else None
+    selected_metric_names = [
+        name for name in JUDGE_METRIC_NAMES
+        if judge_metrics is None or name in judge_metrics
+    ]
+    if args.plan_judge_calls:
+        try:
+            plan = plan_judge_calls(
+                wiki_root,
+                focus_files=focus_files,
+                page_changes=page_changes,
+                judge_metrics=judge_metrics,
+                runs=args.runs,
+            )
+        except ValueError as e:
+            sys.exit(f"[eval] {e}")
+        payload = {
+            "planned_judge_calls": plan.total_calls,
+            "calls_by_metric": plan.calls_by_metric,
+            "runs": args.runs,
+            "metrics": selected_metric_names,
+        }
+        if scope is not None:
+            payload["scope"] = scope
+        if args.json:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print(f"Planned first-attempt judge calls: {plan.total_calls}")
+            for name in JUDGE_METRIC_NAMES:
+                print(f"- {name}: {plan.calls_by_metric[name]}")
+            print("No model was invoked.")
+        return
+
     try:
         judge, label = detect_judge(args.judge)
     except ValueError as e:
@@ -1136,20 +1372,73 @@ def main():
     if judge is None:
         brief = emit_brief(wiki_root)
         agg = aggregate([run_once(
-            wiki_root, None, focus_files=focus_files, page_changes=page_changes,
+            wiki_root,
+            None,
+            focus_files=focus_files,
+            page_changes=page_changes,
+            judge_metrics=judge_metrics,
         )], thresholds)
         _report_or_json(agg, label, args.json, scope=scope)
         if not args.json:
             print(f"\nNo judge available — judge metrics not scored. Brief: {brief}")
         return
 
-    runs = [run_once(
-        wiki_root, judge, focus_files=focus_files, page_changes=page_changes,
+    try:
+        plan = plan_judge_calls(
+            wiki_root,
+            focus_files=focus_files,
+            page_changes=page_changes,
+            judge_metrics=judge_metrics,
+            runs=args.runs,
+        )
+        validate_judge_budget(plan, args.max_judge_calls)
+    except ValueError as e:
+        sys.exit(f"[eval] {e}")
+    sys.stderr.write(
+        f"[eval] planned first-attempt judge calls: {plan.total_calls}; "
+        f"hard cap including retries: {args.max_judge_calls}\n"
     )
-            for _ in range(max(1, args.runs))]
+    sys.stderr.write(
+        "[eval] call plan: "
+        + ", ".join(
+            f"{name}={plan.calls_by_metric[name]}" for name in JUDGE_METRIC_NAMES
+        )
+        + "\n"
+    )
+    budgeted_judge = BudgetedJudge(judge, args.max_judge_calls)
+    try:
+        with JudgeRunLock(wiki_root):
+            runs = [run_once(
+                wiki_root,
+                budgeted_judge,
+                focus_files=focus_files,
+                page_changes=page_changes,
+                judge_metrics=judge_metrics,
+            ) for _ in range(args.runs)]
+    except JudgeRunLocked as e:
+        sys.exit(f"[eval] {e}")
     agg = aggregate(runs, thresholds)
-    record = write_run_record(wiki_root, agg, label, scope=scope)
-    _report_or_json(agg, label, args.json, scope=scope)
+    judge_usage = {
+        "planned_calls": plan.total_calls,
+        "actual_calls": budgeted_judge.actual_calls,
+        "max_calls": args.max_judge_calls,
+        "metrics": selected_metric_names,
+        "runs": args.runs,
+    }
+    record = write_run_record(
+        wiki_root,
+        agg,
+        label,
+        scope=scope,
+        judge_usage=judge_usage,
+    )
+    _report_or_json(
+        agg,
+        label,
+        args.json,
+        scope=scope,
+        judge_usage=judge_usage,
+    )
     if not args.json:
         print(f"\nRun record: {record}")
     if args.gate:

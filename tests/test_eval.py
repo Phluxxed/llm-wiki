@@ -8,6 +8,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -440,6 +442,19 @@ class JudgeMetricsTest(unittest.TestCase):
         with self.assertRaises(ev.JudgeError):
             ev._judge_json(lambda p: "not json", "p")
 
+    def test_judge_json_stops_retrying_when_hard_cap_is_exhausted(self):
+        calls = []
+        judge = ev.BudgetedJudge(
+            lambda prompt: calls.append(prompt) or "not json",
+            max_calls=1,
+        )
+
+        with self.assertRaises(ev.JudgeBudgetExceeded):
+            ev._judge_json(judge, "p")
+
+        self.assertEqual(calls, ["p"])
+        self.assertEqual(judge.actual_calls, 1)
+
     # ── redundancy ──
     def test_redundancy_scored(self):
         write_md(self.wiki_root / "papers/a.md", conformant_fm(title="A"), PRIMARY_BODY)
@@ -659,6 +674,91 @@ class OrchestrationTest(unittest.TestCase):
         self.assertEqual(results["structural_validity"].score, 1.0)   # deterministic still runs
         self.assertIsNone(results["grounding"].score)                 # judge metric skipped
         self.assertIsNone(results["absence_of_contradictions"].score)
+
+    def test_run_once_selected_metric_does_not_invoke_other_judges(self):
+        self._wiki_with_derived()
+        prompts = []
+
+        def judge(prompt):
+            prompts.append(prompt)
+            return '{"score":0.8,"boilerplate":[]}'
+
+        results = {
+            result.name: result
+            for result in ev.run_once(
+                self.wiki_root,
+                judge,
+                judge_metrics={"redundancy_index"},
+            )
+        }
+
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("documentation quality auditor", prompts[0])
+        self.assertEqual(results["redundancy_index"].score, 0.8)
+        self.assertIsNone(results["grounding"].score)
+        self.assertIn("not selected", results["grounding"].detail)
+
+    def test_judge_call_plan_counts_candidate_diff_fanout_and_runs(self):
+        self._wiki_with_derived()
+        changes = {
+            "papers/a.md": ev.PageChange(
+                file="papers/a.md",
+                diff="@@ -1 +1,2 @@\n old\n+New supported claim.",
+                added_text="New supported claim.",
+                is_new=False,
+                duplicate_signals_changed=False,
+            )
+        }
+
+        plan = ev.plan_judge_calls(self.wiki_root, page_changes=changes, runs=2)
+
+        self.assertEqual(plan.calls_by_metric, {
+            "grounding": 2,
+            "absence_of_contradictions": 2,
+            "redundancy_index": 2,
+            "disambiguation": 0,
+        })
+        self.assertEqual(plan.total_calls, 6)
+
+    def test_judge_call_plan_honours_metric_selection(self):
+        self._wiki_with_derived()
+
+        plan = ev.plan_judge_calls(
+            self.wiki_root,
+            judge_metrics={"redundancy_index"},
+        )
+
+        self.assertEqual(plan.calls_by_metric["redundancy_index"], 1)
+        self.assertEqual(plan.total_calls, 1)
+
+    def test_judge_budget_is_explicit_and_refuses_overspend(self):
+        plan = ev.JudgeCallPlan(
+            calls_by_metric={"grounding": 3},
+            total_calls=3,
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires --max-judge-calls"):
+            ev.validate_judge_budget(plan, None)
+        with self.assertRaisesRegex(ValueError, "planned 3 judge call"):
+            ev.validate_judge_budget(plan, 2)
+        ev.validate_judge_budget(plan, 3)
+
+    def test_budgeted_judge_never_calls_underlying_judge_past_cap(self):
+        calls = []
+        judge = ev.BudgetedJudge(lambda prompt: calls.append(prompt) or "{}", 1)
+
+        judge("first")
+        with self.assertRaises(ev.JudgeBudgetExceeded):
+            judge("second")
+
+        self.assertEqual(calls, ["first"])
+        self.assertEqual(judge.actual_calls, 1)
+
+    def test_judge_run_lock_rejects_overlapping_process(self):
+        with ev.JudgeRunLock(self.wiki_root):
+            with self.assertRaisesRegex(ev.JudgeRunLocked, "already active"):
+                with ev.JudgeRunLock(self.wiki_root):
+                    self.fail("overlapping lock unexpectedly acquired")
 
     def test_run_once_scopes_judge_metrics_but_keeps_structural_global(self):
         (self.wiki_root / "sources/a.md").write_text("Alpha evidence.\n", encoding="utf-8")
@@ -900,6 +1000,103 @@ class OrchestrationTest(unittest.TestCase):
         )
         self.assertEqual(record["scope"], scope)
         self.assertEqual(history[-1]["scope"], scope)
+
+    def test_write_run_record_preserves_judge_usage(self):
+        self._wiki_with_derived()
+        agg = ev.aggregate(
+            [ev.run_once(self.wiki_root, stub('{"score":1.0}'))],
+            ev.load_thresholds(self.wiki_root),
+        )
+        usage = {
+            "planned_calls": 3,
+            "actual_calls": 3,
+            "max_calls": 4,
+            "metrics": list(ev.JUDGE_METRIC_NAMES),
+            "runs": 1,
+        }
+
+        path = ev.write_run_record(self.wiki_root, agg, "stub", judge_usage=usage)
+        record = __import__("json").loads(path.read_text(encoding="utf-8"))
+        history = __import__("json").loads(
+            (self.wiki_root / ".eval" / "history.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(record["judge_usage"], usage)
+        self.assertEqual(history[-1]["judge_usage"], usage)
+
+    def test_main_refuses_live_judge_without_explicit_budget(self):
+        self._wiki_with_derived()
+        calls = []
+        live_judge = lambda prompt: calls.append(prompt) or '{"score":1.0}'
+
+        with (
+            patch.object(ev, "WIKI_ROOT", self.wiki_root),
+            patch.object(ev, "detect_judge", return_value=(live_judge, "stub")),
+            patch.object(sys, "argv", ["eval.py", "--judge", "stub"]),
+            self.assertRaisesRegex(SystemExit, "requires --max-judge-calls"),
+        ):
+            ev.main()
+
+        self.assertEqual(calls, [])
+
+    def test_main_budgeted_live_run_records_exact_usage(self):
+        self._wiki_with_derived()
+        calls = []
+
+        def live_judge(prompt):
+            calls.append(prompt)
+            return (
+                '{"score":1.0,"unsupported":[],"conflicts":[],'
+                '"boilerplate":[],"rationale":"ok"}'
+            )
+
+        output = StringIO()
+        with (
+            patch.object(ev, "WIKI_ROOT", self.wiki_root),
+            patch.object(ev, "detect_judge", return_value=(live_judge, "stub")),
+            patch.object(sys, "argv", [
+                "eval.py", "--judge", "stub", "--max-judge-calls", "3", "--json",
+            ]),
+            redirect_stdout(output),
+        ):
+            ev.main()
+
+        payload = __import__("json").loads(output.getvalue())
+        history = __import__("json").loads(
+            (self.wiki_root / ".eval" / "history.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(payload["judge_usage"]["planned_calls"], 3)
+        self.assertEqual(payload["judge_usage"]["actual_calls"], 3)
+        self.assertEqual(payload["judge_usage"]["max_calls"], 3)
+        self.assertEqual(history[-1]["judge_usage"], payload["judge_usage"])
+
+    def test_main_plan_is_zero_model_and_reports_breakdown(self):
+        self._wiki_with_derived()
+        output = StringIO()
+
+        with (
+            patch.object(ev, "WIKI_ROOT", self.wiki_root),
+            patch.object(ev, "detect_judge", side_effect=AssertionError("must not detect")),
+            patch.object(sys, "argv", ["eval.py", "--plan-judge-calls", "--json"]),
+            redirect_stdout(output),
+        ):
+            ev.main()
+
+        payload = __import__("json").loads(output.getvalue())
+        self.assertEqual(payload["planned_judge_calls"], 3)
+        self.assertEqual(payload["calls_by_metric"]["grounding"], 1)
+
+    def test_main_rejects_targeted_metric_as_full_gate(self):
+        with (
+            patch.object(sys, "argv", [
+                "eval.py", "--judge", "none", "--metric", "redundancy_index", "--gate",
+            ]),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            ev.main()
+
+        self.assertEqual(raised.exception.code, 2)
 
     def test_eval_dir_excluded_from_lint_and_render(self):
         import lint
