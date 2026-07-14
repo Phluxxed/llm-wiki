@@ -14,7 +14,19 @@ Missing `knowledge_state` is `unspecified`, never inferred as `current`. Retriev
 
 Every current wiki declares `.llm-wiki.toml` with `schema_version = "1"` and `runtime_contract = "2"`. Content exclusions, source directory, providers, compiler targets/maximums, state field, and manual stewardship live there. Secrets, absolute registry identity, and machine-specific paths are rejected.
 
-The default provider set is `seed`, `frontmatter`, `text`, `graph`, `source`, and `loci`. loci is the core section-navigation route for managed wikis and is invoked through its local `loci-mcp` stdio service; it does not need to share the `llm-wiki` Python environment. Missing, unindexed, stale, or failed loci state produces a structured diagnostic while the deterministic local providers continue. Removing `"loci"` from `[compiler].providers` is an explicit opt-out. See [loci provider](loci-provider.md).
+The default provider set is `seed`, `frontmatter`, `text`, `graph`, `source`, and `loci`. loci owns both indexed section navigation and the default graph mechanics for managed wikis through its local `loci-mcp` stdio service; it does not need to share the `llm-wiki` Python environment. Removing `"loci"` from `[compiler].providers` opts out of indexed-section retrieval. Removing `"graph"` opts out of graph retrieval.
+
+`compiler.graph_backend` accepts exactly `loci` or `legacy` and defaults to `loci`. The legacy value is an explicit rollback to the previous local shortest-path provider. A failed loci graph request reports a diagnostic and returns no graph candidates; it never silently invokes the legacy backend. Other enabled providers continue independently.
+
+## Graph retrieval and relationship sufficiency
+
+The loci graph backend builds a machine-local mirror containing the wiki pages plus generated graph profile and contribution files. The source wiki is never given `.loci` files or otherwise mutated by a compile. The cache defaults to `${XDG_CACHE_HOME:-~/.cache}/llm-wiki/graph` and may be relocated with `LLM_WIKI_GRAPH_CACHE_DIR`.
+
+Every returned path, node, edge, evidence line, and content hash is checked against the original wiki snapshot. Paths are atomic compiler candidates: an over-budget path is omitted rather than truncated. Retrieval score affects ordering only; it does not create knowledge state, authority, or answerability.
+
+For inferred relationship questions, llm-wiki uses Loci's explained anchors to distinguish a path that crosses the question's separate subject clusters from a nearby path within only one cluster. Only a cross-subject path carries the `bridge` role and can satisfy relationship coverage. Ancillary paths may still be returned as `support`, but they cannot make the compiler claim the requested relationship exists. Explicitly seeded endpoint retrieval treats a validated path between those seeds as bridge evidence. llm-wiki still owns final selection, coverage, sufficiency, stop semantics, and budget enforcement. See [loci provider](loci-provider.md).
+
+`LOCI_GRAPH_PATH_REJECTED` records normal negative evidence from a successful graph request. It remains visible in diagnostics but does not by itself mean the provider degraded. If all available paths are rejected or only ancillary support remains, an uncovered relationship stops as `candidate_exhausted`; transport, contract, or freshness failures still stop as `provider_degraded` when required coverage remains.
 
 ## Migration and rollback
 
