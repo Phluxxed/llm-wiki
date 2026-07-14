@@ -368,16 +368,19 @@ or calculated scoring trace; no runtime mutation.
 
 ## Stage 5: Local Runtime Implementation
 
+**Status:** complete; implementation and technical review approved on
+2026-07-14.
+
 **Description:** Implement only the selected policy in `llm-wiki` with focused
 regression tests.
 
 **Acceptance criteria:**
 
-- [ ] Tests fail against the previous behavior and pass with the selected
+- [x] Tests fail against the previous behavior and pass with the selected
   policy.
-- [ ] Existing compiler contracts, diagnostics, deterministic fallback, and
+- [x] Existing compiler contracts, diagnostics, deterministic fallback, and
   loci-first behavior remain compatible.
-- [ ] Diff is limited to the approved behavior, tests, and required docs.
+- [x] Diff is limited to the approved behavior, tests, and required docs.
 
 **Verification:** Focused tests, full local suite, build, diff check, and
 before/after fixture output.
@@ -386,21 +389,28 @@ before/after fixture output.
 
 ## Stage 6: Cross-Wiki Validation
 
+**Status:** complete; technical validation passed on 2026-07-14 and is ready
+for the shared-default rollout review gate.
+
 **Description:** Validate the selected implementation against temporary or
 read-only copies of `ai_graph_ideas` and Brain.
 
 **Acceptance criteria:**
 
-- [ ] Both corpora meet the approved retrieval and bridge criteria.
-- [ ] Cost and latency regressions remain within the approved envelope.
-- [ ] Loci degradation still produces explicit diagnostics and deterministic
+- [x] Both corpora meet the approved retrieval and bridge criteria.
+- [x] Cost and latency regressions remain within the approved envelope.
+- [x] Loci degradation still produces explicit diagnostics and deterministic
   fallback.
-- [ ] No live wiki has been migrated or mutated.
+- [x] No live wiki has been migrated or mutated.
 
 **Verification:** Cross-wiki acceptance suite, lint/query smoke checks, package
 build, and clean temporary-install smoke tests.
 
 **Review gate:** Approve or reject shared-default rollout.
+
+Detailed isolation, benchmark, degradation, clean-install, and review evidence
+is recorded in
+[`2026-07-14-extensible-graph-retrieval-stage-6.md`](./2026-07-14-extensible-graph-retrieval-stage-6.md).
 
 ## Stage 7: Rollout and Durable Recording
 

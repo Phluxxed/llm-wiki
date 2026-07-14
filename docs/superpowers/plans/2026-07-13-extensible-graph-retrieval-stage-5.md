@@ -398,3 +398,14 @@ selected evidence size was 26,314.5 bytes.
 The technical review verdict is **ready for owner review**. The legacy graph
 provider remains available only through explicit `graph_backend = "legacy"`.
 No removal or automatic fallback is authorized by this stage.
+
+## Stage 6 Validation Note
+
+Stage 6 proved that this historical digest was stable for repeated runs at the
+same corpus roots but also found that the benchmark normalizer retained the
+diagnostic `roots` field. The Stage 6 benchmark keeps roots in the inspectable
+artifact while excluding them from its deterministic hash, with a regression
+test proving identical snapshots at different mount paths now hash equally.
+The Stage 5 digest above remains historical evidence under the original
+root-inclusive normalizer; see the
+[Stage 6 validation record](./2026-07-14-extensible-graph-retrieval-stage-6.md).
