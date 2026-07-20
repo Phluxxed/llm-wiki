@@ -92,6 +92,51 @@ class LociProviderTest(unittest.TestCase):
         self.assertIn("propagate_upgrade", evidence["content"])
         self.assertTrue(all(call[-1] is True for call in calls))
 
+    def test_indexed_section_on_current_page_carries_current_claim_role(self):
+        write_md(
+            self.root / "notes" / "overview.md",
+            base_fm(title="Overview", knowledge_state="current"),
+            "Current Overview implementation status and next work.",
+        )
+
+        class CurrentPageGateway:
+            def retrieve(self, wiki_root, query, *, limit):
+                from llm_wiki_core.providers.loci import LociRetrieval
+
+                return LociRetrieval(
+                    results=(
+                        {
+                            "id": "notes/overview.md::Current status#section",
+                            "file_path": "notes/overview.md",
+                            "line": 1,
+                            "end_line": 1,
+                            "content": "Current Overview implementation status and next work.",
+                            "hydrated_locator": {
+                                "file_path": "notes/overview.md",
+                                "line": 1,
+                                "end_line": 1,
+                            },
+                        },
+                    )
+                )
+
+        request = CompileRequest.from_mapping(
+            {
+                "alias": "test",
+                "question": "What is the current Overview implementation status?",
+                "seeds": [],
+            }
+        )
+        response = compile_context(
+            self.root,
+            request,
+            extra_providers=(LociProvider(gateway=CurrentPageGateway()),),
+        ).to_dict()
+
+        evidence = next(item for item in response["evidence"] if item["provider"] == "loci")
+        self.assertEqual(evidence["authored_state"], "current")
+        self.assertIn("current_claim", evidence["roles"])
+
     def test_mcp_gateway_hydrates_search_results_over_stdio(self):
         server = self.root / "fake_loci_mcp.py"
         server.write_text(

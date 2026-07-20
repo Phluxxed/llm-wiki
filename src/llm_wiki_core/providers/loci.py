@@ -224,6 +224,7 @@ class LociProvider:
                 continue
             page = context.pages.get(file_path)
             state = normalize_knowledge_state(page.frontmatter) if page is not None else None
+            authored_state = state.normalized if state is not None else "unspecified"
             is_source = _is_source(file_path, context.config.content.source_directory)
             candidates.append(
                 CandidateEvidence(
@@ -240,9 +241,9 @@ class LociProvider:
                         "search_rank": retrieval_rank,
                     },
                     content=content,
-                    roles=_roles(context.shapes, is_source),
+                    roles=_roles(context.shapes, is_source, authored_state),
                     selection_signals=("indexed_symbol_match", f"search_rank:{retrieval_rank}"),
-                    authored_state=state.normalized if state is not None else "unspecified",
+                    authored_state=authored_state,
                     derived_flags=state.derived_flags if state is not None else (),
                     authority_signals=("source_index_span",) if is_source else (),
                     retrieval_rank=retrieval_rank,
@@ -348,14 +349,18 @@ def _invalid_result(file_path: str | None, message: str) -> Diagnostic:
     )
 
 
-def _roles(shapes: tuple[str, ...], is_source: bool) -> tuple[str, ...]:
+def _roles(shapes: tuple[str, ...], is_source: bool, authored_state: str) -> tuple[str, ...]:
     roles: list[str] = []
     if "lookup" in shapes:
         roles.append("answer")
     if "relationship" in shapes:
         roles.append("endpoint")
+    if "state" in shapes and authored_state == "current":
+        roles.append("current_claim")
     if "synthesis" in shapes or "history" in shapes:
         roles.append("support")
+    if "history" in shapes and authored_state in {"historical", "superseded"}:
+        roles.append("lineage")
     if "maintenance" in shapes:
         roles.append("evidence")
     if is_source:
