@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -41,6 +42,14 @@ class McpCompilerTest(unittest.TestCase):
         self.assertEqual(result["compiled"]["kind"], "compiled_context")
         self.assertEqual(result["compiled"]["query"]["question"], "What does Runtime own?")
         self.assertTrue(result["compiled"]["stop"]["sufficient"])
+        serialized = json.dumps(
+            result["compiled"],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self.assertLessEqual(len(serialized), 10_000)
+        self.assertIn("reporting", result["compiled"])
 
     def test_invalid_compiler_input_keeps_structured_error_envelope(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -52,6 +61,17 @@ class McpCompilerTest(unittest.TestCase):
         self.assertTrue(result["is_error"])
         self.assertEqual(result["error"]["code"], "CONTRACT_VERSION_UNSUPPORTED")
         self.assertEqual(result["error"]["details"], {"found": "2", "supported": "1"})
+
+    def test_impossible_complete_response_budget_keeps_structured_error_envelope(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            wiki = create_wiki_root(tmp / "wiki")
+
+            result = asyncio.run(_too_small_budget_round_trip(tmp / "home", wiki))
+
+        self.assertTrue(result["is_error"])
+        self.assertEqual(result["error"]["code"], "BUDGET_TOO_SMALL")
+        self.assertGreater(result["error"]["details"]["minimum_response_bytes"], 100)
 
 
 async def _session(home: Path):
@@ -97,6 +117,24 @@ async def _invalid_round_trip(home: Path, wiki: Path):
             result = await session.call_tool(
                 "wiki_compile_context",
                 {"alias": "test", "question": "What changed?", "contract_version": "2"},
+            )
+            return {"is_error": result.isError, "error": result.structuredContent["error"]}
+
+
+async def _too_small_budget_round_trip(home: Path, wiki: Path):
+    params = await _session(home)
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            await session.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
+            result = await session.call_tool(
+                "wiki_compile_context",
+                {
+                    "alias": "test",
+                    "question": "What changed?",
+                    "target_bytes": 100,
+                    "max_bytes": 100,
+                },
             )
             return {"is_error": result.isError, "error": result.structuredContent["error"]}
 

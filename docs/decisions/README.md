@@ -20,3 +20,5 @@ Use an ADR when a decision changes architecture, public behavior, dependency pos
 | [ADR-003](./ADR-003-canonical-runtime-and-versioned-wiki-contract.md) | Accepted | 2026-07-12 | Centralize shared behavior in a versioned runtime contract. |
 | [ADR-004](./ADR-004-question-shaped-state-aware-context-compiler.md) | Accepted | 2026-07-12 | Compile question-shaped context with explicit knowledge state. |
 | [ADR-005](./ADR-005-loci-first-class-default-traversal.md) | Accepted | 2026-07-13 | Make loci core, default-on traversal with explicit degradation. |
+| [ADR-006](./ADR-006-budget-and-lock-live-judge-evals.md) | Accepted | 2026-07-14 | Require previewed, capped, and serialized live judge evaluation. |
+| [ADR-007](./ADR-007-enforce-complete-response-context-budgets.md) | Accepted | 2026-07-20 | Enforce compiler ceilings across the complete response and stop forced redundant Loci evidence. |

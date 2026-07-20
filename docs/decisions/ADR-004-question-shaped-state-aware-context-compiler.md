@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted; loci-specific provider posture superseded by ADR-005
+Accepted; loci-specific provider posture superseded by ADR-005 and budget-boundary semantics amended by ADR-007
 
 ## Date
 
@@ -73,6 +73,8 @@ Rejected as the production contract. Manual reads remain available for inspectio
 - Provider failure must be visible without discarding valid evidence from other providers.
 - A sufficiency flag describes deterministic evidence-role coverage, not final-answer correctness.
 - Content writes and Brain promotion remain outside MCP and under existing wiki governance.
+
+The detailed meaning of the caller's byte and estimated-token ceilings, bounded omission reporting, and post-coverage Loci selection is amended by [ADR-007](./ADR-007-enforce-complete-response-context-budgets.md).
 
 ## Follow-Up
 

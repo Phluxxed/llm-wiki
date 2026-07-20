@@ -157,6 +157,7 @@ class EvidenceRecord:
     selection_reasons: tuple[str, ...]
     byte_cost: int
     truncated: bool = False
+    atomic: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -174,6 +175,7 @@ class EvidenceRecord:
             "selection_reasons": list(self.selection_reasons),
             "byte_cost": self.byte_cost,
             "truncated": self.truncated,
+            "atomic": self.atomic,
         }
 
 
@@ -262,6 +264,26 @@ class Diagnostic:
 
 
 @dataclass(frozen=True)
+class ResponseReporting:
+    omissions_total: int
+    omissions_returned: int
+    diagnostics_total: int
+    diagnostics_returned: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "omissions": {
+                "total": self.omissions_total,
+                "returned": self.omissions_returned,
+            },
+            "diagnostics": {
+                "total": self.diagnostics_total,
+                "returned": self.diagnostics_returned,
+            },
+        }
+
+
+@dataclass(frozen=True)
 class CompiledContext:
     alias: str
     schema_version: str
@@ -277,9 +299,16 @@ class CompiledContext:
     stop: StopState
     continuation: Mapping[str, Any] | None = None
     diagnostics: tuple[Diagnostic, ...] = ()
+    reporting: ResponseReporting | None = None
     contract_version: str = CONTRACT_VERSION
 
     def to_dict(self) -> dict[str, Any]:
+        reporting = self.reporting or ResponseReporting(
+            omissions_total=len(self.omissions),
+            omissions_returned=len(self.omissions),
+            diagnostics_total=len(self.diagnostics),
+            diagnostics_returned=len(self.diagnostics),
+        )
         return {
             "kind": "compiled_context",
             "contract_version": self.contract_version,
@@ -301,6 +330,7 @@ class CompiledContext:
             "stop": self.stop.to_dict(),
             "continuation": dict(self.continuation) if self.continuation is not None else None,
             "diagnostics": [item.to_dict() for item in self.diagnostics],
+            "reporting": reporting.to_dict(),
         }
 
 

@@ -43,7 +43,8 @@
         "covers:current_claim"
       ],
       "byte_cost": 35,
-      "truncated": false
+      "truncated": false,
+      "atomic": false
     }
   ],
   "omissions": [],
@@ -80,5 +81,15 @@
     "detail": "All required roles covered"
   },
   "continuation": null,
-  "diagnostics": []
+  "diagnostics": [],
+  "reporting": {
+    "omissions": {
+      "total": 0,
+      "returned": 0
+    },
+    "diagnostics": {
+      "total": 0,
+      "returned": 0
+    }
+  }
 }

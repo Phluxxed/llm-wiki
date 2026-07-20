@@ -40,7 +40,7 @@ The recent generated-manifest traversal milestone in `ai_graph_ideas` supports r
 | C5 | Primary query interface | Add **`wiki_compile_context`** and a matching CLI command. It requires a question and accepts optional seed pages and bounded policy. |
 | C6 | Existing interface | Keep `wiki_context_pack(alias, page, tokens)` as a compatibility adapter with its current response contract for one deprecation window. Do not silently change its shape. |
 | C7 | Knowledge state | Add an additive, optional state contract. Missing state is **`unspecified`**, not fabricated as `current`. |
-| C8 | Budget semantics | **Progressive, not one-shot.** Search broadly, start with a target context size, and automatically expand while required evidence roles remain uncovered. Enforce only the caller/system maximum as the hard ceiling. Report estimated tokens as advisory unless a configured tokenizer is available. Always return usage, omissions, continuation guidance, and a stop reason. |
+| C8 | Budget semantics | **Progressive, not one-shot.** Search broadly, start with a target context size, and automatically expand while required evidence roles remain uncovered. Enforce the caller/system byte maximum and optional deterministic estimated-token maximum across the complete serialized response. Always return usage, bounded omission reporting, continuation guidance, and a stop reason. See ADR-007. |
 | C9 | Mutation boundary | Compilation, doctor, and migration inspection are read-only. Wiki content mutation remains governed by `wiki-agent.md`; Brain promotion remains a curated Brain Steward action. |
 | C10 | Initial retrieval providers | Ship deterministic local providers only: seed/exact reference, frontmatter/text search, graph links/backlinks, source references, and optional `loci` navigation when available. Provider failures degrade explicitly; they do not erase successful evidence. |
 | C11 | Upgrade mechanism | Ship an explicit `inspect -> dry-run -> apply -> verify -> rollback` migration workflow with receipts. Never auto-edit an existing wiki merely because MCP accessed it. |
@@ -302,16 +302,18 @@ Progressive selection:
 
 Hard limits:
 
-- `max_bytes` is the caller/system safety ceiling and applies to the serialized evidence content plus required per-item metadata, using UTF-8 bytes.
+- `max_bytes` is the caller/system safety ceiling and applies to the complete serialized response, using UTF-8 bytes.
 - `max_items` applies to selected evidence records.
-- required response envelope metadata may exceed `max_bytes`; its actual size is reported separately so the caller can account for total transport cost.
+- detailed omission and diagnostic rows are capped at 16 each and compacted further when necessary, with total and returned counts remaining visible; compacted continuation guidance retains its remaining-candidate count.
+- if the irreducible response envelope cannot fit, the compiler returns `BUDGET_TOO_SMALL` rather than an oversized result.
 - an individual record that cannot fit is omitted or excerpted at a valid text boundary; the action is recorded.
-- the compiler never return an unmarked partial source quotation.
+- atomic evidence is omitted rather than excerpted.
+- the compiler never returns an unmarked partial source quotation.
 
-Advisory limit:
+Estimated-token limit:
 
-- `max_estimated_tokens` uses a documented deterministic estimate unless a supported tokenizer is configured.
-- because an estimate is not exact across models, it cannot be the only hard safety control.
+- `max_estimated_tokens` uses the documented deterministic estimate of one token per four serialized UTF-8 bytes, rounded up.
+- when supplied, it is enforced as an additional complete-response transport ceiling; it remains an estimate rather than a model-specific token count.
 
 The compiler stops with exactly one primary reason:
 
@@ -363,7 +365,11 @@ The structured response has a stable versioned envelope:
     "detail": "..."
   },
   "continuation": null,
-  "diagnostics": []
+  "diagnostics": [],
+  "reporting": {
+    "omissions": {"total": 0, "returned": 0},
+    "diagnostics": {"total": 0, "returned": 0}
+  }
 }
 ```
 
@@ -379,7 +385,7 @@ Each evidence record includes:
 - byte cost; and
 - any truncation marker.
 
-Each omission includes the candidate identity, reason, and estimated cost when known. Omission reasons include state mismatch, duplicate, lower marginal value, byte limit, item limit, unsafe path, unavailable content, and provider failure.
+Each returned omission includes the candidate identity, reason, and estimated cost when known. Omission reasons include state mismatch, duplicate, lower marginal value, byte limit, item limit, unsafe path, unavailable content, and provider failure. The reporting counts show when detailed omission or diagnostic rows were compacted to keep the complete response within its ceiling.
 
 `stop.sufficient` is a deterministic coverage assertion, not a claim that the final answer is correct. The compiler supplies evidence; the calling agent remains responsible for reasoning and citation.
 

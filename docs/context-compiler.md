@@ -4,9 +4,11 @@ The Context Compiler turns a wiki, a real question, optional seeds, a knowledge-
 
 ## Retrieval contract
 
-`wiki_compile_context` and `llm-wiki compile-context` use the same versioned request/response path. Discovery can search more broadly than the returned packet. Selection begins at `target_bytes` / `target_items`, expands while required evidence roles remain uncovered, and stops at sufficiency, candidate exhaustion, provider degradation, or the caller/system hard maximum.
+`wiki_compile_context` and `llm-wiki compile-context` use the same versioned request/response path. Discovery can search more broadly than the returned packet. Selection begins at `target_bytes` / `target_items`, expands while required evidence roles remain uncovered, and stops at sufficiency, candidate exhaustion, provider degradation, or the caller/system hard maximum. Loci retrieval rank orders candidates but does not force a fixed number of results into the response after required roles are covered; query-selected graph paths remain eligible as bounded supplementary relationship evidence.
 
-Targets are efficiency goals. Only `max_bytes` and `max_items` are hard output ceilings. Responses report selected evidence, exact locators, authored state, derived flags, authority signals, omission reasons, exact serialized byte accounting, estimated tokens, coverage, continuation guidance, diagnostics, and stop semantics.
+Targets are efficiency goals. `max_bytes` limits the complete serialized response, `max_items` limits selected evidence records, and `max_estimated_tokens` is an additional complete-response ceiling when supplied. The token estimate is deterministic at one token per four serialized UTF-8 bytes, rounded up; it is a transport guard rather than a model-specific tokenizer claim. A request whose complete response envelope cannot fit fails with `BUDGET_TOO_SMALL` instead of returning an oversized result.
+
+Responses report selected evidence, exact locators, authored state, derived flags, authority signals, omission reasons, exact serialized byte accounting, estimated tokens, coverage, continuation guidance, diagnostics, and stop semantics. Detailed omission and diagnostic rows are capped at 16 each and may be reduced further to protect the response ceiling; `reporting` always gives their total and returned counts. A compacted continuation retains `remaining_candidate_count` even when its duplicate candidate-id list is removed. Evidence marked `atomic` is omitted rather than excerpted.
 
 Missing `knowledge_state` is `unspecified`, never inferred as `current`. Retrieval score is not source authority.
 
