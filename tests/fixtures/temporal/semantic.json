@@ -1,0 +1,20 @@
+{
+  "contract_version": "temporal-codex-proposal-evaluation/1",
+  "cases": [
+    {"name": "direct_current_fact"},
+    {"name": "explicit_world_interval"},
+    {"name": "unknown_world_time"},
+    {"name": "resolved_page_subject"},
+    {"name": "ambiguous_page_subject"},
+    {"name": "literal_object"},
+    {"name": "multiple_claims_one_observation"},
+    {"name": "no_temporal_claim"},
+    {"name": "prompt_injection_text_is_inert"},
+    {"name": "missing_resolved_page_rejected"},
+    {"name": "caller_supplied_id_rejected"},
+    {"name": "caller_supplied_relation_rejected"},
+    {"name": "caller_supplied_authority_rejected"},
+    {"name": "caller_supplied_mutation_rejected"},
+    {"name": "oversized_payload_rejected"}
+  ]
+}

@@ -18,6 +18,7 @@ from llm_wiki_core.contracts import (
     Coverage,
     EvidenceRecord,
     StopState,
+    TemporalQuery,
 )
 from llm_wiki_core.query_shape import classify_question, required_roles
 from llm_wiki_core.state import normalize_knowledge_state, state_compatibility
@@ -70,7 +71,7 @@ class CompileRequestTest(unittest.TestCase):
     def test_unsupported_contract_version_fails_before_execution(self):
         with self.assertRaises(ContractError) as raised:
             CompileRequest.from_mapping(
-                {"contract_version": "2", "alias": "brain", "question": "What changed?"}
+                {"contract_version": "3", "alias": "brain", "question": "What changed?"}
             )
 
         self.assertEqual(raised.exception.code, "CONTRACT_VERSION_UNSUPPORTED")
@@ -86,6 +87,81 @@ class CompileRequestTest(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.details["field"], "budget.target_bytes")
+
+    def test_v1_rejects_temporal_fields_and_keeps_exact_serialization(self):
+        raw = {"alias": "brain", "question": "What changed?", "temporal": {}}
+        with self.assertRaises(ContractError) as raised:
+            CompileRequest.from_mapping(raw)
+        self.assertEqual(raised.exception.code, "INVALID_INPUT")
+        self.assertEqual(raised.exception.details["field"], "temporal")
+
+        request = CompileRequest.from_mapping({"alias": "brain", "question": "What changed?"})
+        self.assertEqual(request.contract_version, "1")
+        self.assertNotIn("temporal", request.to_dict())
+
+    def test_v2_temporal_query_defaults_current_world_and_known_to_request_time(self):
+        request = CompileRequest.from_mapping(
+            {
+                "contract_version": "2",
+                "alias": "brain",
+                "question": "What is current?",
+                "temporal": {
+                    "view": "current",
+                    "request_time": "2026-08-10T00:00:00+00:00",
+                },
+            }
+        )
+        self.assertIsInstance(request.temporal, TemporalQuery)
+        self.assertEqual(request.temporal.request_time, "2026-08-10T00:00:00Z")
+        self.assertEqual(request.temporal.world_at, "2026-08-10T00:00:00Z")
+        self.assertEqual(request.temporal.known_at, "2026-08-10T00:00:00Z")
+        self.assertEqual(request.to_dict()["contract_version"], "2")
+        self.assertEqual(request.to_dict()["temporal"]["view"], "current")
+
+    def test_v2_without_temporal_preserves_ordinary_compilation_request(self):
+        request = CompileRequest.from_mapping(
+            {"contract_version": "2", "alias": "brain", "question": "What changed?"}
+        )
+        self.assertIsNone(request.temporal)
+        self.assertNotIn("temporal", request.to_dict())
+
+    def test_temporal_view_rules_are_strict(self):
+        with self.assertRaises(ContractError):
+            CompileRequest.from_mapping(
+                {
+                    "contract_version": "2",
+                    "alias": "brain",
+                    "question": "What was true?",
+                    "temporal": {"view": "historical", "request_time": "2026-01-01T00:00:00Z"},
+                }
+            )
+        with self.assertRaises(ContractError):
+            CompileRequest.from_mapping(
+                {
+                    "contract_version": "2",
+                    "alias": "brain",
+                    "question": "What changed?",
+                    "temporal": {
+                        "view": "transition",
+                        "request_time": "2026-01-01T00:00:00Z",
+                        "world_at": "2026-01-01",
+                        "transition": {"from": "2025-01-01", "to": "2026-01-01"},
+                    },
+                }
+            )
+        with self.assertRaises(ContractError):
+            CompileRequest.from_mapping(
+                {
+                    "contract_version": "2",
+                    "alias": "brain",
+                    "question": "What changed?",
+                    "temporal": {
+                        "view": "lineage",
+                        "request_time": "2026-01-01T00:00:00Z",
+                        "unexpected": True,
+                    },
+                }
+            )
 
 
 class KnowledgeStateTest(unittest.TestCase):

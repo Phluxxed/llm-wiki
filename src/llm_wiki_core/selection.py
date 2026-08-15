@@ -18,7 +18,15 @@ from .providers.base import CandidateEvidence
 from .state import state_compatibility
 
 
-_PROVIDER_ORDER = {"seed": 0, "loci": 1, "frontmatter": 2, "graph": 3, "source": 4, "text": 5}
+_PROVIDER_ORDER = {
+    "seed": 0,
+    "temporal": 1,
+    "loci": 2,
+    "frontmatter": 3,
+    "graph": 4,
+    "source": 5,
+    "text": 6,
+}
 _MAX_RETURNED_OMISSIONS = 16
 _MAX_RETURNED_DIAGNOSTICS = 16
 

@@ -12,6 +12,37 @@ Responses report selected evidence, exact locators, authored state, derived flag
 
 Missing `knowledge_state` is `unspecified`, never inferred as `current`. Retrieval score is not source authority.
 
+## Temporal compiler v2
+
+The compiler keeps the v1 request and response path unchanged: an omitted
+`contract_version` means `"1"`, v1 rejects `temporal`, and v1 request
+serialization contains only its original fields. Contract v2 is opt-in. A v2
+request without `temporal` performs ordinary compilation; a temporal request
+must include a strict RFC 3339 `request_time` and one of `current`,
+`historical`, `transition`, `lineage`, or `conflict` views.
+
+`current` defaults `world_at` and `known_at` to `request_time`; `historical`
+requires `world_at`; `transition` requires a `from`/`to` range and forbids
+`world_at`; `lineage` and `conflict` may include `world_at`. Unknown world
+bounds never satisfy point-in-time eligibility. `known_at` controls whether a
+late Steward acceptance is visible, while world validity controls whether the
+fact was true at the requested world time.
+
+Temporal revisions are parsed and folded before ordinary candidate selection.
+Only eligible target-wiki-Steward evidence reaches ranking. Selected records
+use `provider: temporal`, a `temporal_<view>` route, a temporal claim locator,
+and an atomic deterministic fact rendering capped at 4,000 UTF-8 bytes.
+Contested evidence is labeled `contested` and is never presented as settled
+authority. Pages without temporal revisions retain their ordinary providers
+and are labeled `legacy_temporal_unspecified`.
+
+The CLI exposes the opt-in mapping with `--contract-version 2`,
+`--temporal-view`, `--request-time`, `--world-at`, `--known-at`, and
+`--transition-from`/`--transition-to`. MCP accepts the corresponding
+`temporal_view`, `request_time`, `world_at`, `known_at`, `transition_from`, and
+`transition_to` arguments. Both surfaces pass the same strict core request;
+there is no hidden clock, model call, network call, or canonical storage write.
+
 ## Configuration
 
 Every current wiki declares `.llm-wiki.toml` with `schema_version = "1"` and `runtime_contract = "2"`. Content exclusions, source directory, providers, compiler targets/maximums, state field, and manual stewardship live there. Secrets, absolute registry identity, and machine-specific paths are rejected.

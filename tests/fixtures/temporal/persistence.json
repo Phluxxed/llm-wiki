@@ -1,0 +1,15 @@
+{
+  "contract_version": "temporal-claim-persistence-fixtures/1",
+  "cases": [
+    {"name": "accept", "valid": true, "events": [{"id": "accepted", "decision": "accept", "recorded_at": "2026-08-10T00:00:00Z"}]},
+    {"name": "retire", "valid": true, "events": [{"id": "accepted", "decision": "accept", "recorded_at": "2026-08-10T00:00:00Z"}, {"id": "retired", "decision": "retire", "recorded_at": "2026-08-10T00:00:01Z", "targets": ["accepted"]}]},
+    {"name": "supersede", "valid": true, "events": [{"id": "accepted", "decision": "accept", "recorded_at": "2026-08-10T00:00:00Z"}, {"id": "replacement", "decision": "supersede", "recorded_at": "2026-08-10T00:00:01Z", "targets": ["accepted"]}]},
+    {"name": "contradict", "valid": true, "events": [{"id": "accepted", "decision": "accept", "recorded_at": "2026-08-10T00:00:00Z"}, {"id": "contest", "decision": "contradict", "recorded_at": "2026-08-10T00:00:01Z", "targets": ["accepted"]}]},
+    {"name": "qualify", "valid": true, "events": [{"id": "accepted", "decision": "accept", "recorded_at": "2026-08-10T00:00:00Z"}, {"id": "qualification", "decision": "qualify", "recorded_at": "2026-08-10T00:00:01Z", "targets": ["accepted"], "predicate": "condition:staffed_hours"}]},
+    {"name": "late_acceptance", "valid": true, "events": [{"id": "accepted", "decision": "accept", "recorded_at": "2026-08-10T00:00:00Z"}, {"id": "late", "decision": "accept", "recorded_at": "2026-08-11T00:00:00Z"}]},
+    {"name": "invalid_target_order", "valid": false, "events": [{"id": "retired", "decision": "retire", "recorded_at": "2026-08-10T00:00:00Z", "targets": ["accepted"]}, {"id": "accepted", "decision": "accept", "recorded_at": "2026-08-10T00:00:01Z"}]},
+    {"name": "invalid_close_claim_key", "valid": false, "events": [{"id": "accepted", "decision": "accept", "recorded_at": "2026-08-10T00:00:00Z"}, {"id": "other", "decision": "accept", "recorded_at": "2026-08-10T00:00:01Z", "subject": "other"}, {"id": "replacement", "decision": "supersede", "recorded_at": "2026-08-10T00:00:02Z", "targets": ["other"]}]},
+    {"name": "invalid_literal_subject", "valid": false, "events": [{"id": "literal", "decision": "accept", "recorded_at": "2026-08-10T00:00:00Z", "subject": "literal"}]},
+    {"name": "invalid_authority", "valid": false, "events": [{"id": "unauthorized", "decision": "accept", "recorded_at": "2026-08-10T00:00:00Z", "authority": "llm_wiki"}]}
+  ]
+}

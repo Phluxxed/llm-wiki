@@ -37,6 +37,12 @@ def build_parser() -> argparse.ArgumentParser:
     compile_parser.add_argument("--max-items", type=int, default=96)
     compile_parser.add_argument("--max-estimated-tokens", type=int)
     compile_parser.add_argument("--contract-version", default="1")
+    compile_parser.add_argument("--temporal-view", choices=("current", "historical", "transition", "lineage", "conflict"))
+    compile_parser.add_argument("--request-time")
+    compile_parser.add_argument("--world-at")
+    compile_parser.add_argument("--known-at")
+    compile_parser.add_argument("--transition-from")
+    compile_parser.add_argument("--transition-to")
 
     doctor_parser = commands.add_parser("doctor", help="Inspect wiki runtime compatibility")
     doctor_parser.add_argument("--wiki", required=True, help="Path to the wiki root")
@@ -59,21 +65,39 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "compile-context":
-            request = CompileRequest.from_mapping(
-                {
-                    "contract_version": args.contract_version,
-                    "alias": args.alias,
-                    "question": args.question,
-                    "seeds": args.seeds,
-                    "state_view": args.state_view,
-                    "budget": {
-                        "target_bytes": args.target_bytes,
-                        "max_bytes": args.max_bytes,
-                        "target_items": args.target_items,
-                        "max_items": args.max_items,
-                        "max_estimated_tokens": args.max_estimated_tokens,
-                    },
+            temporal = None
+            if args.temporal_view is not None:
+                temporal = {
+                    "view": args.temporal_view,
+                    "request_time": args.request_time,
                 }
+                if args.world_at is not None:
+                    temporal["world_at"] = args.world_at
+                if args.known_at is not None:
+                    temporal["known_at"] = args.known_at
+                if args.transition_from is not None or args.transition_to is not None:
+                    temporal["transition"] = {
+                        "from": args.transition_from,
+                        "to": args.transition_to,
+                    }
+            request_data = {
+                "contract_version": args.contract_version,
+                "alias": args.alias,
+                "question": args.question,
+                "seeds": args.seeds,
+                "state_view": args.state_view,
+                "budget": {
+                    "target_bytes": args.target_bytes,
+                    "max_bytes": args.max_bytes,
+                    "target_items": args.target_items,
+                    "max_items": args.max_items,
+                    "max_estimated_tokens": args.max_estimated_tokens,
+                },
+            }
+            if temporal is not None:
+                request_data["temporal"] = temporal
+            request = CompileRequest.from_mapping(
+                request_data
             )
             payload = compile_context(Path(args.wiki), request).to_dict()
             _print(payload)

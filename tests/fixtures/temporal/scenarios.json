@@ -1,0 +1,93 @@
+{
+  "contract_version": "temporal-evaluation-0",
+  "scenarios": [
+    {
+      "name": "new_fact",
+      "observations": [{"id": "obs:new:1", "source": "sources/status.md", "locator": "L10", "content_hash": "hash-new-1"}],
+      "revisions": [{"id": "rev:new:1", "claim": "service is ready", "world": ["2026-01-01", "open"], "known": ["2026-01-02", "open"], "observations": ["obs:new:1"], "status": "accepted"}],
+      "queries": [{"view": "current", "at": "2026-02-01", "expected_eligible": ["rev:new:1"], "expected_lineage": ["obs:new:1"]}]
+    },
+    {
+      "name": "correction",
+      "observations": [{"id": "obs:correction:1", "source": "sources/status.md", "locator": "L20", "content_hash": "hash-correction-1"}],
+      "revisions": [
+        {"id": "rev:correction:old", "claim": "service is ready", "world": ["2025-01-01", "2025-06-01"], "known": ["2025-01-02", "2025-07-01"], "observations": ["obs:correction:1"], "status": "retired"},
+        {"id": "rev:correction:new", "claim": "service is delayed", "world": ["2025-01-01", "open"], "known": ["2025-07-01", "open"], "observations": ["obs:correction:1"], "supersedes": ["rev:correction:old"], "status": "accepted"}
+      ],
+      "queries": [
+        {"view": "historical", "world_at": "2025-03-01", "known_at": "2025-04-01", "expected_eligible": ["rev:correction:old"]},
+        {"view": "current", "at": "2025-08-01", "expected_eligible": ["rev:correction:new"], "expected_lineage": ["rev:correction:old", "obs:correction:1"]}
+      ]
+    },
+    {
+      "name": "supersession",
+      "observations": [{"id": "obs:supersession:1", "source": "sources/policy.md", "locator": "L4", "content_hash": "hash-super-1"}],
+      "revisions": [
+        {"id": "rev:supersession:a", "claim": "policy A", "world": ["2024-01-01", "2025-01-01"], "known": ["2024-01-02", "2025-02-01"], "observations": ["obs:supersession:1"], "status": "retired"},
+        {"id": "rev:supersession:b", "claim": "policy B", "world": ["2025-01-01", "open"], "known": ["2025-02-01", "open"], "observations": ["obs:supersession:1"], "supersedes": ["rev:supersession:a"], "status": "accepted"}
+      ],
+      "queries": [{"view": "transition", "transition_at": "2025-01-01", "expected_eligible": [], "expected_before": ["rev:supersession:a"], "expected_after": ["rev:supersession:b"], "expected_lineage": ["rev:supersession:a", "rev:supersession:b"]}]
+    },
+    {
+      "name": "retirement_without_replacement",
+      "observations": [{"id": "obs:retire:1", "source": "sources/feature.md", "locator": "L8", "content_hash": "hash-retire-1"}],
+      "revisions": [{"id": "rev:retire:1", "claim": "feature is supported", "world": ["2024-01-01", "open"], "known": ["2024-01-02", "2025-05-01"], "observations": ["obs:retire:1"], "status": "retired"}],
+      "queries": [
+        {"view": "historical", "world_at": "2025-01-01", "known_at": "2025-02-01", "expected_eligible": ["rev:retire:1"]},
+        {"view": "current", "at": "2025-06-01", "expected_eligible": [], "expected_lineage": ["rev:retire:1", "obs:retire:1"]}
+      ]
+    },
+    {
+      "name": "contradiction",
+      "observations": [{"id": "obs:contradiction:1", "source": "sources/conflict.md", "locator": "L3", "content_hash": "hash-conflict-1"}],
+      "revisions": [
+        {"id": "rev:contradiction:a", "claim": "flag is enabled", "world": ["2025-01-01", "open"], "known": ["2025-01-02", "open"], "observations": ["obs:contradiction:1"], "status": "accepted"},
+        {"id": "rev:contradiction:b", "claim": "flag is disabled", "world": ["2025-01-01", "open"], "known": ["2025-02-02", "open"], "observations": ["obs:contradiction:1"], "contradicts": ["rev:contradiction:a"], "status": "accepted"}
+      ],
+      "queries": [{"view": "conflict", "at": "2025-03-01", "expected_eligible": ["rev:contradiction:a", "rev:contradiction:b"], "expected_lineage": ["rev:contradiction:a", "rev:contradiction:b"]}]
+    },
+    {
+      "name": "qualification",
+      "observations": [{"id": "obs:qualification:1", "source": "sources/limits.md", "locator": "L12", "content_hash": "hash-qualify-1"}],
+      "revisions": [
+        {"id": "rev:qualification:claim", "claim": "backup is available", "world": ["2025-01-01", "open"], "known": ["2025-01-02", "open"], "observations": ["obs:qualification:1"], "status": "accepted"},
+        {"id": "rev:qualification:limit", "claim": "only during staffed hours", "world": ["2025-01-01", "open"], "known": ["2025-01-03", "open"], "observations": ["obs:qualification:1"], "qualifies": ["rev:qualification:claim"], "status": "accepted"}
+      ],
+      "queries": [{"view": "current", "at": "2025-02-01", "expected_eligible": ["rev:qualification:claim", "rev:qualification:limit"], "expected_qualification": {"rev:qualification:claim": ["only during staffed hours"]}, "expected_lineage": ["rev:qualification:claim", "rev:qualification:limit", "obs:qualification:1"]}]
+    },
+    {
+      "name": "duplicate_observation",
+      "observations": [
+        {"id": "obs:duplicate:canonical", "source": "sources/repeated.md", "locator": "L2", "content_hash": "same-bytes"},
+        {"id": "obs:duplicate:repeat", "source": "sources/repeated.md", "locator": "L2", "content_hash": "same-bytes"}
+      ],
+      "revisions": [{"id": "rev:duplicate:1", "claim": "same observation", "world": ["2025-01-01", "open"], "known": ["2025-01-02", "open"], "observations": ["obs:duplicate:canonical", "obs:duplicate:repeat"], "status": "accepted"}],
+      "dedupe": {"observation_ids": ["obs:duplicate:canonical", "obs:duplicate:repeat"], "expected_unique_id": "obs:duplicate:canonical"},
+      "queries": [{"view": "current", "at": "2025-02-01", "expected_eligible": ["rev:duplicate:1"], "expected_lineage": ["obs:duplicate:canonical"]}]
+    },
+    {
+      "name": "late_arrival",
+      "observations": [{"id": "obs:late:1", "source": "sources/late.md", "locator": "L1", "content_hash": "hash-late-1"}],
+      "revisions": [{"id": "rev:late:1", "claim": "late fact", "world": ["2024-06-01", "open"], "known": ["2025-01-10", "open"], "observations": ["obs:late:1"], "status": "accepted"}],
+      "queries": [{"view": "historical", "world_at": "2024-07-01", "known_at": "2024-12-01", "expected_eligible": []}, {"view": "historical", "world_at": "2024-07-01", "known_at": "2025-02-01", "expected_eligible": ["rev:late:1"]}]
+    },
+    {
+      "name": "backdated_validity",
+      "observations": [{"id": "obs:backdated:1", "source": "sources/backdated.md", "locator": "L7", "content_hash": "hash-backdated-1"}],
+      "revisions": [{"id": "rev:backdated:1", "claim": "rule applied earlier", "world": ["2023-01-01", "2024-01-01"], "known": ["2025-01-01", "open"], "observations": ["obs:backdated:1"], "status": "accepted"}],
+      "queries": [{"view": "historical", "world_at": "2023-06-01", "known_at": "2025-02-01", "expected_eligible": ["rev:backdated:1"]}, {"view": "historical", "world_at": "2024-06-01", "known_at": "2025-02-01", "expected_eligible": []}]
+    },
+    {
+      "name": "ambiguous_identity",
+      "observations": [{"id": "obs:ambiguous:1", "source": "sources/people.md", "locator": "L9", "content_hash": "hash-ambiguous-1"}],
+      "revisions": [{"id": "rev:ambiguous:1", "claim": "Alex approved the change", "world": ["2025-01-01", "open"], "known": ["2025-01-02", "open"], "observations": ["obs:ambiguous:1"], "identity": "ambiguous", "status": "candidate_only"}],
+      "queries": [{"view": "current", "at": "2025-02-01", "expected_eligible": [], "expected_lineage": ["rev:ambiguous:1", "obs:ambiguous:1"]}]
+    },
+    {
+      "name": "unknown_time_is_not_open",
+      "observations": [{"id": "obs:unknown-time:1", "source": "sources/unknown.md", "locator": "L1", "content_hash": "hash-unknown-1"}],
+      "revisions": [{"id": "rev:unknown-time:1", "claim": "time cannot be established", "world": ["unknown:missing-valid-from", "open"], "known": ["2025-01-01", "open"], "observations": ["obs:unknown-time:1"], "status": "accepted"}],
+      "queries": [{"view": "current", "at": "2025-02-01", "expected_eligible": [], "expected_lineage": ["rev:unknown-time:1", "obs:unknown-time:1"]}, {"view": "lineage", "at": "2025-02-01", "expected_eligible": ["rev:unknown-time:1"]}]
+    }
+  ]
+}

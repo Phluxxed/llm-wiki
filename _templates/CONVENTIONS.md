@@ -51,6 +51,52 @@ Links between pages use wiki-root-relative paths: `[title](./policies/data-reten
 
 > For a single-primary-type wiki, this collapses to one `{slug}/` directory and one `_templates/{slug}.md`.
 
+## Temporal claim revisions
+
+Pages may carry an append-only `temporal_claim_revisions` frontmatter list when
+a target-wiki Steward has accepted a durable temporal decision. The list is
+validated by `llm-wiki` and is never written by `llm-wiki` itself. Every entry
+has exactly these fields:
+
+```yaml
+temporal_claim_revisions:
+  - contract_version: temporal-claim-revision/1
+    revision_id: temporal-revision:sha256:<64 lowercase hex>
+    claim_key: temporal-claim:sha256:<64 lowercase hex>
+    claim_scope: default
+    decision: accept # accept | retire | supersede | contradict | qualify
+    subject: {kind: resolved_page, page: entities/example.md}
+    predicate: status:has_state
+    object: {kind: literal, datatype: type:text, value: ready}
+    world_validity:
+      from: {kind: known, value: 2026-01-01}
+      to: {kind: open}
+    recorded_at: 2026-08-10T00:00:00Z
+    candidate_ids: [temporal-candidate:sha256:<64 lowercase hex>]
+    observation_ids: [temporal-observation:sha256:<64 lowercase hex>]
+    retires_revision_ids: []
+    supersedes_revision_ids: []
+    contradicts_revision_ids: []
+    qualification_of_revision_ids: []
+    steward_evidence_refs: [sources/example.md]
+    authority: target_wiki_steward
+```
+
+The Steward appends entries in non-decreasing `recorded_at` order and never
+edits an earlier entry. IDs and evidence references are sorted and
+deduplicated inside an entry; relation targets must already occur in the same
+page history. `accept` has no targets. `retire`, `supersede`, `contradict`, and
+`qualify` use only their matching relation array. Close and contradiction
+targets share the claim key; qualification targets may differ. A literal
+subject, raw evidence payload, non-Steward authority, malformed ID, or
+oversized entry/history is rejected.
+
+For an accepted revision, snapshot mutable external evidence under `sources/`
+before appending the revision. Keep page prose consistent with the folded
+state, then update `index.md` and append `log.md` as usual. Run the target
+wiki's lint and render commands. `llm-wiki` only parses and folds this authored
+state; it does not edit pages, sources, indexes, logs, or model/API state.
+
 ## Sources Layer
 
 `sources/` holds raw, unmodified inputs and immutable grounding-evidence packs. These are never edited.

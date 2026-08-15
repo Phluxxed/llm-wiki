@@ -81,6 +81,31 @@ class CompilerCliTest(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertEqual(payload["error"]["code"], "INVALID_INPUT")
 
+    def test_cli_temporal_v2_matches_core_mapping(self):
+        args = [
+            "compile-context", "--wiki", str(self.root), "--alias", "test",
+            "--question", "What is current?", "--contract-version", "2",
+            "--temporal-view", "current", "--request-time", "2026-08-10T00:00:00Z",
+            "--world-at", "2026-08-10", "--known-at", "2026-08-10T00:00:00Z",
+        ]
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(args)
+        expected = compile_context(
+            self.root,
+            CompileRequest.from_mapping(
+                {
+                    "contract_version": "2", "alias": "test", "question": "What is current?",
+                    "temporal": {
+                        "view": "current", "request_time": "2026-08-10T00:00:00Z",
+                        "world_at": "2026-08-10", "known_at": "2026-08-10T00:00:00Z",
+                    },
+                }
+            ),
+        ).to_dict()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

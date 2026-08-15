@@ -4,6 +4,13 @@ from dataclasses import dataclass
 
 from ..documents import WikiPage
 from ..state import normalize_knowledge_state
+from ..temporal import TemporalContractError
+from ..temporal_persistence import (
+    eligible_temporal_revisions,
+    fold_temporal_claim_revisions,
+    parse_temporal_claim_revisions,
+    render_temporal_revision,
+)
 from .base import CandidateEvidence, ProviderContext
 from .utils import question_terms
 
@@ -105,6 +112,58 @@ class TextProvider:
         return [item[3] for item in ranked[:MAX_TEXT_CANDIDATES]]
 
 
+class TemporalProvider:
+    name = "temporal"
+
+    def collect(self, context: ProviderContext) -> list[CandidateEvidence]:
+        query = context.request.temporal
+        if query is None:
+            return []
+        candidates: list[CandidateEvidence] = []
+        for path, page in context.pages.items():
+            raw_revisions = page.frontmatter.get("temporal_claim_revisions")
+            if raw_revisions is None:
+                continue
+            try:
+                revisions = parse_temporal_claim_revisions(raw_revisions)
+                eligible = eligible_temporal_revisions(revisions, query)
+                fold = fold_temporal_claim_revisions(revisions, known_at=query.known_at or query.request_time)
+            except TemporalContractError:
+                continue
+            for revision in eligible:
+                contested = revision.revision_id in fold.contested_revision_ids or query.view == "conflict"
+                flags = ["temporal_accepted"]
+                if revision.decision == "qualify":
+                    flags.append("temporal_qualified")
+                if contested:
+                    flags.append("temporal_contested")
+                authority = ["target_wiki_steward", "contested" if contested else "settled"]
+                candidates.append(
+                    CandidateEvidence(
+                        id=f"temporal:{path}#{revision.revision_id}",
+                        provider=self.name,
+                        route=f"temporal_{query.view}",
+                        page=path,
+                        source=str(page.frontmatter.get("source") or "") or None,
+                        locator={
+                            "kind": "temporal_claim",
+                            "claim_key": revision.claim_key,
+                            "revision_ids": [revision.revision_id],
+                            "world_validity": revision.world_validity.to_dict(),
+                            "known_at": query.known_at or query.request_time,
+                        },
+                        content=render_temporal_revision(revision, view=query.view, fold=fold),
+                        roles=("answer", "current_claim", "authority"),
+                        selection_signals=("temporal_accepted", "temporal_steward"),
+                        authored_state="current",
+                        derived_flags=tuple(flags),
+                        authority_signals=tuple(authority),
+                        atomic=True,
+                    )
+                )
+        return candidates
+
+
 def _candidate(
     page: WikiPage,
     *,
@@ -130,7 +189,8 @@ def _candidate(
         roles=_roles(shapes, state.normalized, authority),
         selection_signals=signals,
         authored_state=state.normalized,
-        derived_flags=state.derived_flags,
+        derived_flags=state.derived_flags
+        + (("legacy_temporal_unspecified",) if "temporal_claim_revisions" not in page.frontmatter else ()),
         authority_signals=authority,
         truncated=truncated,
     )

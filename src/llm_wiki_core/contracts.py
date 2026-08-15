@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
+import re
 from typing import Any, Mapping
 
 
 CONTRACT_VERSION = "1"
+SUPPORTED_CONTRACT_VERSIONS = {"1", "2"}
+TEMPORAL_VIEWS = {"current", "historical", "transition", "lineage", "conflict"}
+_RFC3339_INSTANT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 STATE_VIEWS = {"current", "historical", "transition", "all"}
 MAX_QUESTION_CHARS = 16_000
 MAX_SEEDS = 32
@@ -81,6 +87,57 @@ class CompileBudget:
 
 
 @dataclass(frozen=True)
+class TemporalTransition:
+    from_value: str
+    to_value: str
+
+    @property
+    def from_(self) -> str:
+        return self.from_value
+
+    @property
+    def to(self) -> str:
+        return self.to_value
+
+    def to_dict(self) -> dict[str, str]:
+        return {"from": self.from_value, "to": self.to_value}
+
+
+@dataclass(frozen=True)
+class TemporalQuery:
+    view: str
+    request_time: str
+    world_at: str | None = None
+    known_at: str | None = None
+    transition: TemporalTransition | None = None
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, Any]) -> "TemporalQuery":
+        return _parse_temporal_query(raw)
+
+    @property
+    def transition_from(self) -> str | None:
+        return self.transition.from_value if self.transition is not None else None
+
+    @property
+    def transition_to(self) -> str | None:
+        return self.transition.to_value if self.transition is not None else None
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "view": self.view,
+            "request_time": self.request_time,
+        }
+        if self.world_at is not None:
+            result["world_at"] = self.world_at
+        if self.known_at is not None:
+            result["known_at"] = self.known_at
+        if self.transition is not None:
+            result["transition"] = self.transition.to_dict()
+        return result
+
+
+@dataclass(frozen=True)
 class CompileRequest:
     alias: str
     question: str
@@ -88,23 +145,26 @@ class CompileRequest:
     state_view: str = "current"
     budget: CompileBudget = field(default_factory=CompileBudget)
     contract_version: str = CONTRACT_VERSION
+    temporal: TemporalQuery | None = None
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> CompileRequest:
         if not isinstance(raw, Mapping):
             raise _invalid("request", "Compile request must be an object")
-        unknown = set(raw) - {"contract_version", "alias", "question", "seeds", "state_view", "budget"}
-        if unknown:
-            field_name = sorted(unknown)[0]
-            raise _invalid(field_name, "Unknown request field")
-
         version = _nonempty_string(raw.get("contract_version", CONTRACT_VERSION), "contract_version")
-        if version != CONTRACT_VERSION:
+        if version not in SUPPORTED_CONTRACT_VERSIONS:
             raise ContractError(
                 "CONTRACT_VERSION_UNSUPPORTED",
                 "Compiler contract version is not supported",
-                {"found": version, "supported": CONTRACT_VERSION},
+                {"found": version, "supported": sorted(SUPPORTED_CONTRACT_VERSIONS)},
             )
+        allowed = {"contract_version", "alias", "question", "seeds", "state_view", "budget"}
+        if version == "2":
+            allowed.add("temporal")
+        unknown = set(raw) - allowed
+        if unknown:
+            field_name = sorted(unknown)[0]
+            raise _invalid(field_name, "Unknown request field")
         alias = _nonempty_string(raw.get("alias"), "alias")
         question = _nonempty_string(raw.get("question"), "question")
         if len(question) > MAX_QUESTION_CHARS:
@@ -121,6 +181,7 @@ class CompileRequest:
         if len(seeds) > MAX_SEEDS:
             raise _invalid("seeds", f"At most {MAX_SEEDS} seeds are allowed")
 
+        temporal = _parse_temporal_query(raw.get("temporal")) if version == "2" and "temporal" in raw else None
         return cls(
             alias=alias,
             question=question,
@@ -128,10 +189,11 @@ class CompileRequest:
             state_view=state_view,
             budget=CompileBudget.from_mapping(raw.get("budget")),
             contract_version=version,
+            temporal=temporal,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "contract_version": self.contract_version,
             "alias": self.alias,
             "question": self.question,
@@ -139,6 +201,9 @@ class CompileRequest:
             "state_view": self.state_view,
             "budget": self.budget.to_dict(),
         }
+        if self.contract_version == "2" and self.temporal is not None:
+            result["temporal"] = self.temporal.to_dict()
+        return result
 
 
 @dataclass(frozen=True)
@@ -301,6 +366,7 @@ class CompiledContext:
     diagnostics: tuple[Diagnostic, ...] = ()
     reporting: ResponseReporting | None = None
     contract_version: str = CONTRACT_VERSION
+    temporal: TemporalQuery | None = None
 
     def to_dict(self) -> dict[str, Any]:
         reporting = self.reporting or ResponseReporting(
@@ -309,6 +375,14 @@ class CompiledContext:
             diagnostics_total=len(self.diagnostics),
             diagnostics_returned=len(self.diagnostics),
         )
+        query = {
+            "question": self.question,
+            "shapes": list(self.shapes),
+            "state_view": self.state_view,
+            "resolved_seeds": list(self.resolved_seeds),
+        }
+        if self.temporal is not None:
+            query["temporal"] = self.temporal.to_dict()
         return {
             "kind": "compiled_context",
             "contract_version": self.contract_version,
@@ -317,12 +391,7 @@ class CompiledContext:
                 "schema_version": self.schema_version,
                 "runtime_contract": self.runtime_contract,
             },
-            "query": {
-                "question": self.question,
-                "shapes": list(self.shapes),
-                "state_view": self.state_view,
-                "resolved_seeds": list(self.resolved_seeds),
-            },
+            "query": query,
             "evidence": [item.to_dict() for item in self.evidence],
             "omissions": [item.to_dict() for item in self.omissions],
             "coverage": self.coverage.to_dict(),
@@ -344,6 +413,86 @@ def _positive_int(value: Any, field_name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise _invalid(field_name, "Field must be a positive integer")
     return value
+
+
+def _parse_instant(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise _invalid(field_name, "Field must be an RFC 3339 instant")
+    candidate = value.strip()
+    if _RFC3339_INSTANT.fullmatch(candidate) is None:
+        raise _invalid(field_name, "Field must be an RFC 3339 instant")
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise _invalid(field_name, "Field must be an RFC 3339 instant") from exc
+    if parsed.tzinfo is None:
+        raise _invalid(field_name, "Field must include a timezone")
+    normalized = parsed.astimezone(timezone.utc).replace(microsecond=parsed.microsecond)
+    return normalized.isoformat(timespec="microseconds" if normalized.microsecond else "seconds").replace("+00:00", "Z")
+
+
+def _parse_world_point(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise _invalid(field_name, "Field must be a known date or RFC 3339 instant")
+    candidate = value.strip()
+    if _ISO_DATE.fullmatch(candidate) is None:
+        return _parse_instant(candidate, field_name)
+    try:
+        parsed_date = date.fromisoformat(candidate)
+    except ValueError:
+        return _parse_instant(candidate, field_name)
+    return parsed_date.isoformat()
+
+
+def _point_key(value: str) -> datetime:
+    if len(value) == 10:
+        return datetime.combine(date.fromisoformat(value), datetime.min.time(), tzinfo=timezone.utc)
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _parse_temporal_query(raw: Any) -> TemporalQuery:
+    if not isinstance(raw, Mapping):
+        raise _invalid("temporal", "Temporal query must be an object")
+    allowed = {"view", "request_time", "world_at", "known_at", "transition"}
+    unknown = set(raw) - allowed
+    if unknown:
+        raise _invalid(f"temporal.{sorted(unknown)[0]}", "Unknown temporal field")
+    view = _nonempty_string(raw.get("view"), "temporal.view")
+    if view not in TEMPORAL_VIEWS:
+        raise _invalid("temporal.view", "Unsupported temporal view", allowed=sorted(TEMPORAL_VIEWS))
+    request_time = _parse_instant(raw.get("request_time"), "temporal.request_time")
+    known_at = _parse_instant(raw["known_at"], "temporal.known_at") if "known_at" in raw else request_time
+    world_at = _parse_world_point(raw["world_at"], "temporal.world_at") if "world_at" in raw else None
+    transition = None
+    if "transition" in raw:
+        transition_raw = raw["transition"]
+        if not isinstance(transition_raw, Mapping):
+            raise _invalid("temporal.transition", "Transition must be an object")
+        unknown_transition = set(transition_raw) - {"from", "to"}
+        if unknown_transition:
+            raise _invalid(f"temporal.transition.{sorted(unknown_transition)[0]}", "Unknown transition field")
+        if "from" not in transition_raw or "to" not in transition_raw:
+            raise _invalid("temporal.transition", "Transition requires from and to")
+        from_value = _parse_world_point(transition_raw["from"], "temporal.transition.from")
+        to_value = _parse_world_point(transition_raw["to"], "temporal.transition.to")
+        if _point_key(from_value) >= _point_key(to_value):
+            raise _invalid("temporal.transition", "Transition from must precede to")
+        transition = TemporalTransition(from_value, to_value)
+
+    if view == "historical" and world_at is None:
+        raise _invalid("temporal.world_at", "Historical view requires world_at")
+    if view == "transition":
+        if world_at is not None:
+            raise _invalid("temporal.world_at", "Transition view forbids world_at")
+        if transition is None:
+            raise _invalid("temporal.transition", "Transition view requires a transition range")
+    elif transition is not None:
+        raise _invalid("temporal.transition", "Transition range is only valid for transition view")
+    if view == "current" and world_at is None:
+        world_at = request_time
+    return TemporalQuery(view, request_time, world_at, known_at, transition)
 
 
 def _invalid(field_name: str, message: str, **details: Any) -> ContractError:

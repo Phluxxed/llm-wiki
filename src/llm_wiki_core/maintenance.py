@@ -7,12 +7,13 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .config import ContentConfig, inspect_wiki_config
 from .doctor import inspect_runtime
 from .documents import WikiPage, collect_pages, safe_source_path
 from .state import normalize_knowledge_state
+from .temporal import TemporalFactCandidate, _build_temporal_candidate_packet
 
 
 MAINTENANCE_CONTRACT_VERSION = "1"
@@ -46,6 +47,23 @@ ENDPOINT_DEDUPE_CANDIDATE_KINDS = frozenset(
 )
 
 _ALIAS_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def build_temporal_candidate_packet(
+    *,
+    alias: str,
+    candidates: Sequence[TemporalFactCandidate],
+    generated_at: str,
+    unknowns: Sequence[Mapping[str, str]] = (),
+) -> dict[str, Any]:
+    """Build a candidate-only temporal packet without changing v1 discovery."""
+
+    return _build_temporal_candidate_packet(
+        alias=alias,
+        candidates=candidates,
+        generated_at=generated_at,
+        unknowns=unknowns,
+    ).to_dict()
 
 
 def build_candidate_proposal(

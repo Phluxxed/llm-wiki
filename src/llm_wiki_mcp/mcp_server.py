@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Callable
 
 from mcp.server.fastmcp import FastMCP
@@ -21,6 +22,9 @@ from llm_wiki_mcp.wiki_runtime import (
     maintenance_candidates,
     overview,
     query_pages,
+    temporal_candidate_proposal,
+    wiki_build_maintenance as unified_maintenance_proposal,
+    wiki_reconcile_temporal_candidates as reconcile_temporal_candidates_runtime,
 )
 
 
@@ -130,6 +134,12 @@ def create_server() -> FastMCP:
         max_items: int = 96,
         max_estimated_tokens: int | None = None,
         contract_version: str = "1",
+        temporal_view: str | None = None,
+        request_time: str | None = None,
+        world_at: str | None = None,
+        known_at: str | None = None,
+        transition_from: str | None = None,
+        transition_to: str | None = None,
     ) -> CallToolResult:
         """Compile bounded, question-shaped evidence from a registered wiki."""
         return _handle_wiki_error(
@@ -144,6 +154,12 @@ def create_server() -> FastMCP:
                 max_items=max_items,
                 max_estimated_tokens=max_estimated_tokens,
                 contract_version=contract_version,
+                temporal_view=temporal_view,
+                request_time=request_time,
+                world_at=world_at,
+                known_at=known_at,
+                transition_from=transition_from,
+                transition_to=transition_to,
             )
         )
 
@@ -177,6 +193,54 @@ def create_server() -> FastMCP:
                 evidence=evidence,
             )
         )
+
+    @mcp.tool()
+    def wiki_build_temporal_candidates(
+        alias: str,
+        source: Mapping[str, Any],
+        claims: list[Mapping[str, Any]],
+        proposed_at: str,
+    ) -> CallToolResult:
+        """Build a read-only temporal candidate proposal from Codex semantic claims."""
+        return _handle_wiki_error(
+            lambda: temporal_candidate_proposal(
+                alias,
+                source=source,
+                claims=claims,
+                proposed_at=proposed_at,
+            )
+        )
+
+    @mcp.tool()
+    def wiki_build_maintenance(
+        alias: str,
+        source: Mapping[str, Any],
+        intent: str,
+        proposed_at: str,
+        claims: list[Mapping[str, Any]] | None = None,
+        pages: list[str] | None = None,
+        evidence: list[Mapping[str, Any]] | None = None,
+    ) -> CallToolResult:
+        """Build one unified, candidate-only maintenance proposal."""
+        return _handle_wiki_error(
+            lambda: unified_maintenance_proposal(
+                alias,
+                source=source,
+                intent=intent,
+                claims=claims or [],
+                pages=pages or [],
+                evidence=evidence or [],
+                proposed_at=proposed_at,
+            )
+        )
+
+    @mcp.tool()
+    def wiki_reconcile_temporal_candidates(
+        alias: str,
+        proposals: list[Mapping[str, Any]],
+    ) -> CallToolResult:
+        """Reconcile read-only temporal candidate proposals for one wiki."""
+        return _handle_wiki_error(lambda: reconcile_temporal_candidates_runtime(alias, proposals))
 
     @mcp.tool()
     def wiki_get_page(alias: str, page: str, max_chars: int = 4_000) -> CallToolResult:

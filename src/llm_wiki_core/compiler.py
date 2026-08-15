@@ -34,6 +34,7 @@ from .providers import (
     TextProvider,
 )
 from .providers.base import CandidateEvidence
+from .providers.local import TemporalProvider
 from .query_shape import classify_question, required_roles
 from .selection import coverage, finalize_response_budget, select_candidates
 
@@ -77,6 +78,8 @@ def compile_context(
     providers = tuple(provider for provider in built_in if provider.name in config.compiler.providers) + tuple(
         extra_providers
     )
+    if request.temporal is not None:
+        providers = providers + (TemporalProvider(),)
     diagnostics: list[Diagnostic] = []
     candidates: list[CandidateEvidence] = []
     for provider in providers:
@@ -166,6 +169,8 @@ def compile_context(
         stop=StopState(stop_reason, sufficient, stop_detail),
         continuation=continuation,
         diagnostics=tuple(diagnostics),
+        contract_version=request.contract_version,
+        temporal=request.temporal,
     )
     return finalize_response_budget(response)
 
