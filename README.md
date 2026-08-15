@@ -52,15 +52,27 @@ cd ~/llm-wiki
 uv venv
 uv pip install -e .
 
-# Codex personal registry
-codex mcp add --env LLM_WIKI_HOME="$HOME/.codex/llm-wiki" llm-wiki -- llm-wiki-mcp
+# Codex personal registry and nested-Loci store identity
+codex mcp add \
+  --env LLM_WIKI_HOME="$HOME/.codex/llm-wiki" \
+  --env LOCI_BASE_DIR="$HOME/.codex/loci-index" \
+  --env LOCI_STORE_NAMESPACE=codex \
+  llm-wiki -- llm-wiki-mcp
 
-# Claude work registry; do not share this home with Codex
-claude mcp add llm-wiki -s local -e LLM_WIKI_HOME="$HOME/.claude/llm-wiki" -- llm-wiki-mcp
+# Claude work registry and nested-Loci store identity; do not share these with Codex
+claude mcp add llm-wiki -s local \
+  -e LLM_WIKI_HOME="$HOME/.claude/llm-wiki" \
+  -e LOCI_BASE_DIR="$HOME/.claude/loci-index" \
+  -e LOCI_STORE_NAMESPACE=claude \
+  -- llm-wiki-mcp
 ```
 
-The MCP server fails closed when `LLM_WIKI_HOME` is absent. Codex and Claude
-should use separate registry homes so personal and work wikis do not cross over.
+The MCP server fails closed when `LLM_WIKI_HOME` is absent. Its nested
+`loci-mcp` client also requires the explicit `LOCI_BASE_DIR` and
+`LOCI_STORE_NAMESPACE` of an initialized store; it reports
+`LOCI_MCP_CONFIG_MISSING` rather than guessing a host identity. Codex and
+Claude should use separate registry homes and Loci stores so personal and work
+wikis do not cross over.
 
 Generated wikis should install the canonical package into a project-local `.venv` (resolve the path to the current release checkout; do not write a user-specific path into wiki files):
 
@@ -159,7 +171,16 @@ author pages, mutate sources, or replace `/wikime`.
 | `wiki_compile_context` | Compile question-shaped evidence with progressive targets, hard limits, provenance, state, coverage, and stop semantics. |
 | `wiki_maintenance_candidates` | Return evidence-backed review candidates and explicit unknowns; never mutate wiki content. |
 | `wiki_build_maintenance_candidate` | Canonicalize one evidence-backed task observation for later steward review; never mutate wiki content. |
+| `wiki_build_maintenance` | Build the canonical unified maintenance proposal for new consumers; combines eligible discovery, task, and temporal evidence without mutating wiki content. |
+| `wiki_build_temporal_candidates` / `wiki_reconcile_temporal_candidates` | Build and reconcile exact temporal components for provenance-preserving specialist consumers; never mutate wiki content. |
 | `wiki_get_page` / `wiki_get_source_excerpt` | Read bounded page content and source excerpts. |
+
+New maintenance integrations should use `wiki_build_maintenance` as the
+canonical proposal entry point. `wiki_maintenance_candidates` and
+`wiki_build_maintenance_candidate` remain supported v1 compatibility
+producers, while the temporal build and reconciliation tools remain exact
+specialist component surfaces. Every layer is candidate-only with
+`mutation.allowed = false`; the target wiki's steward remains the sole writer.
 
 Existing wikis migrate only through the explicit receipt-backed flow:
 

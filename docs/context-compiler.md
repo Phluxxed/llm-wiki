@@ -84,6 +84,8 @@ Receipts live under `.llm-wiki/migrations/`. Migration does not edit pages, sour
 
 `wiki_build_maintenance_candidate` canonicalizes one task-derived observation for a registered target wiki. It normalizes page endpoints and evidence, produces stable observation and dedupe identities, and marks whether the candidate is deterministic or requires recurrence/corroboration. It is also read-only: the result is a proposal for an external operational queue and target steward, not permission to edit the wiki.
 
+`wiki_build_maintenance` is the canonical entry point for new maintenance consumers. It composes eligible discovery and task observations with temporal evidence into one `unified-maintenance/1` proposal. `wiki_maintenance_candidates` and `wiki_build_maintenance_candidate` remain supported v1 compatibility producers; `wiki_build_temporal_candidates` and `wiki_reconcile_temporal_candidates` remain exact specialist component surfaces for provenance-preserving temporal workflows. All of these surfaces are candidate-only with `mutation.allowed = false`; only the target wiki's steward may accept a proposal and mutate the wiki.
+
 Zero candidates means `no_candidates_observed`, not `clean`. Semantic contradiction, semantic staleness, and live external-source drift remain explicit unknowns without a semantic/source review. Brain changes still go through Brain Steward and the target `wiki-agent.md`; see [Brain Steward integration](brain-steward-integration.md).
 
 ## Legacy compatibility policy
