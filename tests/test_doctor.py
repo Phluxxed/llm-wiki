@@ -39,7 +39,16 @@ class DoctorTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_unmodified_legacy_wiki_is_migration_available(self):
-        with patch("llm_wiki_core.doctor.shutil.which", return_value="/usr/local/bin/loci-mcp"):
+        with (
+            patch("llm_wiki_core.doctor.shutil.which", return_value="/usr/local/bin/loci-mcp"),
+            patch.dict(
+                os.environ,
+                {
+                    "LOCI_BASE_DIR": "/tmp/loci-index",
+                    "LOCI_STORE_NAMESPACE": "test",
+                },
+            ),
+        ):
             result = doctor("test")
 
         self.assertEqual(result["compatibility"]["status"], "migration_available")
@@ -60,6 +69,26 @@ class DoctorTest(unittest.TestCase):
         self.assertEqual(result["providers"]["graph"]["code"], "LOCI_MCP_UNAVAILABLE")
         self.assertTrue(result["providers"]["graph"]["rollback_available"])
         self.assertEqual(result["compatibility"]["status"], "migration_available")
+
+    def test_default_loci_reports_missing_store_identity(self):
+        with (
+            patch("llm_wiki_core.doctor.shutil.which", return_value="/fake/loci-mcp"),
+            patch.dict(
+                os.environ,
+                {"LLM_WIKI_HOME": str(self.tmp / "home")},
+                clear=True,
+            ),
+        ):
+            result = doctor("test")
+
+        self.assertEqual(result["providers"]["loci"]["status"], "degraded")
+        self.assertEqual(result["providers"]["loci"]["code"], "LOCI_MCP_CONFIG_MISSING")
+        self.assertEqual(
+            result["providers"]["loci"]["missing"],
+            ["LOCI_BASE_DIR", "LOCI_STORE_NAMESPACE"],
+        )
+        self.assertEqual(result["providers"]["graph"]["status"], "degraded")
+        self.assertEqual(result["providers"]["graph"]["code"], "LOCI_MCP_CONFIG_MISSING")
 
     def test_legacy_graph_backend_is_ready_without_loci_transport(self):
         (self.wiki / ".llm-wiki.toml").write_text(

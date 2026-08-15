@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import textwrap
@@ -195,6 +196,27 @@ class LociProviderTest(unittest.TestCase):
         diagnostic = next(item for item in response["diagnostics"] if item["provider"] == "loci")
         self.assertEqual(diagnostic["code"], "LOCI_MCP_UNAVAILABLE")
         self.assertEqual(diagnostic["details"]["transport"], "mcp_stdio")
+
+    def test_missing_mcp_store_identity_degrades_before_launch(self):
+        provider = LociProvider(gateway=LociMcpGateway())
+
+        with (
+            patch("llm_wiki_core.providers.loci_transport.shutil.which", return_value="/fake/loci-mcp"),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            response = compile_context(
+                self.root,
+                self.request(),
+                extra_providers=(provider,),
+            ).to_dict()
+
+        diagnostic = next(item for item in response["diagnostics"] if item["provider"] == "loci")
+        self.assertEqual(diagnostic["code"], "LOCI_MCP_CONFIG_MISSING")
+        self.assertEqual(diagnostic["details"]["transport"], "mcp_stdio")
+        self.assertEqual(
+            diagnostic["details"]["missing"],
+            ["LOCI_BASE_DIR", "LOCI_STORE_NAMESPACE"],
+        )
 
     def test_slow_mcp_service_times_out_and_degrades(self):
         server = self.root / "slow_loci_mcp.py"

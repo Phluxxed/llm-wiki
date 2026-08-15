@@ -12,6 +12,9 @@ from .config import CURRENT_RUNTIME_CONTRACT, CURRENT_SCHEMA_VERSION, inspect_wi
 from .script_drift import inspect_scripts
 
 
+_LOCI_STORE_ENV = ("LOCI_BASE_DIR", "LOCI_STORE_NAMESPACE")
+
+
 def inspect_runtime(wiki_root: str | Path) -> dict[str, Any]:
     root = Path(wiki_root).expanduser().resolve()
     config = inspect_wiki_config(root)
@@ -161,6 +164,15 @@ def _loci_transport_status() -> dict[str, Any]:
             "code": "LOCI_MCP_UNAVAILABLE",
             "transport": "mcp_stdio",
             "freshness": "not_checked",
+        }
+    missing = [name for name in _LOCI_STORE_ENV if not os.environ.get(name)]
+    if missing:
+        return {
+            "status": "degraded",
+            "code": "LOCI_MCP_CONFIG_MISSING",
+            "transport": "mcp_stdio",
+            "freshness": "not_checked",
+            "missing": missing,
         }
     return {
         "status": "ready",

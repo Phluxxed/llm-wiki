@@ -321,6 +321,7 @@ def _loci_failure(exc: Exception, *, file_path: str | None = None) -> Diagnostic
     code = {
         "REPO_NOT_INDEXED": "LOCI_REPO_NOT_INDEXED",
         "LOCI_MCP_UNAVAILABLE": "LOCI_MCP_UNAVAILABLE",
+        "LOCI_MCP_CONFIG_MISSING": "LOCI_MCP_CONFIG_MISSING",
         "LOCI_MCP_FAILED": "LOCI_MCP_FAILED",
         "LOCI_MCP_TIMEOUT": "LOCI_MCP_TIMEOUT",
         "LOCI_RESULT_INVALID": "LOCI_RESULT_INVALID",

@@ -14,6 +14,7 @@ from mcp.client.stdio import stdio_client
 
 
 T = TypeVar("T")
+_LOCI_STORE_ENV = ("LOCI_BASE_DIR", "LOCI_STORE_NAMESPACE")
 
 
 class LociGatewayError(RuntimeError):
@@ -52,6 +53,14 @@ class LociMcpClient:
                 "The core loci MCP traversal service is not available",
                 {"transport": "mcp_stdio"},
             )
+        if self._command is None:
+            missing = [name for name in _LOCI_STORE_ENV if not os.environ.get(name)]
+            if missing:
+                raise LociGatewayError(
+                    "LOCI_MCP_CONFIG_MISSING",
+                    "The core loci MCP traversal service requires an explicit store identity",
+                    {"missing": missing, "transport": "mcp_stdio"},
+                )
         return resolved
 
     async def _run_session(
