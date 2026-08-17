@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from mcp import ClientSession, StdioServerParameters
+from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from tests.wiki_fixture import base_fm, create_wiki_root, write_md
@@ -85,77 +85,75 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
         cwd=REPO_ROOT,
     )
 
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            tools = await session.list_tools()
-            tool_names = sorted(tool.name for tool in tools.tools)
+    async with Client(stdio_client(server_params), mode="auto") as client:
+        tools = await client.list_tools()
+        tool_names = sorted(tool.name for tool in tools.tools)
 
-            registered = await session.call_tool(
-                "wiki_register",
-                arguments={"alias": "brain", "path": str(wiki), "created_by": "wikime"},
-            )
-            listed = await session.call_tool("wiki_list", arguments={})
-            overview = await session.call_tool("wiki_overview", arguments={"alias": "brain"})
-            manual = await session.call_tool("wiki_agent_manual", arguments={"alias": "brain"})
-            page = await session.call_tool(
-                "wiki_get_page",
-                arguments={"alias": "brain", "page": "b.md"},
-            )
-            context = await session.call_tool(
-                "wiki_context_pack",
-                arguments={"alias": "brain", "page": "a.md", "tokens": 1_000},
-            )
-            links = await session.call_tool(
-                "wiki_links",
-                arguments={"alias": "brain", "page": "a.md"},
-            )
-            maintenance = await session.call_tool(
-                "wiki_maintenance_candidates",
-                arguments={"alias": "brain", "stale_after_days": 180},
-            )
-            proposal = await session.call_tool(
-                "wiki_build_maintenance_candidate",
-                arguments={
-                    "alias": "brain",
-                    "kind": "durable_outcome",
-                    "diagnostic": "A verified outcome is not represented.",
-                    "review_question": "Should this become durable Brain knowledge?",
-                    "pages": ["a.md"],
-                    "evidence": [{"ref": "test:result", "content_hash": "abc123"}],
-                },
-            )
-            invalid_proposal = await session.call_tool(
-                "wiki_build_maintenance_candidate",
-                arguments={
-                    "alias": "brain",
-                    "kind": "relationship_gap",
-                    "diagnostic": "A route may be missing.",
-                    "review_question": "Should these pages be connected?",
-                    "pages": ["a.md"],
-                    "evidence": [{"ref": "test:result"}],
-                },
-            )
+        registered = await client.call_tool(
+            "wiki_register",
+            arguments={"alias": "brain", "path": str(wiki), "created_by": "wikime"},
+        )
+        listed = await client.call_tool("wiki_list", arguments={})
+        overview = await client.call_tool("wiki_overview", arguments={"alias": "brain"})
+        manual = await client.call_tool("wiki_agent_manual", arguments={"alias": "brain"})
+        page = await client.call_tool(
+            "wiki_get_page",
+            arguments={"alias": "brain", "page": "b.md"},
+        )
+        context = await client.call_tool(
+            "wiki_context_pack",
+            arguments={"alias": "brain", "page": "a.md", "tokens": 1_000},
+        )
+        links = await client.call_tool(
+            "wiki_links",
+            arguments={"alias": "brain", "page": "a.md"},
+        )
+        maintenance = await client.call_tool(
+            "wiki_maintenance_candidates",
+            arguments={"alias": "brain", "stale_after_days": 180},
+        )
+        proposal = await client.call_tool(
+            "wiki_build_maintenance_candidate",
+            arguments={
+                "alias": "brain",
+                "kind": "durable_outcome",
+                "diagnostic": "A verified outcome is not represented.",
+                "review_question": "Should this become durable Brain knowledge?",
+                "pages": ["a.md"],
+                "evidence": [{"ref": "test:result", "content_hash": "abc123"}],
+            },
+        )
+        invalid_proposal = await client.call_tool(
+            "wiki_build_maintenance_candidate",
+            arguments={
+                "alias": "brain",
+                "kind": "relationship_gap",
+                "diagnostic": "A route may be missing.",
+                "review_question": "Should these pages be connected?",
+                "pages": ["a.md"],
+                "evidence": [{"ref": "test:result"}],
+            },
+        )
 
     return {
         "tools": tool_names,
-        "registered": registered.structuredContent,
-        "listed": listed.structuredContent,
-        "overview": overview.structuredContent,
-        "manual": manual.structuredContent,
-        "page": page.structuredContent,
-        "context": context.structuredContent,
+        "registered": registered.structured_content,
+        "listed": listed.structured_content,
+        "overview": overview.structured_content,
+        "manual": manual.structured_content,
+        "page": page.structured_content,
+        "context": context.structured_content,
         "success_text": {
             "listed": [block.text for block in listed.content],
             "manual": [block.text for block in manual.content],
             "page": [block.text for block in page.content],
             "context": [block.text for block in context.content],
         },
-        "links": links.structuredContent,
-        "maintenance": maintenance.structuredContent,
-        "proposal": proposal.structuredContent,
-        "invalid_proposal_is_error": invalid_proposal.isError,
-        "invalid_proposal_error": invalid_proposal.structuredContent["error"],
+        "links": links.structured_content,
+        "maintenance": maintenance.structured_content,
+        "proposal": proposal.structured_content,
+        "invalid_proposal_is_error": invalid_proposal.is_error,
+        "invalid_proposal_error": invalid_proposal.structured_content["error"],
     }
 
 
@@ -170,14 +168,12 @@ async def _missing_home_error() -> dict[str, Any]:
         cwd=REPO_ROOT,
     )
 
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool("wiki_list", arguments={})
-            return {
-                "is_error": result.isError,
-                "error": result.structuredContent["error"],
-                "error_text": "\n".join(block.text for block in result.content),
-            }
+    async with Client(stdio_client(server_params), mode="auto") as client:
+        result = await client.call_tool("wiki_list", arguments={})
+        return {
+            "is_error": result.is_error,
+            "error": result.structured_content["error"],
+            "error_text": "\n".join(block.text for block in result.content),
+        }
 
     raise AssertionError("Expected wiki_list to return an error")

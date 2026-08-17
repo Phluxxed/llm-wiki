@@ -9,7 +9,7 @@ from threading import Thread
 from typing import Any, TypeVar
 
 from anyio import fail_after
-from mcp import ClientSession, StdioServerParameters
+from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
@@ -40,7 +40,7 @@ class LociMcpClient:
         self._args = args
         self._timeout_seconds = timeout_seconds
 
-    def run(self, operation: Callable[[ClientSession], Awaitable[T]]) -> T:
+    def run(self, operation: Callable[[Client], Awaitable[T]]) -> T:
         command = self._resolve_command()
         return _run_coroutine(self._run_session(command, operation))
 
@@ -66,7 +66,7 @@ class LociMcpClient:
     async def _run_session(
         self,
         command: str,
-        operation: Callable[[ClientSession], Awaitable[T]],
+        operation: Callable[[Client], Awaitable[T]],
     ) -> T:
         params = StdioServerParameters(
             command=command,
@@ -76,10 +76,11 @@ class LociMcpClient:
         try:
             with fail_after(self._timeout_seconds):
                 with open(os.devnull, "w", encoding="utf-8") as errlog:
-                    async with stdio_client(params, errlog=errlog) as (read, write):
-                        async with ClientSession(read, write) as session:
-                            await session.initialize()
-                            return await operation(session)
+                    async with Client(
+                        stdio_client(params, errlog=errlog),
+                        mode="auto",
+                    ) as client:
+                        return await operation(client)
         except TimeoutError as exc:
             raise LociGatewayError(
                 "LOCI_MCP_TIMEOUT",
@@ -106,8 +107,8 @@ class LociMcpClient:
 
 
 def tool_mapping(result: Any) -> Mapping[str, Any]:
-    structured = getattr(result, "structuredContent", None)
-    if getattr(result, "isError", False):
+    structured = getattr(result, "structured_content", None)
+    if getattr(result, "is_error", False):
         error = structured.get("error") if isinstance(structured, Mapping) else None
         if isinstance(error, Mapping):
             raise LociGatewayError(

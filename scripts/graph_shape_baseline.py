@@ -16,7 +16,7 @@ from time import perf_counter
 from typing import Any, Mapping
 from unittest.mock import patch
 
-from mcp import ClientSession
+from mcp import Client
 from llm_wiki_core.compiler import _effective_config, compile_context
 from llm_wiki_core.contracts import CompileRequest, Diagnostic
 from llm_wiki_core.documents import WikiPage, collect_pages
@@ -671,15 +671,34 @@ def _run_current_compiler(
     hubs: set[str],
 ) -> dict[str, Any]:
     tool_calls = 0
-    original_call_tool = ClientSession.call_tool
+    original_call_tool = Client.call_tool
 
-    async def counted_call_tool(session, *args, **kwargs):
+    async def counted_call_tool(
+        client: Client,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        read_timeout_seconds: float | None = None,
+        progress_callback: Any = None,
+        *,
+        input_responses: Any = None,
+        request_state: str | None = None,
+        meta: Any = None,
+    ):
         nonlocal tool_calls
         tool_calls += 1
-        return await original_call_tool(session, *args, **kwargs)
+        return await original_call_tool(
+            client,
+            name,
+            arguments,
+            read_timeout_seconds,
+            progress_callback,
+            input_responses=input_responses,
+            request_state=request_state,
+            meta=meta,
+        )
 
     start = perf_counter()
-    with patch.object(ClientSession, "call_tool", new=counted_call_tool):
+    with patch.object(Client, "call_tool", new=counted_call_tool):
         response = compile_context(corpus["root"], request).to_dict()
     trace = record_trace(
         response["evidence"],

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Callable
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from mcp.types import CallToolResult, TextContent
 
 from llm_wiki_mcp.errors import WikiMcpError
@@ -31,8 +31,8 @@ from llm_wiki_mcp.wiki_runtime import (
 SUCCESS_MARKER = "OK: structured result available; inspect structuredContent."
 
 
-def create_server() -> FastMCP:
-    mcp = FastMCP(
+def create_server() -> MCPServer:
+    mcp = MCPServer(
         "llm-wiki",
         log_level="ERROR",
         instructions=(
@@ -278,28 +278,28 @@ def _handle_wiki_error(operation: Callable[[], dict[str, Any]]) -> CallToolResul
     except WikiMcpError as exc:
         return CallToolResult(
             content=[TextContent(type="text", text=f"{exc.code}: {exc.message}")],
-            structuredContent={"error": exc.to_dict()},
-            isError=True,
+            structured_content={"error": exc.to_dict()},
+            is_error=True,
         )
     except Exception as exc:
         return CallToolResult(
             content=[TextContent(type="text", text=f"UNEXPECTED_ERROR: {type(exc).__name__}")],
-            structuredContent={
+            structured_content={
                 "error": {
                     "code": "UNEXPECTED_ERROR",
                     "message": "Unexpected llm-wiki MCP server error",
                     "details": {"type": type(exc).__name__},
                 }
             },
-            isError=True,
+            is_error=True,
         )
 
 
 def _success(payload: dict[str, Any]) -> CallToolResult:
     return CallToolResult(
         content=[TextContent(type="text", text=SUCCESS_MARKER)],
-        structuredContent=payload,
-        isError=False,
+        structured_content=payload,
+        is_error=False,
     )
 
 

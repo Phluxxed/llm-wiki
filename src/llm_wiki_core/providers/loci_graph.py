@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 from typing import Any, Protocol
 
-from mcp import ClientSession
+from mcp import Client
 
 from ..contracts import Diagnostic
 from ..graph_adapter import (
@@ -55,7 +55,7 @@ class LociGraphMcpGateway:
 
     async def _retrieve_session(
         self,
-        session: ClientSession,
+        session: Client,
         context: ProviderContext,
     ) -> Mapping[str, Any]:
         with open_graph_mirror(context, cache_dir=self._cache_dir) as mirror:
@@ -111,7 +111,7 @@ class LociGraphProvider:
             return ProviderResult(diagnostics=(_gateway_failure(exc),))
 
 
-async def _index_mirror(session: ClientSession, root: Path) -> Mapping[str, Any]:
+async def _index_mirror(session: Client, root: Path) -> Mapping[str, Any]:
     result = await session.call_tool(
         "loci_index",
         arguments={"path": str(root), "incremental": True},

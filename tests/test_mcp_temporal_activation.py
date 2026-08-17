@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from mcp import ClientSession, StdioServerParameters
+from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from tests.wiki_fixture import base_fm, create_wiki_root, write_md
@@ -125,8 +125,8 @@ class TemporalActivationMcpTest(unittest.TestCase):
             write_md(wiki / "a.md", base_fm(title="A"), "A body.")
             result = asyncio.run(_round_trip(tmp / "home", wiki))
         self.assertIn("wiki_reconcile_temporal_candidates", result["tools"])
-        self.assertFalse(result["result"].isError)
-        self.assertEqual(result["result"].structuredContent["kind"], "temporal_reconciliation_result")
+        self.assertFalse(result["result"].is_error)
+        self.assertEqual(result["result"].structured_content["kind"], "temporal_reconciliation_result")
 
 
 async def _round_trip(home: Path, wiki: Path):
@@ -139,25 +139,23 @@ async def _round_trip(home: Path, wiki: Path):
         env=env,
         cwd=REPO_ROOT,
     )
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            tools = await session.list_tools()
-            await session.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
-            proposal_result = await session.call_tool(
-                "wiki_build_temporal_candidates",
-                arguments={
-                    "alias": "brain",
-                    "source": _source(),
-                    "claims": [_claim()],
-                    "proposed_at": "2026-08-10T01:00:00Z",
-                },
-            )
-            result = await session.call_tool(
-                "wiki_reconcile_temporal_candidates",
-                arguments={"alias": "brain", "proposals": [proposal_result.structuredContent]},
-            )
-            return {"tools": [tool.name for tool in tools.tools], "result": result}
+    async with Client(stdio_client(params), mode="auto") as client:
+        tools = await client.list_tools()
+        await client.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
+        proposal_result = await client.call_tool(
+            "wiki_build_temporal_candidates",
+            arguments={
+                "alias": "brain",
+                "source": _source(),
+                "claims": [_claim()],
+                "proposed_at": "2026-08-10T01:00:00Z",
+            },
+        )
+        result = await client.call_tool(
+            "wiki_reconcile_temporal_candidates",
+            arguments={"alias": "brain", "proposals": [proposal_result.structured_content]},
+        )
+        return {"tools": [tool.name for tool in tools.tools], "result": result}
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from mcp import ClientSession
+from mcp import Client
 
 from ..contracts import Diagnostic
 from ..state import normalize_knowledge_state
@@ -58,7 +58,7 @@ class LociMcpGateway:
 
     async def _retrieve_session(
         self,
-        session: ClientSession,
+        session: Client,
         wiki_root: Path,
         query: str,
         *,

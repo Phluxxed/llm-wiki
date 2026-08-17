@@ -143,9 +143,9 @@ class LociProviderTest(unittest.TestCase):
         server.write_text(
             textwrap.dedent(
                 """\
-                from mcp.server.fastmcp import FastMCP
+                from mcp.server import MCPServer
 
-                mcp = FastMCP("fake-loci")
+                mcp = MCPServer("fake-loci")
 
                 @mcp.tool()
                 def loci_search(repo: str, query: str, limit: int = 20):
@@ -224,9 +224,9 @@ class LociProviderTest(unittest.TestCase):
             textwrap.dedent(
                 """\
                 import time
-                from mcp.server.fastmcp import FastMCP
+                from mcp.server import MCPServer
 
-                mcp = FastMCP("slow-loci")
+                mcp = MCPServer("slow-loci")
 
                 @mcp.tool()
                 def loci_search(repo: str, query: str, limit: int = 20):
@@ -261,9 +261,9 @@ class LociProviderTest(unittest.TestCase):
         server.write_text(
             textwrap.dedent(
                 """\
-                from mcp.server.fastmcp import FastMCP
+                from mcp.server import MCPServer
 
-                mcp = FastMCP("empty-loci")
+                mcp = MCPServer("empty-loci")
 
                 if __name__ == "__main__":
                     mcp.run(transport="stdio")

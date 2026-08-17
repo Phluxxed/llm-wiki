@@ -411,10 +411,10 @@ class LociGraphProviderTest(unittest.TestCase):
                 import json
                 from collections import deque
                 from pathlib import Path
-                from mcp.server.fastmcp import FastMCP
+                from mcp.server import MCPServer
 
                 CALLS = Path({str(calls)!r})
-                mcp = FastMCP("fake-loci-graph")
+                mcp = MCPServer("fake-loci-graph")
 
                 def record(name, payload):
                     with CALLS.open("a", encoding="utf-8") as handle:

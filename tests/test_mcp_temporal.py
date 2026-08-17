@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from mcp import ClientSession, StdioServerParameters
+from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from tests.wiki_fixture import base_fm, create_wiki_root, write_md
@@ -138,25 +138,25 @@ class TemporalProposalMcpTest(unittest.TestCase):
             write_md(wiki / "a.md", base_fm(title="A"), "A body.")
             result = asyncio.run(_round_trip(tmp / "home", wiki))
         self.assertIn("wiki_build_temporal_candidates", result["tools"])
-        self.assertFalse(result["proposal"].isError)
-        self.assertEqual(result["proposal"].structuredContent["kind"], "temporal_candidate_proposal")
+        self.assertFalse(result["proposal"].is_error)
+        self.assertEqual(result["proposal"].structured_content["kind"], "temporal_candidate_proposal")
 
     def test_compile_context_accepts_v2_temporal_mapping(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             wiki = create_wiki_root(tmp / "wiki")
             result = asyncio.run(_temporal_compile_round_trip(tmp / "home", wiki))
-        self.assertFalse(result.isError)
-        self.assertEqual(result.structuredContent["contract_version"], "2")
-        self.assertEqual(result.structuredContent["query"]["temporal"]["view"], "current")
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.structured_content["contract_version"], "2")
+        self.assertEqual(result.structured_content["query"]["temporal"]["view"], "current")
 
     def test_compile_context_rejects_temporal_arguments_without_view(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             wiki = create_wiki_root(tmp / "wiki")
             result = asyncio.run(_temporal_compile_without_view(tmp / "home", wiki))
-        self.assertTrue(result.isError)
-        self.assertEqual(result.structuredContent["error"]["code"], "INVALID_INPUT")
+        self.assertTrue(result.is_error)
+        self.assertEqual(result.structured_content["error"]["code"], "INVALID_INPUT")
 
 
 async def _round_trip(home: Path, wiki: Path):
@@ -164,16 +164,14 @@ async def _round_trip(home: Path, wiki: Path):
     env["LLM_WIKI_HOME"] = str(home)
     env["PYTHONPATH"] = f"{REPO_ROOT / 'src'}:{env.get('PYTHONPATH', '')}"
     params = StdioServerParameters(command=sys.executable, args=["-m", "llm_wiki_mcp.mcp_server"], env=env, cwd=REPO_ROOT)
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            tools = await session.list_tools()
-            await session.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
-            proposal = await session.call_tool(
-                "wiki_build_temporal_candidates",
-                arguments={"alias": "brain", "source": _source(), "claims": [_claim()], "proposed_at": "2026-08-10T00:00:01Z"},
-            )
-            return {"tools": [tool.name for tool in tools.tools], "proposal": proposal}
+    async with Client(stdio_client(params), mode="auto") as client:
+        tools = await client.list_tools()
+        await client.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
+        proposal = await client.call_tool(
+            "wiki_build_temporal_candidates",
+            arguments={"alias": "brain", "source": _source(), "claims": [_claim()], "proposed_at": "2026-08-10T00:00:01Z"},
+        )
+        return {"tools": [tool.name for tool in tools.tools], "proposal": proposal}
 
 
 async def _temporal_compile_round_trip(home: Path, wiki: Path):
@@ -181,22 +179,20 @@ async def _temporal_compile_round_trip(home: Path, wiki: Path):
     env["LLM_WIKI_HOME"] = str(home)
     env["PYTHONPATH"] = f"{REPO_ROOT / 'src'}:{env.get('PYTHONPATH', '')}"
     params = StdioServerParameters(command=sys.executable, args=["-m", "llm_wiki_mcp.mcp_server"], env=env, cwd=REPO_ROOT)
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            await session.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
-            return await session.call_tool(
-                "wiki_compile_context",
-                arguments={
-                    "alias": "brain",
-                    "question": "What is current?",
-                    "contract_version": "2",
-                    "temporal_view": "current",
-                    "request_time": "2026-08-10T00:00:00Z",
-                    "world_at": "2026-08-10",
-                    "known_at": "2026-08-10T00:00:00Z",
-                },
-            )
+    async with Client(stdio_client(params), mode="auto") as client:
+        await client.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
+        return await client.call_tool(
+            "wiki_compile_context",
+            arguments={
+                "alias": "brain",
+                "question": "What is current?",
+                "contract_version": "2",
+                "temporal_view": "current",
+                "request_time": "2026-08-10T00:00:00Z",
+                "world_at": "2026-08-10",
+                "known_at": "2026-08-10T00:00:00Z",
+            },
+        )
 
 
 async def _temporal_compile_without_view(home: Path, wiki: Path):
@@ -204,19 +200,17 @@ async def _temporal_compile_without_view(home: Path, wiki: Path):
     env["LLM_WIKI_HOME"] = str(home)
     env["PYTHONPATH"] = f"{REPO_ROOT / 'src'}:{env.get('PYTHONPATH', '')}"
     params = StdioServerParameters(command=sys.executable, args=["-m", "llm_wiki_mcp.mcp_server"], env=env, cwd=REPO_ROOT)
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            await session.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
-            return await session.call_tool(
-                "wiki_compile_context",
-                arguments={
-                    "alias": "brain",
-                    "question": "What is current?",
-                    "contract_version": "2",
-                    "request_time": "2026-08-10T00:00:00Z",
-                },
-            )
+    async with Client(stdio_client(params), mode="auto") as client:
+        await client.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
+        return await client.call_tool(
+            "wiki_compile_context",
+            arguments={
+                "alias": "brain",
+                "question": "What is current?",
+                "contract_version": "2",
+                "request_time": "2026-08-10T00:00:00Z",
+            },
+        )
 
 
 if __name__ == "__main__":

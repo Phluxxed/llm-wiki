@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from typing import Any
 
-from mcp import ClientSession, StdioServerParameters
+from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from tests.wiki_fixture import base_fm, create_wiki_root, write_md
@@ -182,9 +182,9 @@ class UnifiedMaintenanceMcpTest(unittest.TestCase):
             write_md(wiki / "a.md", base_fm(title="A"), "A body.")
             result = asyncio.run(_round_trip(tmp / "home", wiki))
         self.assertIn("wiki_build_maintenance", result["tools"])
-        self.assertFalse(result["result"].isError)
-        self.assertEqual(result["result"].structuredContent["schema_version"], "unified-maintenance/1")
-        self.assertFalse(result["result"].structuredContent["mutation"]["allowed"])
+        self.assertFalse(result["result"].is_error)
+        self.assertEqual(result["result"].structured_content["schema_version"], "unified-maintenance/1")
+        self.assertFalse(result["result"].structured_content["mutation"]["allowed"])
 
 
 async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
@@ -197,25 +197,23 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
         env=env,
         cwd=REPO_ROOT,
     )
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            tools = await session.list_tools()
-            await session.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
-            result = await session.call_tool(
-                "wiki_build_maintenance",
-                arguments={
-                    "alias": "brain",
-                    "source": {
-                        "source_kind": "scan",
-                        "source_ref": "scan:1",
-                        "content_hash": "b" * 64,
-                    },
-                    "intent": "durable_learning",
-                    "proposed_at": "2026-08-10T01:00:00Z",
+    async with Client(stdio_client(params), mode="auto") as client:
+        tools = await client.list_tools()
+        await client.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
+        result = await client.call_tool(
+            "wiki_build_maintenance",
+            arguments={
+                "alias": "brain",
+                "source": {
+                    "source_kind": "scan",
+                    "source_ref": "scan:1",
+                    "content_hash": "b" * 64,
                 },
-            )
-            return {"tools": [tool.name for tool in tools.tools], "result": result}
+                "intent": "durable_learning",
+                "proposed_at": "2026-08-10T01:00:00Z",
+            },
+        )
+        return {"tools": [tool.name for tool in tools.tools], "result": result}
 
 
 if __name__ == "__main__":

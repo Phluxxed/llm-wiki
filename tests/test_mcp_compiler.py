@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from mcp import ClientSession, StdioServerParameters
+from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from tests.wiki_fixture import base_fm, create_wiki_root, write_md
@@ -91,55 +91,49 @@ async def _session(home: Path):
 
 async def _compile_round_trip(home: Path, wiki: Path):
     params = await _session(home)
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            tools = await session.list_tools()
-            await session.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
-            compiled = await session.call_tool(
-                "wiki_compile_context",
-                {
-                    "alias": "test",
-                    "question": "What does Runtime own?",
-                    "target_bytes": 100,
-                    "max_bytes": 10_000,
-                },
-            )
-            return {
-                "tools": sorted(tool.name for tool in tools.tools),
-                "compiled": compiled.structuredContent,
-            }
+    async with Client(stdio_client(params), mode="auto") as client:
+        tools = await client.list_tools()
+        await client.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
+        compiled = await client.call_tool(
+            "wiki_compile_context",
+            {
+                "alias": "test",
+                "question": "What does Runtime own?",
+                "target_bytes": 100,
+                "max_bytes": 10_000,
+            },
+        )
+        return {
+            "tools": sorted(tool.name for tool in tools.tools),
+            "compiled": compiled.structured_content,
+        }
 
 
 async def _invalid_round_trip(home: Path, wiki: Path):
     params = await _session(home)
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            await session.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
-            result = await session.call_tool(
-                "wiki_compile_context",
-                {"alias": "test", "question": "What changed?", "contract_version": "3"},
-            )
-            return {"is_error": result.isError, "error": result.structuredContent["error"]}
+    async with Client(stdio_client(params), mode="auto") as client:
+        await client.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
+        result = await client.call_tool(
+            "wiki_compile_context",
+            {"alias": "test", "question": "What changed?", "contract_version": "3"},
+        )
+        return {"is_error": result.is_error, "error": result.structured_content["error"]}
 
 
 async def _too_small_budget_round_trip(home: Path, wiki: Path):
     params = await _session(home)
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            await session.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
-            result = await session.call_tool(
-                "wiki_compile_context",
-                {
-                    "alias": "test",
-                    "question": "What changed?",
-                    "target_bytes": 100,
-                    "max_bytes": 100,
-                },
-            )
-            return {"is_error": result.isError, "error": result.structuredContent["error"]}
+    async with Client(stdio_client(params), mode="auto") as client:
+        await client.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
+        result = await client.call_tool(
+            "wiki_compile_context",
+            {
+                "alias": "test",
+                "question": "What changed?",
+                "target_bytes": 100,
+                "max_bytes": 100,
+            },
+        )
+        return {"is_error": result.is_error, "error": result.structured_content["error"]}
 
 
 if __name__ == "__main__":
