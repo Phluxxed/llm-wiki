@@ -15,6 +15,7 @@ from tests.wiki_fixture import base_fm, create_wiki_root, write_md
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+SUCCESS_MARKER = "OK: structured result available; inspect structuredContent."
 
 
 class McpServerTest(unittest.TestCase):
@@ -36,6 +37,18 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(result["overview"]["kind"], "agent_overview")
         self.assertEqual(result["manual"]["kind"], "wiki_agent_manual")
         self.assertIn("Wiki Agent", result["manual"]["operating_manual"])
+        self.assertIn("B body.", result["page"]["content"])
+        self.assertTrue(result["context"])
+        self.assertEqual(
+            result["success_text"],
+            {
+                "listed": [SUCCESS_MARKER],
+                "manual": [SUCCESS_MARKER],
+                "page": [SUCCESS_MARKER],
+                "context": [SUCCESS_MARKER],
+            },
+        )
+        self.assertLessEqual(len(SUCCESS_MARKER), 80)
         self.assertEqual(result["links"]["links"][0]["page"], "b.md")
         self.assertEqual(result["maintenance"]["kind"], "maintenance_candidate_packet")
         self.assertFalse(result["maintenance"]["mutation"]["allowed"])
@@ -57,6 +70,8 @@ class McpServerTest(unittest.TestCase):
                 "details": {"env": "LLM_WIKI_HOME"},
             },
         )
+        self.assertIn("CONFIG_REQUIRED", result["error_text"])
+        self.assertIn("LLM_WIKI_HOME must be set", result["error_text"])
 
 
 async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
@@ -83,6 +98,14 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
             listed = await session.call_tool("wiki_list", arguments={})
             overview = await session.call_tool("wiki_overview", arguments={"alias": "brain"})
             manual = await session.call_tool("wiki_agent_manual", arguments={"alias": "brain"})
+            page = await session.call_tool(
+                "wiki_get_page",
+                arguments={"alias": "brain", "page": "b.md"},
+            )
+            context = await session.call_tool(
+                "wiki_context_pack",
+                arguments={"alias": "brain", "page": "a.md", "tokens": 1_000},
+            )
             links = await session.call_tool(
                 "wiki_links",
                 arguments={"alias": "brain", "page": "a.md"},
@@ -120,6 +143,14 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
         "listed": listed.structuredContent,
         "overview": overview.structuredContent,
         "manual": manual.structuredContent,
+        "page": page.structuredContent,
+        "context": context.structuredContent,
+        "success_text": {
+            "listed": [block.text for block in listed.content],
+            "manual": [block.text for block in manual.content],
+            "page": [block.text for block in page.content],
+            "context": [block.text for block in context.content],
+        },
         "links": links.structuredContent,
         "maintenance": maintenance.structuredContent,
         "proposal": proposal.structuredContent,
@@ -146,6 +177,7 @@ async def _missing_home_error() -> dict[str, Any]:
             return {
                 "is_error": result.isError,
                 "error": result.structuredContent["error"],
+                "error_text": "\n".join(block.text for block in result.content),
             }
 
     raise AssertionError("Expected wiki_list to return an error")

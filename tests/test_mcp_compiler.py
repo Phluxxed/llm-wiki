@@ -60,7 +60,10 @@ class McpCompilerTest(unittest.TestCase):
 
         self.assertTrue(result["is_error"])
         self.assertEqual(result["error"]["code"], "CONTRACT_VERSION_UNSUPPORTED")
-        self.assertEqual(result["error"]["details"], {"found": "2", "supported": "1"})
+        self.assertEqual(
+            result["error"]["details"],
+            {"found": "3", "supported": ["1", "2"]},
+        )
 
     def test_impossible_complete_response_budget_keeps_structured_error_envelope(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -116,7 +119,7 @@ async def _invalid_round_trip(home: Path, wiki: Path):
             await session.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
             result = await session.call_tool(
                 "wiki_compile_context",
-                {"alias": "test", "question": "What changed?", "contract_version": "2"},
+                {"alias": "test", "question": "What changed?", "contract_version": "3"},
             )
             return {"is_error": result.isError, "error": result.structuredContent["error"]}
 

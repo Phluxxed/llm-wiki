@@ -28,6 +28,9 @@ from llm_wiki_mcp.wiki_runtime import (
 )
 
 
+SUCCESS_MARKER = "OK: structured result available; inspect structuredContent."
+
+
 def create_server() -> FastMCP:
     mcp = FastMCP(
         "llm-wiki",
@@ -35,7 +38,9 @@ def create_server() -> FastMCP:
         instructions=(
             "Local stdio MCP server for registered llm-wiki folders. "
             "Tools expose registry, navigation, graph health, page, source, "
-            "context-pack, and compiled-context data without mutating wiki content."
+            "context-pack, and compiled-context data without mutating wiki content. "
+            "Successful text content is only a marker; structuredContent is the "
+            "authoritative result payload."
         ),
     )
 
@@ -291,7 +296,11 @@ def _handle_wiki_error(operation: Callable[[], dict[str, Any]]) -> CallToolResul
 
 
 def _success(payload: dict[str, Any]) -> CallToolResult:
-    return CallToolResult(content=[], structuredContent=payload, isError=False)
+    return CallToolResult(
+        content=[TextContent(type="text", text=SUCCESS_MARKER)],
+        structuredContent=payload,
+        isError=False,
+    )
 
 
 mcp = create_server()
