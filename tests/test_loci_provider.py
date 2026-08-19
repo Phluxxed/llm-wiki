@@ -15,7 +15,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from llm_wiki_core.compiler import compile_context
 from llm_wiki_core.contracts import CompileRequest
 from llm_wiki_core.graph_adapter import GraphAdapterError
-from llm_wiki_core.providers.loci import LociMcpGateway, LociProvider
+from llm_wiki_core.providers.loci import LociMcpGateway, LociProvider, LociRetrieval
 from llm_wiki_core.providers.loci_transport import LociGatewayError, LociMcpClient
 from tests.wiki_fixture import base_fm, write_md
 
@@ -33,12 +33,7 @@ class LociProviderTest(unittest.TestCase):
         write_md(
             self.root / "notes" / "overview.md",
             base_fm(title="Overview"),
-            "General overview without implementation detail.",
-        )
-        (self.root / "implementation").mkdir()
-        (self.root / "implementation" / "runtime.py").write_text(
-            "def propagate_upgrade():\n    return 'canonical runtime'\n",
-            encoding="utf-8",
+            "## Upgrade propagation\n\npropagate_upgrade is implemented by the canonical page workflow.",
         )
         (self.root / ".llm-wiki.toml").write_text(
             'schema_version = "1"\n'
@@ -63,14 +58,15 @@ class LociProviderTest(unittest.TestCase):
     def test_loci_result_becomes_exact_section_candidate(self):
         calls = []
 
-        def search(repo, query, *, limit, ensure_fresh):
-            calls.append(("search", Path(repo), query, limit, ensure_fresh))
+        def search(repo, query, *, limit, file_paths, ensure_fresh):
+            calls.append(("search", Path(repo), query, limit, file_paths, ensure_fresh))
+            self.assertEqual(file_paths, ["notes/overview.md"])
             return [
                 {
-                    "id": "implementation/runtime.py::propagate_upgrade#function",
-                    "file_path": "implementation/runtime.py",
-                    "line": 1,
-                    "end_line": 2,
+                    "id": "notes/overview.md::Upgrade propagation#section",
+                    "file_path": "notes/overview.md",
+                    "line": 2,
+                    "end_line": 4,
                 }
             ]
 
@@ -78,7 +74,7 @@ class LociProviderTest(unittest.TestCase):
             calls.append(("file", Path(repo), file_path, start_line, end_line, ensure_fresh))
             return {
                 "file": file_path,
-                "content": "def propagate_upgrade():\n    return 'canonical runtime'",
+                "content": "## Upgrade propagation\n\npropagate_upgrade is implemented by the canonical page workflow.",
                 "start_line": start_line,
                 "end_line": end_line,
             }
@@ -88,10 +84,33 @@ class LociProviderTest(unittest.TestCase):
         response = compile_context(self.root, self.request(), extra_providers=(provider,)).to_dict()
 
         evidence = next(item for item in response["evidence"] if item["provider"] == "loci")
-        self.assertEqual(evidence["locator"]["symbol_id"], "implementation/runtime.py::propagate_upgrade#function")
-        self.assertEqual(evidence["locator"]["start_line"], 1)
+        self.assertEqual(evidence["locator"]["symbol_id"], "notes/overview.md::Upgrade propagation#section")
+        self.assertEqual(evidence["locator"]["start_line"], 2)
+        self.assertEqual(evidence["page"], "notes/overview.md")
+        self.assertIsNone(evidence["source"])
         self.assertIn("propagate_upgrade", evidence["content"])
         self.assertTrue(all(call[-1] is True for call in calls))
+
+    def test_gateway_receives_exact_sorted_loaded_page_keys(self):
+        write_md(
+            self.root / "alpha.md",
+            base_fm(title="Alpha"),
+            "Alpha page.",
+        )
+        received = []
+
+        class RecordingGateway:
+            def retrieve(self, wiki_root, query, *, limit, file_paths):
+                received.append(file_paths)
+                return LociRetrieval()
+
+        compile_context(
+            self.root,
+            self.request(),
+            extra_providers=(LociProvider(gateway=RecordingGateway()),),
+        )
+
+        self.assertEqual(received, [("alpha.md", "notes/overview.md")])
 
     def test_indexed_section_on_current_page_carries_current_claim_role(self):
         write_md(
@@ -101,9 +120,7 @@ class LociProviderTest(unittest.TestCase):
         )
 
         class CurrentPageGateway:
-            def retrieve(self, wiki_root, query, *, limit):
-                from llm_wiki_core.providers.loci import LociRetrieval
-
+            def retrieve(self, wiki_root, query, *, limit, file_paths):
                 return LociRetrieval(
                     results=(
                         {
@@ -146,24 +163,31 @@ class LociProviderTest(unittest.TestCase):
                 from mcp.server import MCPServer
 
                 mcp = MCPServer("fake-loci")
+                get_calls = 0
 
                 @mcp.tool()
-                def loci_search(repo: str, query: str, limit: int = 20):
+                def loci_search(repo: str, query: str, limit: int = 20, file_paths: list[str] | None = None):
+                    if file_paths != ["notes/overview.md"]:
+                        raise ValueError(f"unexpected file_paths: {file_paths!r}")
                     return {"symbols": [{
-                        "id": "implementation/runtime.py::propagate_upgrade#function",
-                        "file_path": "implementation/runtime.py",
-                        "line": 1,
-                        "end_line": 2,
+                        "id": "notes/overview.md::Upgrade propagation#section",
+                        "file_path": "notes/overview.md",
+                        "line": 2,
+                        "end_line": 4,
                     }]}
 
                 @mcp.tool()
                 def loci_get(repo: str, symbol_ids: list[str], context: int = 0):
+                    global get_calls
+                    get_calls += 1
+                    if get_calls != 1:
+                        raise ValueError(f"unexpected loci_get count: {get_calls}")
                     return {"symbols": [{
                         "id": symbol_ids[0],
-                        "file_path": "implementation/runtime.py",
-                        "line": 1,
-                        "end_line": 2,
-                        "source": "def propagate_upgrade():\\n    return 'canonical runtime'",
+                        "file_path": "notes/overview.md",
+                        "line": 2,
+                        "end_line": 4,
+                        "source": "## Upgrade propagation\\n\\npropagate_upgrade is implemented by the canonical page workflow.",
                     }]}
 
                 if __name__ == "__main__":
@@ -180,8 +204,8 @@ class LociProviderTest(unittest.TestCase):
 
         evidence = next(item for item in response["evidence"] if item["provider"] == "loci")
         self.assertEqual(evidence["route"], "indexed_section")
-        self.assertEqual(evidence["locator"]["start_line"], 1)
-        self.assertIn("canonical runtime", evidence["content"])
+        self.assertEqual(evidence["locator"]["start_line"], 2)
+        self.assertIn("canonical page workflow", evidence["content"])
 
     def test_missing_mcp_service_degrades_with_explicit_diagnostic(self):
         provider = LociProvider(gateway=LociMcpGateway())
@@ -229,7 +253,7 @@ class LociProviderTest(unittest.TestCase):
                 mcp = MCPServer("slow-loci")
 
                 @mcp.tool()
-                def loci_search(repo: str, query: str, limit: int = 20):
+                def loci_search(repo: str, query: str, limit: int = 20, file_paths: list[str] | None = None):
                     time.sleep(1)
                     return {"symbols": []}
 
@@ -288,21 +312,19 @@ class LociProviderTest(unittest.TestCase):
 
     def test_mcp_hydration_must_match_the_validated_search_locator(self):
         class MismatchedGateway:
-            def retrieve(self, wiki_root, query, *, limit):
-                from llm_wiki_core.providers.loci import LociRetrieval
-
+            def retrieve(self, wiki_root, query, *, limit, file_paths):
                 return LociRetrieval(
                     results=(
                         {
-                            "id": "implementation/runtime.py::propagate_upgrade#function",
-                            "file_path": "implementation/runtime.py",
-                            "line": 1,
-                            "end_line": 2,
+                            "id": "notes/overview.md::Upgrade propagation#section",
+                            "file_path": "notes/overview.md",
+                            "line": 2,
+                            "end_line": 4,
                             "content": "do not leak mismatched evidence",
                             "hydrated_locator": {
                                 "file_path": "other.py",
-                                "line": 1,
-                                "end_line": 2,
+                                "line": 2,
+                                "end_line": 4,
                             },
                         },
                     )
@@ -320,9 +342,7 @@ class LociProviderTest(unittest.TestCase):
 
     def test_stopword_only_search_result_is_not_evidence(self):
         class StopwordOnlyGateway:
-            def retrieve(self, wiki_root, query, *, limit):
-                from llm_wiki_core.providers.loci import LociRetrieval
-
+            def retrieve(self, wiki_root, query, *, limit, file_paths):
                 return LociRetrieval(
                     results=(
                         {
@@ -349,6 +369,74 @@ class LociProviderTest(unittest.TestCase):
             extra_providers=(LociProvider(gateway=StopwordOnlyGateway()),),
         ).to_dict()
 
+        self.assertFalse(any(item["provider"] == "loci" for item in response["evidence"]))
+
+    def test_broken_gateway_out_of_scope_results_are_diagnosed_and_rejected(self):
+        out_of_scope_paths = (
+            "sources/reference.md",
+            "_templates/page.md",
+            "scripts/helper.py",
+            "unknown.md",
+        )
+
+        class BrokenGateway:
+            def retrieve(self, wiki_root, query, *, limit, file_paths):
+                self.file_paths = file_paths
+                return LociRetrieval(
+                    results=tuple(
+                        {
+                            "id": f"{file_path}::propagate_upgrade#section",
+                            "file_path": file_path,
+                            "line": 1,
+                            "end_line": 1,
+                            "content": "propagate_upgrade must not enter page evidence",
+                            "hydrated_locator": {
+                                "file_path": file_path,
+                                "line": 1,
+                                "end_line": 1,
+                            },
+                        }
+                        for file_path in out_of_scope_paths
+                    )
+                )
+
+        gateway = BrokenGateway()
+        response = compile_context(
+            self.root,
+            self.request(),
+            extra_providers=(LociProvider(gateway=gateway),),
+        ).to_dict()
+
+        self.assertEqual(gateway.file_paths, ("notes/overview.md",))
+        self.assertFalse(any(item["provider"] == "loci" for item in response["evidence"]))
+        diagnostics = [
+            item
+            for item in response["diagnostics"]
+            if item["code"] == "LOCI_RESULT_OUT_OF_SCOPE"
+        ]
+        self.assertEqual(len(diagnostics), len(out_of_scope_paths))
+        self.assertEqual(
+            {item["details"]["file"] for item in diagnostics},
+            set(out_of_scope_paths),
+        )
+        self.assertTrue(all(set(item["details"]) == {"file"} for item in diagnostics))
+
+    def test_empty_loaded_pages_passes_empty_allowlist(self):
+        received = []
+
+        class EmptyGateway:
+            def retrieve(self, wiki_root, query, *, limit, file_paths):
+                received.append(file_paths)
+                return LociRetrieval()
+
+        with patch("llm_wiki_core.compiler.collect_pages", return_value={}):
+            response = compile_context(
+                self.root,
+                self.request(),
+                extra_providers=(LociProvider(gateway=EmptyGateway()),),
+            ).to_dict()
+
+        self.assertEqual(received, [()])
         self.assertFalse(any(item["provider"] == "loci" for item in response["evidence"]))
 
     def test_unindexed_repo_degrades_with_structured_diagnostic(self):

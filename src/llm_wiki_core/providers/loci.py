@@ -27,7 +27,14 @@ class LociRetrieval:
 
 
 class LociGateway(Protocol):
-    def retrieve(self, wiki_root: Path, query: str, *, limit: int) -> LociRetrieval: ...
+    def retrieve(
+        self,
+        wiki_root: Path,
+        query: str,
+        *,
+        limit: int,
+        file_paths: tuple[str, ...],
+    ) -> LociRetrieval: ...
 
 
 class LociMcpGateway:
@@ -46,13 +53,21 @@ class LociMcpGateway:
             timeout_seconds=timeout_seconds,
         )
 
-    def retrieve(self, wiki_root: Path, query: str, *, limit: int) -> LociRetrieval:
+    def retrieve(
+        self,
+        wiki_root: Path,
+        query: str,
+        *,
+        limit: int,
+        file_paths: tuple[str, ...],
+    ) -> LociRetrieval:
         return self._client.run(
             lambda session: self._retrieve_session(
                 session,
                 wiki_root,
                 query,
                 limit=limit,
+                file_paths=file_paths,
             )
         )
 
@@ -63,6 +78,7 @@ class LociMcpGateway:
         query: str,
         *,
         limit: int,
+        file_paths: tuple[str, ...],
     ) -> LociRetrieval:
         results: list[Mapping[str, Any]] = []
         failures: list[LociGatewayError] = []
@@ -72,6 +88,7 @@ class LociMcpGateway:
                 "repo": str(wiki_root),
                 "query": query,
                 "limit": limit,
+                "file_paths": list(file_paths),
             },
         )
         symbols = tool_payload(search, "symbols")
@@ -136,8 +153,21 @@ class _FunctionLociGateway:
         self._search_fn = search_fn
         self._file_fn = file_fn
 
-    def retrieve(self, wiki_root: Path, query: str, *, limit: int) -> LociRetrieval:
-        results = self._search_fn(wiki_root, query, limit=limit, ensure_fresh=True)
+    def retrieve(
+        self,
+        wiki_root: Path,
+        query: str,
+        *,
+        limit: int,
+        file_paths: tuple[str, ...],
+    ) -> LociRetrieval:
+        results = self._search_fn(
+            wiki_root,
+            query,
+            limit=limit,
+            file_paths=list(file_paths),
+            ensure_fresh=True,
+        )
         hydrated: list[Mapping[str, Any]] = []
         failures: list[LociGatewayError] = []
         for result in results:
@@ -196,11 +226,13 @@ class LociProvider:
         )
 
     def collect(self, context: ProviderContext) -> ProviderResult:
+        file_paths = tuple(sorted(context.pages))
         try:
             retrieval = self._gateway.retrieve(
                 context.wiki_root,
                 context.request.question,
                 limit=MAX_RESULTS,
+                file_paths=file_paths,
             )
         except Exception as exc:
             return ProviderResult(diagnostics=(_loci_failure(exc),))
@@ -213,6 +245,9 @@ class LociProvider:
                 diagnostics.append(validated)
                 continue
             symbol_id, file_path, start_line, end_line = validated
+            if file_path not in context.pages:
+                diagnostics.append(_out_of_scope_result(file_path))
+                continue
             if not _hydration_matches(result.get("hydrated_locator"), validated):
                 diagnostics.append(_invalid_result(file_path, "Hydrated result locator does not match search"))
                 continue
@@ -222,17 +257,16 @@ class LociProvider:
             content, truncated = _bounded(str(result["content"]))
             if not _has_meaningful_query_match(result, content, context.request.question):
                 continue
-            page = context.pages.get(file_path)
-            state = normalize_knowledge_state(page.frontmatter) if page is not None else None
-            authored_state = state.normalized if state is not None else "unspecified"
-            is_source = _is_source(file_path, context.config.content.source_directory)
+            page = context.pages[file_path]
+            state = normalize_knowledge_state(page.frontmatter)
+            authored_state = state.normalized
             candidates.append(
                 CandidateEvidence(
                     id=f"loci:{symbol_id}",
                     provider=self.name,
                     route="indexed_section",
-                    page=file_path if page is not None else None,
-                    source=file_path if is_source else None,
+                    page=file_path,
+                    source=None,
                     locator={
                         "symbol_id": symbol_id,
                         "file": file_path,
@@ -241,11 +275,11 @@ class LociProvider:
                         "search_rank": retrieval_rank,
                     },
                     content=content,
-                    roles=_roles(context.shapes, is_source, authored_state),
+                    roles=_roles(context.shapes, authored_state),
                     selection_signals=("indexed_symbol_match", f"search_rank:{retrieval_rank}"),
                     authored_state=authored_state,
-                    derived_flags=state.derived_flags if state is not None else (),
-                    authority_signals=("source_index_span",) if is_source else (),
+                    derived_flags=state.derived_flags,
+                    authority_signals=(),
                     retrieval_rank=retrieval_rank,
                     truncated=truncated,
                 )
@@ -350,7 +384,16 @@ def _invalid_result(file_path: str | None, message: str) -> Diagnostic:
     )
 
 
-def _roles(shapes: tuple[str, ...], is_source: bool, authored_state: str) -> tuple[str, ...]:
+def _out_of_scope_result(file_path: str) -> Diagnostic:
+    return Diagnostic(
+        code="LOCI_RESULT_OUT_OF_SCOPE",
+        message="Loci returned a result outside the loaded page set",
+        provider="loci",
+        details={"file": file_path},
+    )
+
+
+def _roles(shapes: tuple[str, ...], authored_state: str) -> tuple[str, ...]:
     roles: list[str] = []
     if "lookup" in shapes:
         roles.append("answer")
@@ -364,14 +407,7 @@ def _roles(shapes: tuple[str, ...], is_source: bool, authored_state: str) -> tup
         roles.append("lineage")
     if "maintenance" in shapes:
         roles.append("evidence")
-    if is_source:
-        roles.extend(("support", "authority"))
     return tuple(dict.fromkeys(roles))
-
-
-def _is_source(file_path: str, source_directory: str) -> bool:
-    parts = Path(file_path).parts
-    return bool(parts) and parts[0] == source_directory
 
 
 def _bounded(content: str) -> tuple[str, bool]:
