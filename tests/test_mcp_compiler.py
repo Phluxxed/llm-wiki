@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -39,6 +40,41 @@ class McpCompilerTest(unittest.TestCase):
             result = asyncio.run(_compile_round_trip(tmp / "home", wiki))
 
         self.assertIn("wiki_compile_context", result["tools"])
+        _assert_object_output_schema(
+            self,
+            result["schemas"]["wiki_context_pack"],
+            {
+                "kind",
+                "seed",
+                "budget",
+                "included_pages",
+                "source_refs",
+                "source_excerpts",
+                "open_questions",
+                "open_risks",
+                "recent_log",
+                "gaps",
+            },
+        )
+        _assert_object_output_schema(
+            self,
+            result["schemas"]["wiki_compile_context"],
+            {
+                "kind",
+                "contract_version",
+                "wiki",
+                "query",
+                "evidence",
+                "omissions",
+                "coverage",
+                "budget",
+                "stop",
+                "continuation",
+                "diagnostics",
+                "reporting",
+            },
+        )
+        self.assertEqual(result["context"]["kind"], "context_pack")
         self.assertEqual(result["compiled"]["kind"], "compiled_context")
         self.assertEqual(result["compiled"]["query"]["question"], "What does Runtime own?")
         self.assertTrue(result["compiled"]["stop"]["sufficient"])
@@ -58,11 +94,14 @@ class McpCompilerTest(unittest.TestCase):
 
             result = asyncio.run(_invalid_round_trip(tmp / "home", wiki))
 
-        self.assertTrue(result["is_error"])
-        self.assertEqual(result["error"]["code"], "CONTRACT_VERSION_UNSUPPORTED")
-        self.assertEqual(
-            result["error"]["details"],
-            {"found": "3", "supported": ["1", "2"]},
+        _assert_error_envelope(
+            self,
+            result,
+            {
+                "code": "CONTRACT_VERSION_UNSUPPORTED",
+                "message": "Compiler contract version is not supported",
+                "details": {"found": "3", "supported": ["1", "2"]},
+            },
         )
 
     def test_impossible_complete_response_budget_keeps_structured_error_envelope(self):
@@ -72,9 +111,21 @@ class McpCompilerTest(unittest.TestCase):
 
             result = asyncio.run(_too_small_budget_round_trip(tmp / "home", wiki))
 
-        self.assertTrue(result["is_error"])
-        self.assertEqual(result["error"]["code"], "BUDGET_TOO_SMALL")
-        self.assertGreater(result["error"]["details"]["minimum_response_bytes"], 100)
+        _assert_error_envelope(
+            self,
+            result,
+            {
+                "code": "BUDGET_TOO_SMALL",
+                "message": "Budget is too small for the complete response contract",
+                "details": {
+                    "provided_max_bytes": 100,
+                    "provided_max_estimated_tokens": None,
+                    "effective_max_bytes": 100,
+                    "minimum_response_bytes": 853,
+                    "minimum_estimated_tokens": 214,
+                },
+            },
+        )
 
 
 async def _session(home: Path):
@@ -93,7 +144,12 @@ async def _compile_round_trip(home: Path, wiki: Path):
     params = await _session(home)
     async with Client(stdio_client(params), mode="auto") as client:
         tools = await client.list_tools()
+        schemas = {tool.name: tool.output_schema for tool in tools.tools}
         await client.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
+        context = await client.call_tool(
+            "wiki_context_pack",
+            {"alias": "test", "page": "systems/runtime.md", "tokens": 500},
+        )
         compiled = await client.call_tool(
             "wiki_compile_context",
             {
@@ -105,6 +161,8 @@ async def _compile_round_trip(home: Path, wiki: Path):
         )
         return {
             "tools": sorted(tool.name for tool in tools.tools),
+            "schemas": schemas,
+            "context": context.structured_content,
             "compiled": compiled.structured_content,
         }
 
@@ -117,7 +175,12 @@ async def _invalid_round_trip(home: Path, wiki: Path):
             "wiki_compile_context",
             {"alias": "test", "question": "What changed?", "contract_version": "3"},
         )
-        return {"is_error": result.is_error, "error": result.structured_content["error"]}
+        return {
+            "is_error": result.is_error,
+            "error": result.structured_content["error"],
+            "structured_content": result.structured_content,
+            "error_text": result.content[0].text,
+        }
 
 
 async def _too_small_budget_round_trip(home: Path, wiki: Path):
@@ -133,7 +196,38 @@ async def _too_small_budget_round_trip(home: Path, wiki: Path):
                 "max_bytes": 100,
             },
         )
-        return {"is_error": result.is_error, "error": result.structured_content["error"]}
+        return {
+            "is_error": result.is_error,
+            "error": result.structured_content["error"],
+            "structured_content": result.structured_content,
+            "error_text": result.content[0].text,
+        }
+
+
+def _assert_object_output_schema(
+    test: unittest.TestCase,
+    schema: dict[str, Any] | None,
+    success_fields: set[str],
+) -> None:
+    test.assertIsNotNone(schema)
+    assert schema is not None
+    test.assertEqual(schema["type"], "object")
+    properties = schema["properties"]
+    test.assertIn("error", properties)
+    for field in success_fields:
+        with test.subTest(field=field):
+            test.assertIn(field, properties)
+
+
+def _assert_error_envelope(
+    test: unittest.TestCase,
+    result: dict[str, Any],
+    expected_error: dict[str, Any],
+) -> None:
+    test.assertTrue(result["is_error"])
+    test.assertEqual(result["error"], expected_error)
+    test.assertEqual(result["structured_content"], {"error": expected_error})
+    test.assertEqual(result["error_text"], f"{expected_error['code']}: {expected_error['message']}")
 
 
 if __name__ == "__main__":

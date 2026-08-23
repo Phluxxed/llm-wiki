@@ -125,8 +125,42 @@ class TemporalActivationMcpTest(unittest.TestCase):
             write_md(wiki / "a.md", base_fm(title="A"), "A body.")
             result = asyncio.run(_round_trip(tmp / "home", wiki))
         self.assertIn("wiki_reconcile_temporal_candidates", result["tools"])
+        schema = result["schema"]
+        self.assertIsNotNone(schema)
+        assert schema is not None
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(schema["title"], "WikiReconcileTemporalCandidatesOutput")
+        self.assertFalse(schema["additionalProperties"])
+        self.assertIn("error", schema["properties"])
+        for field in {
+            "kind",
+            "contract_version",
+            "reconciliation_id",
+            "status",
+            "candidate_ids",
+            "relations",
+            "unknowns",
+            "usage",
+            "disposition",
+            "mutation",
+            "stewardship",
+        }:
+            with self.subTest(field=field):
+                self.assertIn(field, schema["properties"])
         self.assertFalse(result["result"].is_error)
         self.assertEqual(result["result"].structured_content["kind"], "temporal_reconciliation_result")
+        self.assertEqual(result["result"].structured_content["status"], "no_relations_observed")
+        self.assertEqual(result["result"].structured_content["candidate_ids"], [result["candidate_id"]])
+        self.assertFalse(result["result"].structured_content["mutation"]["allowed"])
+        self.assertEqual(result["result"].content[0].text, "OK: structured result available; inspect structuredContent.")
+        self.assertTrue(result["invalid"].is_error)
+        expected_error = {
+            "code": "INVALID_INPUT",
+            "message": "proposals must contain between 1 and 16 envelopes",
+            "details": {"surface": "wiki_reconcile_temporal_candidates"},
+        }
+        self.assertEqual(result["invalid"].structured_content, {"error": expected_error})
+        self.assertEqual(result["invalid"].content[0].text, f"INVALID_INPUT: {expected_error['message']}")
 
 
 async def _round_trip(home: Path, wiki: Path):
@@ -141,6 +175,11 @@ async def _round_trip(home: Path, wiki: Path):
     )
     async with Client(stdio_client(params), mode="auto") as client:
         tools = await client.list_tools()
+        schema = next(
+            tool.output_schema
+            for tool in tools.tools
+            if tool.name == "wiki_reconcile_temporal_candidates"
+        )
         await client.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
         proposal_result = await client.call_tool(
             "wiki_build_temporal_candidates",
@@ -155,7 +194,18 @@ async def _round_trip(home: Path, wiki: Path):
             "wiki_reconcile_temporal_candidates",
             arguments={"alias": "brain", "proposals": [proposal_result.structured_content]},
         )
-        return {"tools": [tool.name for tool in tools.tools], "result": result}
+        invalid = await client.call_tool(
+            "wiki_reconcile_temporal_candidates",
+            arguments={"alias": "brain", "proposals": []},
+        )
+        candidate_id = proposal_result.structured_content["packet"]["candidates"][0]["candidate_id"]
+        return {
+            "tools": [tool.name for tool in tools.tools],
+            "schema": schema,
+            "result": result,
+            "candidate_id": candidate_id,
+            "invalid": invalid,
+        }
 
 
 if __name__ == "__main__":

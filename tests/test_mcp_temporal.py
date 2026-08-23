@@ -138,17 +138,72 @@ class TemporalProposalMcpTest(unittest.TestCase):
             write_md(wiki / "a.md", base_fm(title="A"), "A body.")
             result = asyncio.run(_round_trip(tmp / "home", wiki))
         self.assertIn("wiki_build_temporal_candidates", result["tools"])
+        schema = result["schema"]
+        self.assertIsNotNone(schema)
+        assert schema is not None
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(schema["title"], "WikiBuildTemporalCandidatesOutput")
+        self.assertFalse(schema["additionalProperties"])
+        self.assertIn("error", schema["properties"])
+        for field in {
+            "kind",
+            "contract_version",
+            "target_wiki",
+            "observation",
+            "packet",
+            "disposition",
+            "mutation",
+            "stewardship",
+        }:
+            with self.subTest(field=field):
+                self.assertIn(field, schema["properties"])
         self.assertFalse(result["proposal"].is_error)
+        self.assertEqual(result["proposal"].content[0].text, "OK: structured result available; inspect structuredContent.")
         self.assertEqual(result["proposal"].structured_content["kind"], "temporal_candidate_proposal")
+        self.assertEqual(result["proposal"].structured_content["contract_version"], "temporal-candidate-proposal/1")
+        self.assertEqual(result["proposal"].structured_content["packet"]["status"], "candidates_present")
+        self.assertFalse(result["proposal"].structured_content["mutation"]["allowed"])
+        self.assertTrue(result["invalid"].is_error)
+        expected_error = {
+            "code": "INVALID_INPUT",
+            "message": (
+                "claims[0] has invalid fields (missing claim_scope, object, predicate, "
+                "proposed_world_validity, signals, subject, unknowns; unsupported bad)"
+            ),
+            "details": {"surface": "wiki_build_temporal_candidates"},
+        }
+        self.assertEqual(result["invalid"].structured_content, {"error": expected_error})
+        self.assertEqual(result["invalid"].content[0].text, f"INVALID_INPUT: {expected_error['message']}")
 
     def test_compile_context_accepts_v2_temporal_mapping(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             wiki = create_wiki_root(tmp / "wiki")
             result = asyncio.run(_temporal_compile_round_trip(tmp / "home", wiki))
-        self.assertFalse(result.is_error)
-        self.assertEqual(result.structured_content["contract_version"], "2")
-        self.assertEqual(result.structured_content["query"]["temporal"]["view"], "current")
+        self.assertFalse(result["result"].is_error)
+        self.assertIsNotNone(result["schema"])
+        schema = result["schema"]
+        assert schema is not None
+        self.assertEqual(schema["type"], "object")
+        self.assertIn("error", schema["properties"])
+        for field in {
+            "kind",
+            "contract_version",
+            "wiki",
+            "query",
+            "evidence",
+            "omissions",
+            "coverage",
+            "budget",
+            "stop",
+            "continuation",
+            "diagnostics",
+            "reporting",
+        }:
+            with self.subTest(field=field):
+                self.assertIn(field, schema["properties"])
+        self.assertEqual(result["result"].structured_content["contract_version"], "2")
+        self.assertEqual(result["result"].structured_content["query"]["temporal"]["view"], "current")
 
     def test_compile_context_rejects_temporal_arguments_without_view(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -156,7 +211,13 @@ class TemporalProposalMcpTest(unittest.TestCase):
             wiki = create_wiki_root(tmp / "wiki")
             result = asyncio.run(_temporal_compile_without_view(tmp / "home", wiki))
         self.assertTrue(result.is_error)
-        self.assertEqual(result.structured_content["error"]["code"], "INVALID_INPUT")
+        expected_error = {
+            "code": "INVALID_INPUT",
+            "message": "Temporal arguments require temporal_view",
+            "details": {"field": "temporal_view"},
+        }
+        self.assertEqual(result.structured_content, {"error": expected_error})
+        self.assertEqual(result.content[0].text, "INVALID_INPUT: Temporal arguments require temporal_view")
 
 
 async def _round_trip(home: Path, wiki: Path):
@@ -166,12 +227,31 @@ async def _round_trip(home: Path, wiki: Path):
     params = StdioServerParameters(command=sys.executable, args=["-m", "llm_wiki_mcp.mcp_server"], env=env, cwd=REPO_ROOT)
     async with Client(stdio_client(params), mode="auto") as client:
         tools = await client.list_tools()
+        schema = next(
+            tool.output_schema
+            for tool in tools.tools
+            if tool.name == "wiki_build_temporal_candidates"
+        )
         await client.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
         proposal = await client.call_tool(
             "wiki_build_temporal_candidates",
             arguments={"alias": "brain", "source": _source(), "claims": [_claim()], "proposed_at": "2026-08-10T00:00:01Z"},
         )
-        return {"tools": [tool.name for tool in tools.tools], "proposal": proposal}
+        invalid = await client.call_tool(
+            "wiki_build_temporal_candidates",
+            arguments={
+                "alias": "brain",
+                "source": _source(),
+                "claims": [{"bad": True}],
+                "proposed_at": "2026-08-10T00:00:01Z",
+            },
+        )
+        return {
+            "tools": [tool.name for tool in tools.tools],
+            "schema": schema,
+            "proposal": proposal,
+            "invalid": invalid,
+        }
 
 
 async def _temporal_compile_round_trip(home: Path, wiki: Path):
@@ -180,8 +260,10 @@ async def _temporal_compile_round_trip(home: Path, wiki: Path):
     env["PYTHONPATH"] = f"{REPO_ROOT / 'src'}:{env.get('PYTHONPATH', '')}"
     params = StdioServerParameters(command=sys.executable, args=["-m", "llm_wiki_mcp.mcp_server"], env=env, cwd=REPO_ROOT)
     async with Client(stdio_client(params), mode="auto") as client:
+        tools = await client.list_tools()
+        schema = next(tool.output_schema for tool in tools.tools if tool.name == "wiki_compile_context")
         await client.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
-        return await client.call_tool(
+        result = await client.call_tool(
             "wiki_compile_context",
             arguments={
                 "alias": "brain",
@@ -193,6 +275,7 @@ async def _temporal_compile_round_trip(home: Path, wiki: Path):
                 "known_at": "2026-08-10T00:00:00Z",
             },
         )
+        return {"result": result, "schema": schema}
 
 
 async def _temporal_compile_without_view(home: Path, wiki: Path):

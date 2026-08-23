@@ -182,9 +182,53 @@ class UnifiedMaintenanceMcpTest(unittest.TestCase):
             write_md(wiki / "a.md", base_fm(title="A"), "A body.")
             result = asyncio.run(_round_trip(tmp / "home", wiki))
         self.assertIn("wiki_build_maintenance", result["tools"])
+        schema = result["schema"]
+        self.assertIsNotNone(schema)
+        assert schema is not None
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(schema["title"], "WikiBuildMaintenanceOutput")
+        self.assertFalse(schema["additionalProperties"])
+        self.assertIn("error", schema["properties"])
+        for field in {
+            "schema_version",
+            "proposal_id",
+            "target_wiki",
+            "source",
+            "classification",
+            "observations",
+            "candidates",
+            "reconciliation",
+            "affected_pages",
+            "unknowns",
+            "disposition",
+            "mutation",
+            "authority",
+        }:
+            with self.subTest(field=field):
+                self.assertIn(field, schema["properties"])
         self.assertFalse(result["result"].is_error)
         self.assertEqual(result["result"].structured_content["schema_version"], "unified-maintenance/1")
+        self.assertEqual(result["result"].structured_content["classification"]["change_class"], "knowledge_revision")
         self.assertFalse(result["result"].structured_content["mutation"]["allowed"])
+        self.assertEqual(result["result"].content[0].text, "OK: structured result available; inspect structuredContent.")
+        for name in ("correction", "work_history", "detected_gap", "wiki_hygiene"):
+            with self.subTest(intent=name):
+                branch = result[name]
+                self.assertFalse(branch.is_error)
+                self.assertEqual(branch.structured_content["schema_version"], "unified-maintenance/1")
+                self.assertFalse(branch.structured_content["mutation"]["allowed"])
+        self.assertEqual(result["correction"].structured_content["classification"]["change_class"], "knowledge_revision")
+        self.assertEqual(result["work_history"].structured_content["classification"]["change_class"], "no_change")
+        self.assertEqual(result["detected_gap"].structured_content["classification"]["change_class"], "no_change")
+        self.assertEqual(result["wiki_hygiene"].structured_content["classification"]["change_class"], "wiki_hygiene")
+        self.assertTrue(result["invalid"].is_error)
+        expected_error = {
+            "code": "INVALID_INPUT",
+            "message": "unified maintenance: intent is unsupported",
+            "details": {"surface": "wiki_build_maintenance"},
+        }
+        self.assertEqual(result["invalid"].structured_content, {"error": expected_error})
+        self.assertEqual(result["invalid"].content[0].text, f"INVALID_INPUT: {expected_error['message']}")
 
 
 async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
@@ -199,21 +243,84 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
     )
     async with Client(stdio_client(params), mode="auto") as client:
         tools = await client.list_tools()
+        schema = next(
+            tool.output_schema
+            for tool in tools.tools
+            if tool.name == "wiki_build_maintenance"
+        )
         await client.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
         result = await client.call_tool(
             "wiki_build_maintenance",
             arguments={
                 "alias": "brain",
-                "source": {
-                    "source_kind": "scan",
-                    "source_ref": "scan:1",
-                    "content_hash": "b" * 64,
-                },
+                "source": _source(),
                 "intent": "durable_learning",
+                "claims": [_claim()],
                 "proposed_at": "2026-08-10T01:00:00Z",
             },
         )
-        return {"tools": [tool.name for tool in tools.tools], "result": result}
+        correction = await client.call_tool(
+            "wiki_build_maintenance",
+            arguments={
+                "alias": "brain",
+                "source": _source(payload_text="A correction is ready."),
+                "intent": "correction",
+                "claims": [_claim()],
+                "proposed_at": "2026-08-10T01:00:00Z",
+            },
+        )
+        scan_source = {
+            "source_kind": "scan",
+            "source_ref": "scan:1",
+            "content_hash": "b" * 64,
+        }
+        work_history = await client.call_tool(
+            "wiki_build_maintenance",
+            arguments={
+                "alias": "brain",
+                "source": scan_source,
+                "intent": "work_history",
+                "proposed_at": "2026-08-10T01:00:00Z",
+            },
+        )
+        detected_gap = await client.call_tool(
+            "wiki_build_maintenance",
+            arguments={
+                "alias": "brain",
+                "source": scan_source,
+                "intent": "detected_gap",
+                "proposed_at": "2026-08-10T01:00:00Z",
+            },
+        )
+        wiki_hygiene = await client.call_tool(
+            "wiki_build_maintenance",
+            arguments={
+                "alias": "brain",
+                "source": scan_source,
+                "intent": "wiki_hygiene",
+                "evidence": [{"ref": "doctor:links", "kind": "link_repair"}],
+                "proposed_at": "2026-08-10T01:00:00Z",
+            },
+        )
+        invalid = await client.call_tool(
+            "wiki_build_maintenance",
+            arguments={
+                "alias": "brain",
+                "source": scan_source,
+                "intent": "unsupported_intent",
+                "proposed_at": "2026-08-10T01:00:00Z",
+            },
+        )
+        return {
+            "tools": [tool.name for tool in tools.tools],
+            "schema": schema,
+            "result": result,
+            "correction": correction,
+            "work_history": work_history,
+            "detected_gap": detected_gap,
+            "wiki_hygiene": wiki_hygiene,
+            "invalid": invalid,
+        }
 
 
 if __name__ == "__main__":

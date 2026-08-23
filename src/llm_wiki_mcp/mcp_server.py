@@ -1,12 +1,34 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Callable
+from typing import Annotated, Any, Callable
 
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, TextContent
 
 from llm_wiki_mcp.errors import WikiMcpError
+from llm_wiki_mcp.output_models import (
+    WikiAgentManualOutput,
+    WikiAroundOutput,
+    WikiBacklinksOutput,
+    WikiBuildMaintenanceCandidateOutput,
+    WikiBuildMaintenanceOutput,
+    WikiBuildTemporalCandidatesOutput,
+    WikiCompileContextOutput,
+    WikiContextPackOutput,
+    WikiDoctorOutput,
+    WikiGetPageOutput,
+    WikiGetSourceExcerptOutput,
+    WikiGraphHealthOutput,
+    WikiLinksOutput,
+    WikiListOutput,
+    WikiMaintenanceCandidatesOutput,
+    WikiOverviewOutput,
+    WikiQueryOutput,
+    WikiReconcileTemporalCandidatesOutput,
+    WikiRegisterOutput,
+    WikiUnregisterOutput,
+)
 from llm_wiki_mcp.registry import doctor, list_wikis, register_wiki, unregister_wiki
 from llm_wiki_mcp.wiki_runtime import (
     agent_manual,
@@ -45,22 +67,24 @@ def create_server() -> MCPServer:
     )
 
     @mcp.tool()
-    def wiki_list() -> CallToolResult:
+    def wiki_list() -> Annotated[CallToolResult, WikiListOutput]:
         """List wikis registered for the current agent runtime."""
         return _handle_wiki_error(list_wikis)
 
     @mcp.tool()
-    def wiki_register(alias: str, path: str, created_by: str = "manual") -> CallToolResult:
+    def wiki_register(
+        alias: str, path: str, created_by: str = "manual"
+    ) -> Annotated[CallToolResult, WikiRegisterOutput]:
         """Register an existing wiki path under an alias in the current agent registry."""
         return _handle_wiki_error(lambda: register_wiki(alias, path, created_by=created_by))
 
     @mcp.tool()
-    def wiki_unregister(alias: str) -> CallToolResult:
+    def wiki_unregister(alias: str) -> Annotated[CallToolResult, WikiUnregisterOutput]:
         """Remove an alias from the current agent registry."""
         return _handle_wiki_error(lambda: unregister_wiki(alias))
 
     @mcp.tool()
-    def wiki_doctor(alias: str) -> CallToolResult:
+    def wiki_doctor(alias: str) -> Annotated[CallToolResult, WikiDoctorOutput]:
         """Validate that a registered wiki exists and has context tooling."""
         return _handle_wiki_error(lambda: doctor(alias))
 
@@ -69,7 +93,7 @@ def create_server() -> MCPServer:
         alias: str,
         include_conventions: bool = True,
         max_chars: int = 120_000,
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, WikiAgentManualOutput]:
         """Return the selected wiki's operating manual before any file mutation."""
         return _handle_wiki_error(
             lambda: agent_manual(
@@ -80,7 +104,7 @@ def create_server() -> MCPServer:
         )
 
     @mcp.tool()
-    def wiki_overview(alias: str) -> CallToolResult:
+    def wiki_overview(alias: str) -> Annotated[CallToolResult, WikiOverviewOutput]:
         """Return the agent overview for a registered wiki alias."""
         return _handle_wiki_error(lambda: overview(alias))
 
@@ -93,7 +117,7 @@ def create_server() -> MCPServer:
         tag: str | None = None,
         stale: int | None = None,
         risks: bool = False,
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, WikiQueryOutput]:
         """Return frontmatter query results for a registered wiki alias."""
         return _handle_wiki_error(
             lambda: query_pages(
@@ -108,22 +132,28 @@ def create_server() -> MCPServer:
         )
 
     @mcp.tool()
-    def wiki_links(alias: str, page: str) -> CallToolResult:
+    def wiki_links(alias: str, page: str) -> Annotated[CallToolResult, WikiLinksOutput]:
         """Return outgoing graph links for a page."""
         return _handle_wiki_error(lambda: links(alias, page))
 
     @mcp.tool()
-    def wiki_backlinks(alias: str, page: str) -> CallToolResult:
+    def wiki_backlinks(
+        alias: str, page: str
+    ) -> Annotated[CallToolResult, WikiBacklinksOutput]:
         """Return incoming graph links for a page."""
         return _handle_wiki_error(lambda: backlinks(alias, page))
 
     @mcp.tool()
-    def wiki_around(alias: str, page: str, depth: int = 1) -> CallToolResult:
+    def wiki_around(
+        alias: str, page: str, depth: int = 1
+    ) -> Annotated[CallToolResult, WikiAroundOutput]:
         """Return a bounded graph neighborhood around a page."""
         return _handle_wiki_error(lambda: around(alias, page, depth=depth))
 
     @mcp.tool()
-    def wiki_context_pack(alias: str, page: str, tokens: int = 12_000) -> CallToolResult:
+    def wiki_context_pack(
+        alias: str, page: str, tokens: int = 12_000
+    ) -> Annotated[CallToolResult, WikiContextPackOutput]:
         """Return deterministic task context around a seed page."""
         return _handle_wiki_error(lambda: context_pack(alias, page, tokens=tokens))
 
@@ -145,7 +175,7 @@ def create_server() -> MCPServer:
         known_at: str | None = None,
         transition_from: str | None = None,
         transition_to: str | None = None,
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, WikiCompileContextOutput]:
         """Compile bounded, question-shaped evidence from a registered wiki."""
         return _handle_wiki_error(
             lambda: compiled_context(
@@ -172,7 +202,7 @@ def create_server() -> MCPServer:
     def wiki_maintenance_candidates(
         alias: str,
         stale_after_days: int = 180,
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, WikiMaintenanceCandidatesOutput]:
         """Return read-only, evidence-backed candidates for steward review."""
         return _handle_wiki_error(
             lambda: maintenance_candidates(alias, stale_after_days=stale_after_days)
@@ -186,7 +216,7 @@ def create_server() -> MCPServer:
         review_question: str,
         pages: list[str],
         evidence: list[dict[str, str]],
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, WikiBuildMaintenanceCandidateOutput]:
         """Build one canonical read-only maintenance proposal for later steward review."""
         return _handle_wiki_error(
             lambda: maintenance_candidate_proposal(
@@ -205,7 +235,7 @@ def create_server() -> MCPServer:
         source: Mapping[str, Any],
         claims: list[Mapping[str, Any]],
         proposed_at: str,
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, WikiBuildTemporalCandidatesOutput]:
         """Build a read-only temporal candidate proposal from Codex semantic claims."""
         return _handle_wiki_error(
             lambda: temporal_candidate_proposal(
@@ -225,7 +255,7 @@ def create_server() -> MCPServer:
         claims: list[Mapping[str, Any]] | None = None,
         pages: list[str] | None = None,
         evidence: list[Mapping[str, Any]] | None = None,
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, WikiBuildMaintenanceOutput]:
         """Build one unified, candidate-only maintenance proposal."""
         return _handle_wiki_error(
             lambda: unified_maintenance_proposal(
@@ -243,12 +273,14 @@ def create_server() -> MCPServer:
     def wiki_reconcile_temporal_candidates(
         alias: str,
         proposals: list[Mapping[str, Any]],
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, WikiReconcileTemporalCandidatesOutput]:
         """Reconcile read-only temporal candidate proposals for one wiki."""
         return _handle_wiki_error(lambda: reconcile_temporal_candidates_runtime(alias, proposals))
 
     @mcp.tool()
-    def wiki_get_page(alias: str, page: str, max_chars: int = 4_000) -> CallToolResult:
+    def wiki_get_page(
+        alias: str, page: str, max_chars: int = 4_000
+    ) -> Annotated[CallToolResult, WikiGetPageOutput]:
         """Return page metadata and bounded page content."""
         return _handle_wiki_error(lambda: get_page(alias, page, max_chars=max_chars))
 
@@ -258,14 +290,14 @@ def create_server() -> MCPServer:
         page: str | None = None,
         source: str | None = None,
         max_chars: int = 1_600,
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, WikiGetSourceExcerptOutput]:
         """Return a bounded excerpt from a source file referenced by page or source path."""
         return _handle_wiki_error(
             lambda: get_source_excerpt(alias, page=page, source=source, max_chars=max_chars)
         )
 
     @mcp.tool()
-    def wiki_graph_health(alias: str) -> CallToolResult:
+    def wiki_graph_health(alias: str) -> Annotated[CallToolResult, WikiGraphHealthOutput]:
         """Return graph health, hubs, orphans, components, and source gaps."""
         return _handle_wiki_error(lambda: graph_health(alias))
 
