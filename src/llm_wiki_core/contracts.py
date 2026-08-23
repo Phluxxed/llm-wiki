@@ -33,6 +33,7 @@ class ContractError(ValueError):
 class CompileBudget:
     target_bytes: int = 48_000
     max_bytes: int = 192_000
+    max_content_bytes: int | None = None
     target_items: int = 24
     max_items: int = 96
     max_estimated_tokens: int | None = None
@@ -45,6 +46,7 @@ class CompileBudget:
         unknown = set(raw) - {
             "target_bytes",
             "max_bytes",
+            "max_content_bytes",
             "target_items",
             "max_items",
             "max_estimated_tokens",
@@ -55,6 +57,9 @@ class CompileBudget:
 
         target_bytes = _positive_int(raw.get("target_bytes", 48_000), "budget.target_bytes")
         max_bytes = _positive_int(raw.get("max_bytes", 192_000), "budget.max_bytes")
+        max_content_bytes = raw.get("max_content_bytes")
+        if max_content_bytes is not None:
+            max_content_bytes = _positive_int(max_content_bytes, "budget.max_content_bytes")
         target_items = _positive_int(raw.get("target_items", 24), "budget.target_items")
         max_items = _positive_int(raw.get("max_items", 96), "budget.max_items")
         estimated = raw.get("max_estimated_tokens")
@@ -71,19 +76,23 @@ class CompileBudget:
         return cls(
             target_bytes=min(target_bytes, effective_max_bytes),
             max_bytes=effective_max_bytes,
+            max_content_bytes=max_content_bytes,
             target_items=min(target_items, effective_max_items),
             max_items=effective_max_items,
             max_estimated_tokens=estimated,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "target_bytes": self.target_bytes,
             "max_bytes": self.max_bytes,
             "target_items": self.target_items,
             "max_items": self.max_items,
             "max_estimated_tokens": self.max_estimated_tokens,
         }
+        if self.max_content_bytes is not None:
+            result["max_content_bytes"] = self.max_content_bytes
+        return result
 
 
 @dataclass(frozen=True)
@@ -283,23 +292,30 @@ class BudgetUsage:
     items: int
     estimated_tokens: int
     target_exceeded_for_coverage: bool
+    content_bytes: int = 0
     max_estimated_tokens: int | None = None
+    max_content_bytes: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "limits": {
+        limits = {
                 "target_bytes": self.target_bytes,
                 "max_bytes": self.max_bytes,
                 "target_items": self.target_items,
                 "max_items": self.max_items,
                 "max_estimated_tokens": self.max_estimated_tokens,
-            },
+            }
+        result = {
+            "limits": limits,
             "target_exceeded_for_coverage": self.target_exceeded_for_coverage,
             "evidence_bytes": self.evidence_bytes,
             "envelope_bytes": self.envelope_bytes,
             "items": self.items,
             "estimated_tokens": self.estimated_tokens,
         }
+        if self.max_content_bytes is not None:
+            limits["max_content_bytes"] = self.max_content_bytes
+            result["content_bytes"] = self.content_bytes
+        return result
 
 
 @dataclass(frozen=True)

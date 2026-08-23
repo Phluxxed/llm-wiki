@@ -9,6 +9,7 @@ from typing import Sequence
 from .compiler import compile_context
 from .contracts import CompileRequest, ContractError
 from .doctor import inspect_runtime
+from .kernel_projection import KernelProjectionError, compile_kernel_projection
 from .migration import (
     MigrationError,
     apply_migration,
@@ -17,6 +18,7 @@ from .migration import (
     rollback_migration,
     verify_migration,
 )
+from .snapshot import SnapshotError, publish_snapshot, resolve_snapshot
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     compile_parser.add_argument("--state-view", default="current")
     compile_parser.add_argument("--target-bytes", type=int, default=48_000)
     compile_parser.add_argument("--max-bytes", type=int, default=192_000)
+    compile_parser.add_argument("--max-content-bytes", type=int)
     compile_parser.add_argument("--target-items", type=int, default=24)
     compile_parser.add_argument("--max-items", type=int, default=96)
     compile_parser.add_argument("--max-estimated-tokens", type=int)
@@ -46,6 +49,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_parser = commands.add_parser("doctor", help="Inspect wiki runtime compatibility")
     doctor_parser.add_argument("--wiki", required=True, help="Path to the wiki root")
+
+    snapshot_parser = commands.add_parser(
+        "publish-snapshot",
+        help="Publish an immutable, content-addressed wiki snapshot",
+    )
+    snapshot_parser.add_argument("--wiki", required=True, help="Path to the wiki root")
+    snapshot_parser.add_argument("--alias", required=True, help="Stable local snapshot alias")
+    snapshot_parser.add_argument("--output-root", required=True, help="Explicit local snapshot storage root")
+
+    resolve_snapshot_parser = commands.add_parser(
+        "resolve-snapshot",
+        help="Resolve and verify the current or last-known-good wiki snapshot",
+    )
+    resolve_snapshot_parser.add_argument("--alias", required=True, help="Stable local snapshot alias")
+    resolve_snapshot_parser.add_argument("--output-root", required=True, help="Explicit local snapshot storage root")
+
+    kernel_parser = commands.add_parser(
+        "compile-kernel",
+        help="Project exact ordered collaboration-kernel sections from an immutable snapshot",
+    )
+    kernel_parser.add_argument("--alias", required=True, help="Stable local snapshot alias")
+    kernel_parser.add_argument("--output-root", required=True, help="Explicit local snapshot storage root")
+    kernel_parser.add_argument(
+        "--source",
+        action="append",
+        required=True,
+        help='Repeatable JSON object with exactly {"role","page","section"}',
+    )
 
     migrate_parser = commands.add_parser("migrate", help="Inspect and operate an explicit wiki migration")
     migration_commands = migrate_parser.add_subparsers(dest="migration_command", required=True)
@@ -89,6 +120,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "budget": {
                     "target_bytes": args.target_bytes,
                     "max_bytes": args.max_bytes,
+                    "max_content_bytes": args.max_content_bytes,
                     "target_items": args.target_items,
                     "max_items": args.max_items,
                     "max_estimated_tokens": args.max_estimated_tokens,
@@ -105,6 +137,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "doctor":
             _print(inspect_runtime(Path(args.wiki)))
             return 0
+        if args.command == "publish-snapshot":
+            _print(
+                publish_snapshot(
+                    Path(args.wiki),
+                    alias=args.alias,
+                    output_root=Path(args.output_root),
+                )
+            )
+            return 0
+        if args.command == "resolve-snapshot":
+            _print(
+                resolve_snapshot(
+                    alias=args.alias,
+                    output_root=Path(args.output_root),
+                ).to_dict()
+            )
+            return 0
+        if args.command == "compile-kernel":
+            _print(
+                compile_kernel_projection(
+                    alias=args.alias,
+                    output_root=Path(args.output_root),
+                    sources=_kernel_sources(args.source),
+                ).to_dict()
+            )
+            return 0
         if args.command == "migrate":
             if args.migration_command == "inspect":
                 payload = inspect_migration(Path(args.wiki)).to_dict()
@@ -120,7 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise AssertionError(f"Unhandled migration command: {args.migration_command}")
             _print(payload)
             return 0 if payload.get("status") != "failed" else 3
-    except (ContractError, MigrationError) as exc:
+    except (ContractError, KernelProjectionError, MigrationError, SnapshotError) as exc:
         print(json.dumps({"error": exc.to_dict()}, ensure_ascii=False), file=sys.stderr)
         return 2
     except Exception as exc:
@@ -132,6 +190,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"error": error}), file=sys.stderr)
         return 1
     raise AssertionError(f"Unhandled command: {args.command}")
+
+
+def _kernel_sources(values: Sequence[str]) -> tuple[dict, ...]:
+    sources: list[dict] = []
+    for index, value in enumerate(values):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise KernelProjectionError(
+                "KERNEL_SOURCE_JSON_INVALID",
+                "Kernel --source must be valid JSON",
+                {"source_index": index},
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise KernelProjectionError(
+                "KERNEL_SOURCE_JSON_INVALID",
+                "Kernel --source JSON must be an object",
+                {"source_index": index},
+            )
+        sources.append(parsed)
+    return tuple(sources)
 
 
 def _print(payload: dict) -> None:

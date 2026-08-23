@@ -67,6 +67,33 @@ class _AtomicProvider:
         ]
 
 
+class _ContentProvider:
+    name = "content-test"
+
+    def __init__(self, content: str, *, atomic: bool = False):
+        self.content = content
+        self.atomic = atomic
+
+    def collect(self, _context):
+        return [
+            CandidateEvidence(
+                id="content:test",
+                provider=self.name,
+                route="content_budget_fixture",
+                page="fixture.md",
+                source=None,
+                locator={"section": "Exact content boundary"},
+                content=self.content,
+                roles=("answer", "authority"),
+                selection_signals=("content_budget_fixture",),
+                authored_state="current",
+                derived_flags=(),
+                authority_signals=("test_fixture",),
+                atomic=self.atomic,
+            )
+        ]
+
+
 class ProgressiveSelectionTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -446,6 +473,102 @@ class ProgressiveSelectionTest(unittest.TestCase):
             [(item.candidate_id, item.reason) for item in omissions],
             [("graph:path-a-b", "byte_limit")],
         )
+
+    def test_content_budget_accepts_exact_utf8_boundary_without_truncation(self):
+        isolated_root = self.root / "content-budget"
+        isolated_root.mkdir()
+        content = "é" * 2048
+        request = CompileRequest.from_mapping(
+            {
+                "alias": "test",
+                "question": "Who owns traversal?",
+                "budget": {
+                    "target_bytes": 20_000,
+                    "max_bytes": 20_000,
+                    "target_items": 4,
+                    "max_items": 4,
+                    "max_content_bytes": 4096,
+                },
+            }
+        )
+
+        response = compile_context(
+            isolated_root,
+            request,
+            extra_providers=(_ContentProvider(content),),
+        ).to_dict()
+
+        evidence = next(item for item in response["evidence"] if item["id"] == "content:test")
+        self.assertEqual(evidence["content"], content)
+        self.assertFalse(evidence["truncated"])
+        self.assertEqual(response["budget"]["limits"]["max_content_bytes"], 4096)
+        self.assertEqual(response["budget"]["content_bytes"], 4096)
+
+    def test_content_budget_deterministically_truncates_non_atomic_evidence(self):
+        isolated_root = self.root / "content-truncation"
+        isolated_root.mkdir()
+        request = CompileRequest.from_mapping(
+            {
+                "alias": "test",
+                "question": "Who owns traversal?",
+                "budget": {
+                    "target_bytes": 20_000,
+                    "max_bytes": 20_000,
+                    "target_items": 4,
+                    "max_items": 4,
+                    "max_content_bytes": 4096,
+                },
+            }
+        )
+
+        response = compile_context(
+            isolated_root,
+            request,
+            extra_providers=(_ContentProvider("é" * 3000),),
+        ).to_dict()
+
+        evidence = next(item for item in response["evidence"] if item["id"] == "content:test")
+        delivered_bytes = len(evidence["content"].encode("utf-8"))
+        self.assertTrue(evidence["truncated"])
+        self.assertTrue(evidence["content"].endswith("\n\n[truncated]"))
+        self.assertIn("content_limit_excerpt", evidence["selection_reasons"])
+        self.assertLessEqual(delivered_bytes, 4096)
+        self.assertEqual(response["budget"]["content_bytes"], delivered_bytes)
+        self.assertLessEqual(
+            len(json.dumps(response, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")),
+            response["budget"]["limits"]["max_bytes"],
+        )
+
+    def test_content_budget_omits_atomic_evidence_that_cannot_fit(self):
+        isolated_root = self.root / "atomic-content-budget"
+        isolated_root.mkdir()
+        request = CompileRequest.from_mapping(
+            {
+                "alias": "test",
+                "question": "Who owns traversal?",
+                "budget": {
+                    "target_bytes": 20_000,
+                    "max_bytes": 20_000,
+                    "target_items": 4,
+                    "max_items": 4,
+                    "max_content_bytes": 4096,
+                },
+            }
+        )
+
+        response = compile_context(
+            isolated_root,
+            request,
+            extra_providers=(_ContentProvider("a" * 4097, atomic=True),),
+        ).to_dict()
+
+        self.assertNotIn("content:test", {item["id"] for item in response["evidence"]})
+        omission = next(item for item in response["omissions"] if item["candidate_id"] == "content:test")
+        self.assertEqual(omission["reason"], "content_byte_limit")
+        self.assertEqual(omission["estimated_bytes"], 4097)
+        self.assertEqual(response["budget"]["content_bytes"], 0)
+        self.assertEqual(response["stop"]["reason"], "content_budget_exhausted")
+        self.assertIn("content:test", response["continuation"]["remaining_candidate_ids"])
 
     def test_loci_selected_graph_paths_remain_selected_within_target(self):
         request = CompileRequest.from_mapping(

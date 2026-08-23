@@ -109,6 +109,7 @@ def compile_context(
         for item in diagnostics
     )
     byte_limited = any(item.reason == "byte_limit" for item in omissions)
+    content_limited = any(item.reason == "content_byte_limit" for item in omissions)
     item_limited = any(item.reason == "item_limit" for item in omissions)
     if sufficient:
         stop_reason = "sufficient"
@@ -116,6 +117,9 @@ def compile_context(
     elif not candidates:
         stop_reason = "provider_degraded" if provider_degraded else "no_evidence"
         stop_detail = "No candidate evidence was available"
+    elif content_limited:
+        stop_reason = "content_budget_exhausted"
+        stop_detail = "Evidence content byte ceiling was reached before coverage was complete"
     elif byte_limited:
         stop_reason = "byte_budget_exhausted"
         stop_detail = "Hard byte ceiling was reached before coverage was complete"
@@ -130,7 +134,9 @@ def compile_context(
         stop_detail = "Available candidates did not cover every required role"
 
     hard_omissions = tuple(
-        item.candidate_id for item in omissions if item.reason in {"byte_limit", "item_limit"}
+        item.candidate_id
+        for item in omissions
+        if item.reason in {"byte_limit", "content_byte_limit", "item_limit"}
     )
     continuation = None
     if not sufficient and hard_omissions:
@@ -154,9 +160,11 @@ def compile_context(
         budget=BudgetUsage(
             target_bytes=request.budget.target_bytes,
             max_bytes=request.budget.max_bytes,
+            max_content_bytes=request.budget.max_content_bytes,
             target_items=request.budget.target_items,
             max_items=request.budget.max_items,
             evidence_bytes=evidence_bytes,
+            content_bytes=sum(len(item.content.encode("utf-8")) for item in selected),
             envelope_bytes=0,
             items=len(selected),
             estimated_tokens=(evidence_bytes + 3) // 4,

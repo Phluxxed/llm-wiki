@@ -41,6 +41,7 @@ def select_candidates(
     omissions: list[Omission] = []
     seen: set[tuple] = set()
     used_bytes = 0
+    used_content_bytes = 0
 
     for candidate in ordered:
         locator_identity = json.dumps(candidate.locator, sort_keys=True, separators=(",", ":"))
@@ -71,6 +72,17 @@ def select_candidates(
         if len(selected) >= request.budget.max_items:
             omissions.append(Omission(candidate.id, "item_limit", record.byte_cost))
             continue
+        if request.budget.max_content_bytes is not None:
+            remaining_content_bytes = request.budget.max_content_bytes - used_content_bytes
+            if _content_bytes(record.content) > remaining_content_bytes:
+                if record.atomic:
+                    omissions.append(Omission(candidate.id, "content_byte_limit", _content_bytes(record.content)))
+                    continue
+                fitted_content = _fit_record_to_content(record, remaining_content_bytes)
+                if fitted_content is None:
+                    omissions.append(Omission(candidate.id, "content_byte_limit", _content_bytes(record.content)))
+                    continue
+                record = fitted_content
         remaining_bytes = request.budget.max_bytes - used_bytes
         if record.byte_cost > remaining_bytes:
             if candidate.atomic:
@@ -83,6 +95,7 @@ def select_candidates(
             record = fitted
         selected.append(record)
         used_bytes += record.byte_cost
+        used_content_bytes += _content_bytes(record.content)
 
     selected_ids = {item.id for item in selected}
     omitted_ids = {item.candidate_id for item in omissions}
@@ -379,7 +392,13 @@ def _with_reporting(
 
 
 def _prioritize_omissions(omissions: tuple[Omission, ...]) -> tuple[Omission, ...]:
-    priority = {"byte_limit": 0, "item_limit": 1, "state_mismatch": 2, "duplicate": 3}
+    priority = {
+        "byte_limit": 0,
+        "content_byte_limit": 0,
+        "item_limit": 1,
+        "state_mismatch": 2,
+        "duplicate": 3,
+    }
     return tuple(
         item
         for _, item in sorted(
@@ -410,6 +429,7 @@ def _with_budget_accounting(response: CompiledContext) -> CompiledContext:
     current = response
     while True:
         evidence_bytes = sum(item.byte_cost for item in current.evidence)
+        content_bytes = sum(len(item.content.encode("utf-8")) for item in current.evidence)
         total_bytes = _serialized_size(current)
         envelope_bytes = total_bytes - evidence_bytes
         estimated_tokens = (total_bytes + 3) // 4
@@ -427,6 +447,7 @@ def _with_budget_accounting(response: CompiledContext) -> CompiledContext:
         )
         if (
             evidence_bytes == current.budget.evidence_bytes
+            and content_bytes == current.budget.content_bytes
             and envelope_bytes == current.budget.envelope_bytes
             and estimated_tokens == current.budget.estimated_tokens
             and len(current.evidence) == current.budget.items
@@ -438,6 +459,7 @@ def _with_budget_accounting(response: CompiledContext) -> CompiledContext:
             budget=replace(
                 current.budget,
                 evidence_bytes=evidence_bytes,
+                content_bytes=content_bytes,
                 envelope_bytes=envelope_bytes,
                 items=len(current.evidence),
                 estimated_tokens=estimated_tokens,
@@ -541,6 +563,29 @@ def _fit_record(record: EvidenceRecord, max_bytes: int) -> EvidenceRecord | None
         else:
             high = middle - 1
     return best if best.content else None
+
+
+def _fit_record_to_content(record: EvidenceRecord, max_content_bytes: int) -> EvidenceRecord | None:
+    reasons = tuple(dict.fromkeys((*record.selection_reasons, "content_limit_excerpt")))
+    source = record.content.removesuffix("\n\n[truncated]") if record.truncated else record.content
+    low = 0
+    high = len(source)
+    best: EvidenceRecord | None = None
+    while low <= high:
+        middle = (low + high) // 2
+        content = _excerpt(source, middle)
+        if content and _content_bytes(content) <= max_content_bytes:
+            best = _with_record_cost(
+                replace(record, content=content, selection_reasons=reasons, truncated=True, byte_cost=0)
+            )
+            low = middle + 1
+        else:
+            high = middle - 1
+    return best
+
+
+def _content_bytes(content: str) -> int:
+    return len(content.encode("utf-8"))
 
 
 def _excerpt(content: str, limit: int) -> str:

@@ -1,0 +1,136 @@
+{
+  "name": "anvil_compiled_evidence_v1",
+  "top_level_fields": [
+    "kind",
+    "contract_version",
+    "wiki",
+    "query",
+    "evidence",
+    "omissions",
+    "coverage",
+    "budget",
+    "stop",
+    "continuation",
+    "diagnostics",
+    "reporting"
+  ],
+  "wiki_fields": [
+    "alias",
+    "schema_version",
+    "runtime_contract"
+  ],
+  "query_fields": [
+    "question",
+    "shapes",
+    "state_view",
+    "resolved_seeds"
+  ],
+  "evidence_record_fields": [
+    "id",
+    "provider",
+    "route",
+    "page",
+    "source",
+    "locator",
+    "content",
+    "roles",
+    "authored_state",
+    "derived_flags",
+    "authority_signals",
+    "selection_reasons",
+    "byte_cost",
+    "truncated",
+    "atomic"
+  ],
+  "omission_fields": [
+    "candidate_id",
+    "reason",
+    "estimated_bytes"
+  ],
+  "coverage_fields": [
+    "required_roles",
+    "covered_roles",
+    "uncovered_roles"
+  ],
+  "budget_fields": [
+    "limits",
+    "target_exceeded_for_coverage",
+    "evidence_bytes",
+    "envelope_bytes",
+    "items",
+    "estimated_tokens"
+  ],
+  "budget_limit_fields": [
+    "target_bytes",
+    "max_bytes",
+    "target_items",
+    "max_items",
+    "max_estimated_tokens"
+  ],
+  "stop_fields": [
+    "reason",
+    "sufficient",
+    "detail"
+  ],
+  "continuation_fields": [
+    "reason",
+    "uncovered_roles",
+    "remaining_candidate_ids",
+    "remaining_candidate_count"
+  ],
+  "diagnostic_fields": [
+    "code",
+    "message",
+    "provider",
+    "details"
+  ],
+  "reporting_fields": [
+    "omissions",
+    "diagnostics"
+  ],
+  "reporting_count_fields": [
+    "total",
+    "returned"
+  ],
+  "expectations": {
+    "kind": "compiled_context",
+    "contract_version": "1",
+    "alias": "anvil-fixture",
+    "schema_version": "1",
+    "runtime_contract": "2",
+    "question": "How are Runtime and Adapter related?",
+    "shapes": [
+      "relationship"
+    ],
+    "state_view": "current",
+    "resolved_seeds": [
+      "systems/runtime.md"
+    ],
+    "selected_provider": "seed",
+    "selected_route": "exact_seed",
+    "selected_page": "systems/runtime.md",
+    "selected_authored_state": "current",
+    "selected_truncated": true,
+    "required_roles": [
+      "endpoint",
+      "bridge"
+    ],
+    "covered_roles": [
+      "endpoint"
+    ],
+    "uncovered_roles": [
+      "bridge"
+    ],
+    "target_bytes": 1,
+    "max_bytes": 6000,
+    "target_items": 1,
+    "max_items": 1,
+    "target_exceeded_for_coverage": true,
+    "stop_reason": "item_budget_exhausted",
+    "stop_sufficient": false,
+    "continuation_reason": "hard_limit_reached",
+    "diagnostic_code": "SOURCE_NOT_FOUND",
+    "diagnostic_provider": "source",
+    "omission_reason": "item_limit"
+  }
+}
