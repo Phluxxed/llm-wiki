@@ -57,6 +57,8 @@ _BINARY_SOURCE_SUFFIXES = {
     ".ppt", ".pptx", ".webp", ".xls", ".xlsx",
 }
 BODY_LINK_RE = re.compile(r'\[(?:[^\]]+)\]\(([^)#\s]+\.md)\)')
+PROJECT_ID_RE = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*\Z")
+NORMALIZED_REMOTE_RE = re.compile(r"[a-z0-9._-]+(?:/[a-z0-9._-]+)+\Z")
 
 
 # ── parsing ───────────────────────────────────────────────────────────────────
@@ -68,7 +70,8 @@ def parse_frontmatter(text: str) -> dict:
     if end == -1:
         return {}
     try:
-        return yaml.safe_load(text[3:end]) or {}
+        value = yaml.safe_load(text[3:end])
+        return value if isinstance(value, dict) else {}
     except yaml.YAMLError:
         return {}
 
@@ -106,6 +109,247 @@ def collect_pages() -> list[dict]:
             continue
         pages.append({"file": str(rel), "fm": fm, "text": text, "sections": extract_sections(text)})
     return pages
+
+
+def _project_issue(file: str, check: str, detail: str, severity: str = "error") -> dict:
+    """Create the stable, machine-readable shape used by project lint checks."""
+    return {"file": file, "check": check, "detail": detail, "severity": severity}
+
+
+def _valid_project_id(value) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) <= 64
+        and bool(PROJECT_ID_RE.fullmatch(value))
+    )
+
+
+def _normalized_alias(value: str) -> str:
+    return value.strip().casefold()
+
+
+def _valid_normalized_remote(value) -> bool:
+    if not isinstance(value, str) or not value or len(value) > 1024:
+        return False
+    if not value.isascii() or value != value.lower() or not NORMALIZED_REMOTE_RE.fullmatch(value):
+        return False
+    segments = value.split("/")
+    return all(segment not in {"", ".", ".."} for segment in segments)
+
+
+def check_project_metadata(pages: list[dict]) -> list[dict]:
+    """Validate Project Identity and Project Membership frontmatter.
+
+    This intentionally remains a lint concern: the compiler can exclude bad
+    metadata, while lint gives maintainers the exact page and repair reason.
+    """
+    issues: list[dict] = []
+    project_ids: dict[str, list[str]] = {}
+    aliases: dict[str, list[str]] = {}
+    remotes: dict[str, list[str]] = {}
+
+    for page in sorted(pages, key=lambda item: item["file"]):
+        file = page["file"]
+        fm = page["fm"]
+        if not isinstance(fm, dict):
+            continue
+        page_type = fm.get("type")
+        has_identity = "identity" in fm
+
+        if page_type != "project":
+            if has_identity:
+                issues.append(_project_issue(
+                    file,
+                    "project_identity",
+                    "identity is only valid on a page with type: project",
+                ))
+            continue
+
+        if "projects" in fm:
+            issues.append(_project_issue(
+                file,
+                "project_membership",
+                "project pages implicitly belong to their identity.project_id and must not declare projects",
+            ))
+
+        if not has_identity:
+            issues.append(_project_issue(
+                file,
+                "project_identity",
+                "project page has no identity; add a resolvable identity (migration warning)",
+                "warning",
+            ))
+            continue
+
+        identity = fm.get("identity")
+        if not isinstance(identity, dict):
+            issues.append(_project_issue(
+                file,
+                "project_identity",
+                "identity must be a mapping with project_id, aliases, and remotes",
+            ))
+            continue
+
+        identity_valid = True
+        project_id = identity.get("project_id")
+        if not _valid_project_id(project_id):
+            issues.append(_project_issue(
+                file,
+                "project_identity",
+                "identity.project_id must be a lowercase snake-case identifier of at most 64 characters",
+            ))
+            identity_valid = False
+
+        parsed_aliases: list[str] = []
+        aliases_value = identity.get("aliases", [])
+        if not isinstance(aliases_value, list):
+            issues.append(_project_issue(file, "project_identity", "identity.aliases must be a list"))
+            identity_valid = False
+        elif len(aliases_value) > 32:
+            issues.append(_project_issue(file, "project_identity", "identity.aliases may contain at most 32 aliases"))
+            identity_valid = False
+        else:
+            seen_aliases: set[str] = set()
+            for alias in aliases_value:
+                if not isinstance(alias, str) or not alias.strip() or len(alias) > 255:
+                    issues.append(_project_issue(
+                        file,
+                        "project_identity",
+                        "each identity.aliases entry must be a non-empty string of at most 255 characters",
+                    ))
+                    identity_valid = False
+                    continue
+                normalized = _normalized_alias(alias)
+                if normalized in seen_aliases:
+                    issues.append(_project_issue(
+                        file,
+                        "project_identity",
+                        f"identity.aliases contains duplicate value after trimming/case-folding: {normalized!r}",
+                    ))
+                    identity_valid = False
+                seen_aliases.add(normalized)
+                parsed_aliases.append(normalized)
+
+        parsed_remotes: list[str] = []
+        remotes_value = identity.get("remotes", [])
+        if not isinstance(remotes_value, list):
+            issues.append(_project_issue(file, "project_identity", "identity.remotes must be a list"))
+            identity_valid = False
+        elif len(remotes_value) > 16:
+            issues.append(_project_issue(file, "project_identity", "identity.remotes may contain at most 16 remotes"))
+            identity_valid = False
+        else:
+            seen_remotes: set[str] = set()
+            for remote in remotes_value:
+                if not _valid_normalized_remote(remote):
+                    issues.append(_project_issue(
+                        file,
+                        "project_identity",
+                        "each identity.remotes entry must be a credential-free normalized host/path of at most 1,024 characters",
+                    ))
+                    identity_valid = False
+                    continue
+                if remote in seen_remotes:
+                    issues.append(_project_issue(
+                        file,
+                        "project_identity",
+                        f"identity.remotes contains duplicate normalized remote: {remote!r}",
+                    ))
+                    identity_valid = False
+                seen_remotes.add(remote)
+                parsed_remotes.append(remote)
+
+        if (
+            isinstance(aliases_value, list)
+            and isinstance(remotes_value, list)
+            and not parsed_aliases
+            and not parsed_remotes
+        ):
+            issues.append(_project_issue(
+                file,
+                "project_identity",
+                "identity requires project_id plus at least one alias or remote",
+            ))
+            identity_valid = False
+
+        if identity_valid:
+            project_ids.setdefault(project_id, []).append(file)
+            for alias in parsed_aliases:
+                aliases.setdefault(alias, []).append(file)
+            for remote in parsed_remotes:
+                remotes.setdefault(remote, []).append(file)
+
+    conflicting_identity_files: set[str] = set()
+    for value, files in sorted(project_ids.items()):
+        if len(files) > 1:
+            conflicting_identity_files.update(files)
+            for file in files:
+                others = ", ".join(other for other in files if other != file)
+                issues.append(_project_issue(
+                    file,
+                    "project_duplicate_id",
+                    f"project_id {value!r} collides with project page(s): {others}",
+                ))
+    for value, files in sorted(aliases.items()):
+        if len(files) > 1:
+            conflicting_identity_files.update(files)
+            for file in files:
+                others = ", ".join(other for other in files if other != file)
+                issues.append(_project_issue(
+                    file,
+                    "project_duplicate_alias",
+                    f"normalized alias {value!r} collides with project page(s): {others}",
+                ))
+    for value, files in sorted(remotes.items()):
+        if len(files) > 1:
+            conflicting_identity_files.update(files)
+            for file in files:
+                others = ", ".join(other for other in files if other != file)
+                issues.append(_project_issue(
+                    file,
+                    "project_duplicate_remote",
+                    f"normalized remote {value!r} collides with project page(s): {others}",
+                ))
+
+    resolvable_ids = {
+        project_id
+        for project_id, files in project_ids.items()
+        if len(files) == 1 and files[0] not in conflicting_identity_files
+    }
+    for page in sorted(pages, key=lambda item: item["file"]):
+        file = page["file"]
+        fm = page["fm"]
+        if not isinstance(fm, dict) or "projects" not in fm:
+            continue
+        # Project pages already received the explicit prohibition above.
+        if fm.get("type") == "project":
+            continue
+        projects = fm.get("projects")
+        if not isinstance(projects, list):
+            issues.append(_project_issue(file, "project_membership", "projects must be a non-empty list of project IDs"))
+            continue
+        if not projects:
+            issues.append(_project_issue(file, "project_membership", "projects must be a non-empty list of project IDs"))
+            continue
+        if len(projects) > 16:
+            issues.append(_project_issue(file, "project_membership", "projects may contain at most 16 project IDs"))
+        if any(not _valid_project_id(project_id) for project_id in projects):
+            issues.append(_project_issue(file, "project_membership", "every projects entry must be a valid lowercase snake-case project ID"))
+        valid_project_entries = [project_id for project_id in projects if isinstance(project_id, str)]
+        if len(valid_project_entries) != len(set(valid_project_entries)):
+            issues.append(_project_issue(file, "project_membership", "projects must not contain duplicate project IDs"))
+        dangling = sorted({
+            project_id for project_id in projects
+            if _valid_project_id(project_id) and project_id not in resolvable_ids
+        })
+        if dangling:
+            issues.append(_project_issue(
+                file,
+                "project_dangling_membership",
+                f"projects entries have no matching valid project page: {', '.join(dangling)}",
+            ))
+
+    return issues
 
 
 def collect_source_files() -> set[str]:
@@ -240,7 +484,7 @@ def parse_risk_open_rows(text: str) -> list[str]:
 # ── checks ────────────────────────────────────────────────────────────────────
 
 def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str], all_md_paths: set[str]) -> list[dict]:
-    issues = []
+    issues = check_project_metadata(pages)
     wiki_files = {p["file"] for p in pages}
 
     for p in pages:
@@ -397,6 +641,12 @@ CHECK_LABELS = {
     "index_dead_link":    "Dead index link",
     "okf_no_frontmatter": "OKF: missing frontmatter",
     "okf_version_missing": "OKF: index missing okf_version",
+    "project_identity": "Project identity",
+    "project_membership": "Project membership",
+    "project_duplicate_id": "Duplicate project ID",
+    "project_duplicate_alias": "Duplicate project alias",
+    "project_duplicate_remote": "Duplicate project remote",
+    "project_dangling_membership": "Dangling project membership",
 }
 
 

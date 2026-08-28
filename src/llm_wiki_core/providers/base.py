@@ -37,6 +37,10 @@ class ProviderContext:
     shapes: tuple[str, ...]
     required_roles: tuple[str, ...]
     resolved_seeds: tuple[str, ...]
+    # Internal project anchors used for discovery.  They are intentionally
+    # separate from resolved_seeds so providers do not apply explicit-seed
+    # output semantics to the compiler's scope seed.
+    scope_seeds: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

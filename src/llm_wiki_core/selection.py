@@ -26,6 +26,7 @@ _PROVIDER_ORDER = {
     "graph": 4,
     "source": 5,
     "text": 6,
+    "project": 7,
 }
 _MAX_RETURNED_OMISSIONS = 16
 _MAX_RETURNED_DIAGNOSTICS = 16
@@ -47,8 +48,21 @@ def select_candidates(
         locator_identity = json.dumps(candidate.locator, sort_keys=True, separators=(",", ":"))
         identity = (candidate.page, candidate.source, locator_identity, candidate.content)
         if identity in seen:
-            omissions.append(Omission(candidate.id, "duplicate", _candidate_cost(candidate)))
-            continue
+            # A project fallback may intentionally share a whole-body span
+            # with an internal graph discovery candidate.  Keep it when its
+            # normal query-shape roles still cover an uncovered role; the
+            # fallback's mandatory status must not be defeated by deduping on
+            # locator/content alone.  Preserve the existing duplicate rule
+            # for every other provider and for already-covered fallbacks.
+            duplicate_roles = set(candidate.roles) & set(coverage(required, selected).uncovered_roles)
+            is_useful_project_fallback = (
+                candidate.provider == "project"
+                and "project_orientation_fallback" in candidate.selection_signals
+                and duplicate_roles
+            )
+            if not is_useful_project_fallback:
+                omissions.append(Omission(candidate.id, "duplicate", _candidate_cost(candidate)))
+                continue
         seen.add(identity)
         compatibility = state_compatibility(candidate.authored_state, request.state_view)
         if compatibility == "lineage_only" and "lineage" not in required:
@@ -62,8 +76,13 @@ def select_candidates(
             and record.byte_cost <= request.budget.target_bytes - used_bytes
         )
         supplementary_retrieval = _is_query_selected_graph_evidence(candidate) and within_target
+        mandatory_project_fallback = (
+            candidate.provider == "project"
+            and "project_orientation_fallback" in candidate.selection_signals
+        )
         if (
             candidate.provider != "seed"
+            and not mandatory_project_fallback
             and not (set(record.roles) & uncovered)
             and not supplementary_retrieval
         ):

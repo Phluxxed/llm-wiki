@@ -561,12 +561,61 @@ CompiledTemporalQuery = Annotated[
 ]
 
 
+class NotRequestedProjectResolution(StrictOutputModel):
+    status: Literal["not_requested"]
+
+
+class UnknownProjectResolution(StrictOutputModel):
+    status: Literal["unknown"]
+
+
+class MatchedProjectResolution(StrictOutputModel):
+    status: Literal["matched"]
+    project_id: str
+    page: str
+    matched_by: Literal["remote", "alias"]
+
+
+class ProjectResolutionCandidate(StrictOutputModel):
+    project_id: str
+    page: str
+
+
+class AmbiguousProjectResolution(StrictOutputModel):
+    status: Literal["ambiguous"]
+    matched_by: Literal["remote", "alias"]
+    candidates: list[ProjectResolutionCandidate]
+    candidate_count: int
+
+
+CompiledProjectResolution = Annotated[
+    NotRequestedProjectResolution
+    | UnknownProjectResolution
+    | MatchedProjectResolution
+    | AmbiguousProjectResolution,
+    Field(discriminator="status"),
+]
+
+
+class ProjectExpansion(StrictOutputModel):
+    project_id: str
+    reason: Literal["question_identity_match", "explicit_seed_membership"]
+
+
+class CompiledProjectScope(StrictOutputModel):
+    active_project_ids: list[str]
+    anchor_page: str | None
+    expansions: list[ProjectExpansion]
+
+
 class CompiledQuery(StrictOutputModel):
     question: str
     shapes: list[str]
     state_view: Literal["current", "historical", "transition", "all"]
     resolved_seeds: list[str]
     temporal: CompiledTemporalQuery | None = None
+    project_resolution: CompiledProjectResolution | None = None
+    project_scope: CompiledProjectScope | None = None
 
 
 class CompiledEvidence(StrictOutputModel):
@@ -605,6 +654,7 @@ class CompiledBudgetLimits(StrictOutputModel):
     target_items: int
     max_items: int
     max_estimated_tokens: int | None
+    max_content_bytes: int | None = None
 
 
 class CompiledBudgetUsage(StrictOutputModel):
@@ -614,12 +664,14 @@ class CompiledBudgetUsage(StrictOutputModel):
     envelope_bytes: int
     items: int
     estimated_tokens: int
+    content_bytes: int | None = None
 
 
 class CompiledStop(StrictOutputModel):
     reason: Literal[
         "sufficient",
         "byte_budget_exhausted",
+        "content_budget_exhausted",
         "item_budget_exhausted",
         "provider_degraded",
         "candidate_exhausted",
@@ -654,7 +706,7 @@ class CompiledReporting(StrictOutputModel):
 
 class WikiCompileContextOutput(SuccessOrErrorOutput):
     kind: Literal["compiled_context"] | None = None
-    contract_version: Literal["1", "2"] | None = None
+    contract_version: Literal["1", "2", "3"] | None = None
     wiki: CompiledWiki | None = None
     query: CompiledQuery | None = None
     evidence: list[CompiledEvidence] | None = None
@@ -678,6 +730,14 @@ class WikiCompileContextOutput(SuccessOrErrorOutput):
             has_temporal = "temporal" in self.query.model_fields_set
             if self.contract_version == "1" and has_temporal:
                 raise ValueError("compiled context v1 forbids query.temporal")
+            has_project_resolution = "project_resolution" in self.query.model_fields_set
+            has_project_scope = "project_scope" in self.query.model_fields_set
+            if self.contract_version in {"1", "2"} and (has_project_resolution or has_project_scope):
+                raise ValueError("compiled context v1/v2 forbids project metadata")
+            if self.contract_version == "3" and (
+                not has_project_resolution or self.query.project_resolution is None
+            ):
+                raise ValueError("compiled context v3 requires query.project_resolution")
         return self
 
 

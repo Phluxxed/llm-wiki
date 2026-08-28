@@ -255,6 +255,25 @@ class LociGraphProviderTest(unittest.TestCase):
         self.assertEqual(result.candidates, ())
         self.assertEqual(result.diagnostics[0].code, "LOCI_GRAPH_RESULT_INVALID")
 
+    def test_scope_only_explicit_response_is_ancillary_not_relationship_bridge(self):
+        base_context = self.context()
+        context = replace(
+            base_context,
+            request=replace(base_context.request, question="How do pieces interoperate?", seeds=()),
+            resolved_seeds=(),
+            scope_seeds=("projects/brain.md",),
+        )
+        provider = LociGraphProvider(gateway=FakeGraphGateway(self.response()))
+
+        result = provider.collect(context)
+
+        candidate = next(
+            item for item in result.candidates if item.route == "evidence_backed_path"
+        )
+        self.assertEqual(candidate.roles, ("support",))
+        self.assertEqual(candidate.locator["relationship_support"], "ancillary_path")
+        self.assertIn("relationship_ancillary_path", candidate.selection_signals)
+
     def test_inferred_anchor_without_matched_question_terms_is_rejected(self):
         response = self.inferred_response(crosses_subjects=True)
         response["anchors"][0]["reason"]["matched_terms"] = []
@@ -401,6 +420,29 @@ class LociGraphProviderTest(unittest.TestCase):
         )
 
         self.assertNotIn("seed_ids", arguments)
+
+    def test_scope_seed_retrieval_joins_existing_loci_seed_argument(self):
+        context = replace(
+            self.context(),
+            resolved_seeds=("systems/llm-wiki.md", "projects/brain.md"),
+            scope_seeds=("projects/brain.md", "concepts/runtime.md"),
+        )
+
+        arguments = _retrieve_arguments(
+            context,
+            self.runtime_root / "mirror",
+            self._page_roots(context),
+        )
+
+        self.assertEqual(
+            arguments["seed_ids"],
+            [
+                "systems/llm-wiki.md::root#section",
+                "projects/brain.md::root#section",
+                "concepts/runtime.md::root#section",
+            ],
+        )
+        self.assertNotIn("scope_seed_ids", arguments)
 
     def test_fresh_process_mcp_builds_external_graph_mirror_and_retrieves_path(self):
         server = self.runtime_root / "fake_loci_graph_mcp.py"

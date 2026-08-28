@@ -527,5 +527,153 @@ class OKFConformanceTest(unittest.TestCase):
         self.assertEqual(self._run(), [])
 
 
+class ProjectMetadataCheckTest(unittest.TestCase):
+    """Project Identity and Project Membership are lint-owned metadata."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.wiki_root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _fm(self, **overrides):
+        fm = {
+            "title": "X", "category": "X", "status": "Live", "owner": "x", "tags": [],
+            "created": "2026-08-27", "last_reviewed": "2026-08-27",
+            "type": "policy", "description": "d", "timestamp": "2026-08-27T00:00:00Z",
+        }
+        fm.update(overrides)
+        return fm
+
+    def _run(self):
+        lint = reload_lint_with_root(self.wiki_root)
+        pages = lint.collect_pages()
+        all_md = lint.collect_all_md_paths()
+        return [
+            issue for issue in lint.run_checks(pages, set(), set(), all_md)
+            if issue["check"].startswith("project_")
+        ]
+
+    def test_valid_identity_and_membership_pass(self):
+        write_md(
+            self.wiki_root / "projects/alpha.md",
+            self._fm(type="project", identity={
+                "project_id": "alpha",
+                "aliases": ["Alpha"],
+                "remotes": ["github.com/example/alpha"],
+            }),
+            "",
+        )
+        write_md(self.wiki_root / "notes/n.md", self._fm(projects=["alpha"]), "")
+        self.assertEqual(self._run(), [])
+
+    def test_project_without_identity_is_migration_warning(self):
+        write_md(self.wiki_root / "projects/alpha.md", self._fm(type="project"), "")
+        issues = self._run()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["check"], "project_identity")
+        self.assertEqual(issues[0]["severity"], "warning")
+        self.assertIn("identity", issues[0]["detail"])
+
+    def test_malformed_identity_is_error(self):
+        write_md(self.wiki_root / "projects/alpha.md", self._fm(type="project", identity="alpha"), "")
+        issues = self._run()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["check"], "project_identity")
+        self.assertEqual(issues[0]["severity"], "error")
+        self.assertIn("mapping", issues[0]["detail"])
+
+    def test_identity_on_non_project_is_error(self):
+        write_md(
+            self.wiki_root / "notes/n.md",
+            self._fm(identity={"project_id": "alpha", "aliases": ["alpha"]}),
+            "",
+        )
+        issues = self._run()
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["check"], "project_identity")
+        self.assertEqual(issues[0]["severity"], "error")
+        self.assertIn("type: project", issues[0]["detail"])
+
+    def test_null_scalar_empty_duplicate_and_dangling_membership_are_errors(self):
+        write_md(
+            self.wiki_root / "projects/alpha.md",
+            self._fm(type="project", identity={"project_id": "alpha", "aliases": ["alpha"]}),
+            "",
+        )
+        write_md(self.wiki_root / "notes/null.md", self._fm(projects=None), "")
+        write_md(self.wiki_root / "notes/scalar.md", self._fm(projects="alpha"), "")
+        write_md(self.wiki_root / "notes/empty.md", self._fm(projects=[]), "")
+        write_md(self.wiki_root / "notes/duplicate.md", self._fm(projects=["alpha", "alpha"]), "")
+        write_md(self.wiki_root / "notes/dangling.md", self._fm(projects=["missing"]), "")
+        issues = self._run()
+        self.assertEqual(
+            {(issue["file"], issue["check"]) for issue in issues},
+            {
+                ("notes/null.md", "project_membership"),
+                ("notes/scalar.md", "project_membership"),
+                ("notes/empty.md", "project_membership"),
+                ("notes/duplicate.md", "project_membership"),
+                ("notes/dangling.md", "project_dangling_membership"),
+            },
+        )
+        self.assertTrue(all(issue["severity"] == "error" for issue in issues))
+
+    def test_project_id_alias_and_remote_collisions_are_errors(self):
+        identity_a = {
+            "project_id": "alpha",
+            "aliases": ["Shared"],
+            "remotes": ["github.com/example/shared"],
+        }
+        identity_b = {
+            "project_id": "alpha",
+            "aliases": [" shared "],
+            "remotes": ["github.com/example/shared"],
+        }
+        write_md(self.wiki_root / "projects/a.md", self._fm(type="project", identity=identity_a), "")
+        write_md(self.wiki_root / "projects/b.md", self._fm(type="project", identity=identity_b), "")
+        checks = {issue["check"] for issue in self._run()}
+        self.assertIn("project_duplicate_id", checks)
+        self.assertIn("project_duplicate_alias", checks)
+        self.assertIn("project_duplicate_remote", checks)
+
+    def test_membership_cannot_resolve_through_a_duplicate_project_id(self):
+        identity = {"project_id": "alpha", "aliases": ["alpha"]}
+        write_md(self.wiki_root / "projects/a.md", self._fm(type="project", identity=identity), "")
+        write_md(
+            self.wiki_root / "projects/b.md",
+            self._fm(type="project", identity={"project_id": "alpha", "aliases": ["alpha-two"]}),
+            "",
+        )
+        write_md(self.wiki_root / "notes/n.md", self._fm(projects=["alpha"]), "")
+
+        issues = self._run()
+
+        self.assertTrue(any(issue["check"] == "project_duplicate_id" for issue in issues))
+        self.assertTrue(any(
+            issue["file"] == "notes/n.md"
+            and issue["check"] == "project_dangling_membership"
+            for issue in issues
+        ))
+
+    def test_identity_limits_and_normalized_remote_are_errors(self):
+        write_md(
+            self.wiki_root / "projects/alpha.md",
+            self._fm(type="project", identity={
+                "project_id": "Alpha",
+                "aliases": ["", "x"] * 17,
+                "remotes": ["https://github.com/example/alpha", "github.com/example/alpha/../x"],
+            }),
+            "",
+        )
+        issues = self._run()
+        details = "\n".join(issue["detail"] for issue in issues)
+        self.assertTrue(any("project_id" in issue["detail"] for issue in issues))
+        self.assertIn("aliases", details)
+        self.assertIn("remotes", details)
+        self.assertTrue(all(issue["severity"] == "error" for issue in issues))
+
+
 if __name__ == "__main__":
     unittest.main()

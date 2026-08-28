@@ -165,6 +165,7 @@ def create_server() -> MCPServer:
         state_view: str = "current",
         target_bytes: int = 48_000,
         max_bytes: int = 192_000,
+        max_content_bytes: int | None = None,
         target_items: int = 24,
         max_items: int = 96,
         max_estimated_tokens: int | None = None,
@@ -175,6 +176,7 @@ def create_server() -> MCPServer:
         known_at: str | None = None,
         transition_from: str | None = None,
         transition_to: str | None = None,
+        workspace_identity: Mapping[str, Any] | None = None,
     ) -> Annotated[CallToolResult, WikiCompileContextOutput]:
         """Compile bounded, question-shaped evidence from a registered wiki."""
         return _handle_wiki_error(
@@ -185,6 +187,7 @@ def create_server() -> MCPServer:
                 state_view=state_view,
                 target_bytes=target_bytes,
                 max_bytes=max_bytes,
+                max_content_bytes=max_content_bytes,
                 target_items=target_items,
                 max_items=max_items,
                 max_estimated_tokens=max_estimated_tokens,
@@ -195,6 +198,7 @@ def create_server() -> MCPServer:
                 known_at=known_at,
                 transition_from=transition_from,
                 transition_to=transition_to,
+                workspace_identity=workspace_identity,
             )
         )
 

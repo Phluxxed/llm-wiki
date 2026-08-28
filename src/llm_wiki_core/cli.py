@@ -46,6 +46,13 @@ def build_parser() -> argparse.ArgumentParser:
     compile_parser.add_argument("--known-at")
     compile_parser.add_argument("--transition-from")
     compile_parser.add_argument("--transition-to")
+    compile_parser.add_argument("--workspace-directory-alias")
+    compile_parser.add_argument(
+        "--workspace-remote",
+        action="append",
+        default=[],
+        dest="workspace_remotes",
+    )
 
     doctor_parser = commands.add_parser("doctor", help="Inspect wiki runtime compatibility")
     doctor_parser.add_argument("--wiki", required=True, help="Path to the wiki root")
@@ -128,6 +135,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
             if temporal is not None:
                 request_data["temporal"] = temporal
+            if args.workspace_directory_alias is not None or args.workspace_remotes:
+                request_data["workspace_identity"] = {
+                    "directory_alias": args.workspace_directory_alias,
+                    "remotes": args.workspace_remotes,
+                }
             request = CompileRequest.from_mapping(
                 request_data
             )

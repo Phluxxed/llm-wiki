@@ -100,9 +100,41 @@ class McpCompilerTest(unittest.TestCase):
             {
                 "code": "CONTRACT_VERSION_UNSUPPORTED",
                 "message": "Compiler contract version is not supported",
-                "details": {"found": "3", "supported": ["1", "2"]},
+                "details": {"found": "4", "supported": ["1", "2", "3"]},
             },
         )
+
+    def test_stdio_v3_workspace_identity_round_trip_is_path_free(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            wiki = create_wiki_root(tmp / "wiki")
+            write_md(
+                wiki / "projects" / "alpha.md",
+                base_fm(
+                    title="Alpha",
+                    type="project",
+                    identity={
+                        "project_id": "alpha",
+                        "aliases": ["Alpha"],
+                        "remotes": ["github.com/acme/alpha"],
+                    },
+                ),
+                "Alpha orientation.",
+            )
+            result = asyncio.run(_v3_round_trip(tmp / "home", wiki))
+
+        self.assertEqual(result["contract_version"], "3")
+        self.assertEqual(
+            result["query"]["project_resolution"],
+            {
+                "status": "matched",
+                "project_id": "alpha",
+                "page": "projects/alpha.md",
+                "matched_by": "remote",
+            },
+        )
+        self.assertTrue(any(item["provider"] == "project" for item in result["evidence"]))
+        self.assertNotIn(str(wiki), json.dumps(result))
 
     def test_impossible_complete_response_budget_keeps_structured_error_envelope(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -173,7 +205,7 @@ async def _invalid_round_trip(home: Path, wiki: Path):
         await client.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
         result = await client.call_tool(
             "wiki_compile_context",
-            {"alias": "test", "question": "What changed?", "contract_version": "3"},
+            {"alias": "test", "question": "What changed?", "contract_version": "4"},
         )
         return {
             "is_error": result.is_error,
@@ -181,6 +213,25 @@ async def _invalid_round_trip(home: Path, wiki: Path):
             "structured_content": result.structured_content,
             "error_text": result.content[0].text,
         }
+
+
+async def _v3_round_trip(home: Path, wiki: Path):
+    params = await _session(home)
+    async with Client(stdio_client(params), mode="auto") as client:
+        await client.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
+        result = await client.call_tool(
+            "wiki_compile_context",
+            {
+                "alias": "test",
+                "question": "What should I work on next?",
+                "contract_version": "3",
+                "workspace_identity": {
+                    "directory_alias": "renamed-checkout",
+                    "remotes": ["github.com/acme/alpha", "github.com/acme/alpha"],
+                },
+            },
+        )
+        return result.structured_content
 
 
 async def _too_small_budget_round_trip(home: Path, wiki: Path):

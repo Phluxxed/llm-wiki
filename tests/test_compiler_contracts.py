@@ -71,7 +71,7 @@ class CompileRequestTest(unittest.TestCase):
     def test_unsupported_contract_version_fails_before_execution(self):
         with self.assertRaises(ContractError) as raised:
             CompileRequest.from_mapping(
-                {"contract_version": "3", "alias": "brain", "question": "What changed?"}
+                {"contract_version": "4", "alias": "brain", "question": "What changed?"}
             )
 
         self.assertEqual(raised.exception.code, "CONTRACT_VERSION_UNSUPPORTED")

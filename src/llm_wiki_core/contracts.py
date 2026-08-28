@@ -7,13 +7,18 @@ from typing import Any, Mapping
 
 
 CONTRACT_VERSION = "1"
-SUPPORTED_CONTRACT_VERSIONS = {"1", "2"}
+SUPPORTED_CONTRACT_VERSIONS = {"1", "2", "3"}
 TEMPORAL_VIEWS = {"current", "historical", "transition", "lineage", "conflict"}
 _RFC3339_INSTANT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_NORMALIZED_REMOTE = re.compile(r"^[a-z0-9._-]+(?:/[a-z0-9._-]+)+$")
+_CONTROL_CHARACTER = re.compile(r"[\x00-\x1f\x7f]")
 STATE_VIEWS = {"current", "historical", "transition", "all"}
 MAX_QUESTION_CHARS = 16_000
 MAX_SEEDS = 32
+MAX_WORKSPACE_REMOTES = 8
+MAX_WORKSPACE_REMOTE_CHARS = 1_024
+MAX_WORKSPACE_ALIAS_CHARS = 255
 SERVER_MAX_BYTES = 1_000_000
 SERVER_MAX_ITEMS = 512
 
@@ -147,6 +152,116 @@ class TemporalQuery:
 
 
 @dataclass(frozen=True)
+class WorkspaceIdentity:
+    """Portable, path-free observations supplied by a host adapter."""
+
+    directory_alias: str | None = None
+    remotes: tuple[str, ...] = ()
+
+    @classmethod
+    def from_mapping(cls, raw: Mapping[str, Any]) -> "WorkspaceIdentity":
+        if not isinstance(raw, Mapping):
+            raise _invalid("workspace_identity", "Workspace Identity must be an object")
+        unknown = set(raw) - {"directory_alias", "remotes"}
+        if unknown:
+            raise _invalid(
+                f"workspace_identity.{sorted(unknown)[0]}",
+                "Unknown Workspace Identity field",
+            )
+
+        alias = raw.get("directory_alias")
+        if alias is not None:
+            if not isinstance(alias, str):
+                raise _invalid(
+                    "workspace_identity.directory_alias",
+                    "Workspace directory alias must be a string",
+                )
+            alias = alias.strip()
+            if not alias:
+                raise _invalid(
+                    "workspace_identity.directory_alias",
+                    "Workspace directory alias must not be empty",
+                )
+            if len(alias) > MAX_WORKSPACE_ALIAS_CHARS:
+                raise _invalid(
+                    "workspace_identity.directory_alias",
+                    f"Workspace directory alias exceeds {MAX_WORKSPACE_ALIAS_CHARS} characters",
+                )
+            if (
+                "/" in alias
+                or "\\" in alias
+                or _CONTROL_CHARACTER.search(alias)
+                or alias in {".", ".."}
+            ):
+                raise _invalid(
+                    "workspace_identity.directory_alias",
+                    "Workspace directory alias must be one path-free basename",
+                )
+
+        raw_remotes = raw.get("remotes", [])
+        if not isinstance(raw_remotes, list):
+            raise _invalid(
+                "workspace_identity.remotes",
+                "Workspace remotes must be a list",
+            )
+        remotes: list[str] = []
+        seen: set[str] = set()
+        for index, remote in enumerate(raw_remotes):
+            field = f"workspace_identity.remotes[{index}]"
+            if not isinstance(remote, str):
+                raise _invalid(field, "Workspace remote must be a string")
+            if remote != remote.strip():
+                raise _invalid(field, "Workspace remote must be normalized")
+            if len(remote) > MAX_WORKSPACE_REMOTE_CHARS:
+                raise _invalid(
+                    field,
+                    f"Workspace remote exceeds {MAX_WORKSPACE_REMOTE_CHARS} characters",
+                )
+            if not remote or not remote.isascii() or _CONTROL_CHARACTER.search(remote):
+                raise _invalid(field, "Workspace remote must be normalized ASCII host/path")
+            if not _NORMALIZED_REMOTE.fullmatch(remote) or remote != remote.lower():
+                raise _invalid(field, "Workspace remote must be normalized ASCII host/path")
+            segments = remote.split("/")
+            host = segments[0]
+            host_labels = host.split(".")
+            if (
+                not host
+                or any(
+                    not label
+                    or label[0] == "-"
+                    or label[-1] == "-"
+                    or not re.fullmatch(r"[a-z0-9-]+", label)
+                    for label in host_labels
+                )
+            ):
+                raise _invalid(field, "Workspace remote must contain one valid hostname")
+            if any(segment in {"", ".", ".."} for segment in segments):
+                raise _invalid(field, "Workspace remote contains an invalid path segment")
+            if remote not in seen:
+                seen.add(remote)
+                remotes.append(remote)
+        if len(remotes) > MAX_WORKSPACE_REMOTES:
+            raise _invalid(
+                "workspace_identity.remotes",
+                f"At most {MAX_WORKSPACE_REMOTES} unique workspace remotes are allowed",
+            )
+        return cls(directory_alias=alias, remotes=tuple(remotes))
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        if self.directory_alias is not None:
+            result["directory_alias"] = self.directory_alias
+        result["remotes"] = list(self.remotes)
+        return result
+
+
+# A descriptive alias used by host adapters and tests.  The wire shape is the
+# same object; keeping both names avoids coupling callers to one language's
+# naming convention.
+WorkspaceIdentityInput = WorkspaceIdentity
+
+
+@dataclass(frozen=True)
 class CompileRequest:
     alias: str
     question: str
@@ -155,6 +270,7 @@ class CompileRequest:
     budget: CompileBudget = field(default_factory=CompileBudget)
     contract_version: str = CONTRACT_VERSION
     temporal: TemporalQuery | None = None
+    workspace_identity: WorkspaceIdentity | None = None
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> CompileRequest:
@@ -168,8 +284,10 @@ class CompileRequest:
                 {"found": version, "supported": sorted(SUPPORTED_CONTRACT_VERSIONS)},
             )
         allowed = {"contract_version", "alias", "question", "seeds", "state_view", "budget"}
-        if version == "2":
+        if version in {"2", "3"}:
             allowed.add("temporal")
+        if version == "3":
+            allowed.add("workspace_identity")
         unknown = set(raw) - allowed
         if unknown:
             field_name = sorted(unknown)[0]
@@ -190,7 +308,16 @@ class CompileRequest:
         if len(seeds) > MAX_SEEDS:
             raise _invalid("seeds", f"At most {MAX_SEEDS} seeds are allowed")
 
-        temporal = _parse_temporal_query(raw.get("temporal")) if version == "2" and "temporal" in raw else None
+        temporal = (
+            _parse_temporal_query(raw.get("temporal"))
+            if version in {"2", "3"} and "temporal" in raw
+            else None
+        )
+        workspace_identity = (
+            WorkspaceIdentity.from_mapping(raw.get("workspace_identity"))
+            if version == "3" and "workspace_identity" in raw
+            else None
+        )
         return cls(
             alias=alias,
             question=question,
@@ -199,6 +326,7 @@ class CompileRequest:
             budget=CompileBudget.from_mapping(raw.get("budget")),
             contract_version=version,
             temporal=temporal,
+            workspace_identity=workspace_identity,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -210,8 +338,10 @@ class CompileRequest:
             "state_view": self.state_view,
             "budget": self.budget.to_dict(),
         }
-        if self.contract_version == "2" and self.temporal is not None:
+        if self.contract_version in {"2", "3"} and self.temporal is not None:
             result["temporal"] = self.temporal.to_dict()
+        if self.contract_version == "3" and self.workspace_identity is not None:
+            result["workspace_identity"] = self.workspace_identity.to_dict()
         return result
 
 
@@ -383,6 +513,8 @@ class CompiledContext:
     reporting: ResponseReporting | None = None
     contract_version: str = CONTRACT_VERSION
     temporal: TemporalQuery | None = None
+    project_resolution: Mapping[str, Any] | None = None
+    project_scope: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         reporting = self.reporting or ResponseReporting(
@@ -399,6 +531,12 @@ class CompiledContext:
         }
         if self.temporal is not None:
             query["temporal"] = self.temporal.to_dict()
+        if self.contract_version == "3":
+            query["project_resolution"] = dict(
+                self.project_resolution or {"status": "not_requested"}
+            )
+            if self.project_scope is not None:
+                query["project_scope"] = dict(self.project_scope)
         return {
             "kind": "compiled_context",
             "contract_version": self.contract_version,

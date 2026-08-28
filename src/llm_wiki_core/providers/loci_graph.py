@@ -20,7 +20,7 @@ from ..state import normalize_knowledge_state
 from .base import CandidateEvidence, ProviderContext, ProviderResult
 from .local import bounded_content, page_sections
 from .loci_transport import LociGatewayError, LociMcpClient, tool_mapping, tool_payload
-from .utils import question_terms
+from .utils import page_matches_question, question_terms
 
 
 GRAPH_NAMESPACE = "llm-wiki"
@@ -141,8 +141,15 @@ def _retrieve_arguments(
         "max_evidence_bytes": min(MAX_EVIDENCE_BYTES, budget.max_bytes),
         "max_estimated_tokens": min(MAX_ESTIMATED_TOKENS, estimated_tokens),
     }
-    if context.resolved_seeds:
-        arguments["seed_ids"] = [roots[path] for path in context.resolved_seeds]
+    # Loci's public graph contract has one seed list.  Keep the compiler's
+    # explicit and internal scope inputs separate in ProviderContext, then
+    # pass their stable deduplicated union at this transport boundary.  The
+    # adapter classifies provenance from the returned path/page roots below;
+    # no unsupported scope-specific MCP argument is sent.
+    seed_paths = tuple(dict.fromkeys((*context.resolved_seeds, *context.scope_seeds)))
+    seed_ids = tuple(dict.fromkeys(roots[path] for path in seed_paths))
+    if seed_ids:
+        arguments["seed_ids"] = list(seed_ids)
     return arguments
 
 
@@ -209,6 +216,7 @@ def _path_node_candidates(
     context: ProviderContext,
 ) -> list[CandidateEvidence]:
     first_seen: dict[str, tuple[int, int]] = {}
+    provenance: dict[str, set[str]] = {}
     for path_rank, candidate in enumerate(paths):
         nodes = candidate.locator.get("nodes")
         if not isinstance(nodes, list):
@@ -219,6 +227,15 @@ def _path_node_candidates(
             file_path = node.get("file")
             if isinstance(file_path, str) and file_path in context.pages:
                 first_seen.setdefault(file_path, (path_rank, node_rank))
+                if "scope_seed_discovery" in candidate.selection_signals:
+                    provenance.setdefault(file_path, set()).add("scope")
+                if "explicit_seed_discovery" in candidate.selection_signals:
+                    provenance.setdefault(file_path, set()).add("explicit")
+                if not {
+                    "scope_seed_discovery",
+                    "explicit_seed_discovery",
+                }.intersection(candidate.selection_signals):
+                    provenance.setdefault(file_path, set()).add("question")
 
     hydrated: list[CandidateEvidence] = []
     ordered = sorted(
@@ -250,6 +267,22 @@ def _path_node_candidates(
             page.frontmatter,
             field_name=context.config.state.field,
         )
+        discovery_signals: list[str] = []
+        file_provenance = provenance.get(file_path, set())
+        if "question" not in file_provenance and not page_matches_question(
+            page,
+            context.request.question,
+            terms,
+        ):
+            # Provenance applies to every node hydrated from a discovery-only
+            # path, not merely to the anchor node itself.  Otherwise a
+            # scope-seeded path could hydrate an unrelated endpoint without
+            # the signal that keeps it out of the question-derived fallback
+            # predicate.
+            if "scope" in file_provenance:
+                discovery_signals.append("scope_seed_discovery")
+            if "explicit" in file_provenance:
+                discovery_signals.append("explicit_seed_discovery")
         identity = f"{file_path}:{section.start_line}:{section.end_line}"
         hydrated.append(
             CandidateEvidence(
@@ -269,7 +302,11 @@ def _path_node_candidates(
                 },
                 content=content,
                 roles=("endpoint",),
-                selection_signals=("loci_path_node", f"path_rank:{path_rank}"),
+                selection_signals=(
+                    "loci_path_node",
+                    f"path_rank:{path_rank}",
+                    *discovery_signals,
+                ),
                 authored_state=state.normalized,
                 derived_flags=state.derived_flags,
                 authority_signals=(),
@@ -322,15 +359,36 @@ def _path_candidate(
     evidence_files = tuple(dict.fromkeys(step["evidence"]["file"] for step in validated_steps))
     state, derived_flags = _path_state(evidence_files, context)
     page = nodes[1]["file"] if len(nodes) > 2 else evidence_files[0]
-    relationship_support = _relationship_support(nodes, selection, anchor_groups)
+    node_files = {node["file"] for node in nodes}
+    explicit_seed_in_path = bool(node_files.intersection(context.resolved_seeds))
+    scope_seed_in_path = bool(node_files.intersection(context.scope_seeds))
+    question_terms_for_path = question_terms(context.request.question)
+    question_page_in_path = any(
+        page_matches_question(context.pages[file_path], context.request.question, question_terms_for_path)
+        for file_path in node_files
+        if file_path in context.pages
+    )
+    relationship_support = _relationship_support(
+        nodes,
+        selection,
+        anchor_groups,
+        explicit_seed_in_path=explicit_seed_in_path,
+        scope_seed_in_path=scope_seed_in_path,
+        question_page_in_path=question_page_in_path,
+    )
     signals = [
         "loci_evidence_backed_path",
         f"support:{support_kind}",
         f"relationship_{relationship_support}",
         *(f"edge:{edge_type}" for edge_type in dict.fromkeys(step["edge"]["type"] for step in validated_steps)),
     ]
-    if selection == "explicit":
+    if selection == "explicit" and explicit_seed_in_path:
         signals.append("explicit_seed_bridge")
+    if not question_page_in_path:
+        if scope_seed_in_path:
+            signals.append("scope_seed_discovery")
+        if explicit_seed_in_path:
+            signals.append("explicit_seed_discovery")
     if semantic_bridge["required"]:
         signals.append("semantic_bridge_matched")
     return CandidateEvidence(
@@ -430,8 +488,20 @@ def _relationship_support(
     nodes: list[dict[str, Any]],
     selection: str,
     anchor_groups: tuple[frozenset[str], frozenset[str]] | None,
+    *,
+    explicit_seed_in_path: bool = False,
+    scope_seed_in_path: bool = False,
+    question_page_in_path: bool = False,
 ) -> str:
-    if selection == "explicit" or anchor_groups is None:
+    if selection == "explicit":
+        # The transport uses one seed_ids list for caller seeds and internal
+        # project anchors.  A path containing only a scope anchor is therefore
+        # reported as explicit by Loci, but it has not earned relationship
+        # coverage unless it also reaches a question-relevant page.
+        if scope_seed_in_path and not explicit_seed_in_path and not question_page_in_path:
+            return "ancillary_path"
+        return "claim_bridge"
+    if anchor_groups is None:
         return "claim_bridge"
     node_ids = {node["id"] for node in nodes}
     primary_ids, distinct_ids = anchor_groups

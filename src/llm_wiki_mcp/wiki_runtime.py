@@ -164,6 +164,7 @@ def compiled_context(
     state_view: str = "current",
     target_bytes: int = 48_000,
     max_bytes: int = 192_000,
+    max_content_bytes: int | None = None,
     target_items: int = 24,
     max_items: int = 96,
     max_estimated_tokens: int | None = None,
@@ -174,6 +175,7 @@ def compiled_context(
     known_at: str | None = None,
     transition_from: str | None = None,
     transition_to: str | None = None,
+    workspace_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     record = get_wiki(alias)
     request_data: dict[str, Any] = {
@@ -185,6 +187,7 @@ def compiled_context(
         "budget": {
             "target_bytes": target_bytes,
             "max_bytes": max_bytes,
+            "max_content_bytes": max_content_bytes,
             "target_items": target_items,
             "max_items": max_items,
             "max_estimated_tokens": max_estimated_tokens,
@@ -202,6 +205,8 @@ def compiled_context(
         if transition_from is not None or transition_to is not None:
             temporal["transition"] = {"from": transition_from, "to": transition_to}
         request_data["temporal"] = temporal
+    if workspace_identity is not None:
+        request_data["workspace_identity"] = workspace_identity
     try:
         temporal_arguments = (request_time, world_at, known_at, transition_from, transition_to)
         if temporal_view is None and any(value is not None for value in temporal_arguments):

@@ -107,6 +107,61 @@ class CompilerCliTest(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(json.loads(stdout.getvalue()), expected)
 
+    def test_cli_v3_workspace_identity_matches_core_without_path_metadata(self):
+        write_md(
+            self.root / "projects" / "alpha.md",
+            base_fm(
+                title="Alpha",
+                type="project",
+                identity={
+                    "project_id": "alpha",
+                    "aliases": ["Alpha"],
+                    "remotes": ["github.com/acme/alpha"],
+                },
+            ),
+            "Alpha orientation.",
+        )
+        args = [
+            "compile-context",
+            "--wiki",
+            str(self.root),
+            "--alias",
+            "test",
+            "--question",
+            "What should I work on next?",
+            "--contract-version",
+            "3",
+            "--workspace-directory-alias",
+            "renamed-checkout",
+            "--workspace-remote",
+            "github.com/acme/alpha",
+            "--workspace-remote",
+            "github.com/acme/alpha",
+        ]
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(args)
+
+        expected = compile_context(
+            self.root,
+            CompileRequest.from_mapping(
+                {
+                    "contract_version": "3",
+                    "alias": "test",
+                    "question": "What should I work on next?",
+                    "workspace_identity": {
+                        "directory_alias": "renamed-checkout",
+                        "remotes": ["github.com/acme/alpha", "github.com/acme/alpha"],
+                    },
+                }
+            ),
+        ).to_dict()
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload, expected)
+        self.assertEqual(payload["query"]["project_resolution"]["project_id"], "alpha")
+        self.assertNotIn(str(self.root), json.dumps(payload))
+
     def test_cli_applies_content_ceiling_without_replacing_response_ceiling(self):
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
