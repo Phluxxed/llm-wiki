@@ -323,7 +323,7 @@ class ProgressiveSelectionTest(unittest.TestCase):
             2_000,
         )
 
-    def test_loci_is_the_primary_non_seed_route_for_equivalent_coverage(self):
+    def test_loci_stays_primary_while_distinct_matching_content_can_supplement(self):
         request = CompileRequest.from_mapping(
             {"alias": "test", "question": "What owns traversal?", "seeds": []}
         )
@@ -335,7 +335,7 @@ class ProgressiveSelectionTest(unittest.TestCase):
                 page="systems/wiki.md",
                 source=None,
                 locator={"file": "systems/wiki.md"},
-                content="Broad page content.",
+                content="Broad page content about traversal.",
                 roles=("answer",),
                 selection_signals=("frontmatter_match",),
                 authored_state="current",
@@ -349,7 +349,7 @@ class ProgressiveSelectionTest(unittest.TestCase):
                 page="systems/wiki.md",
                 source=None,
                 locator={"file": "systems/wiki.md", "start_line": 10, "end_line": 12},
-                content="Exact ownership section.",
+                content="Exact traversal ownership section.",
                 roles=("answer",),
                 selection_signals=("indexed_symbol_match",),
                 authored_state="current",
@@ -360,7 +360,7 @@ class ProgressiveSelectionTest(unittest.TestCase):
 
         selected, _ = select_candidates(candidates, request, ("answer",))
 
-        self.assertEqual([item.provider for item in selected], ["loci"])
+        self.assertEqual([item.provider for item in selected], ["loci", "frontmatter"])
 
     def test_loci_retrieval_rank_does_not_force_redundant_results_after_coverage(self):
         request = CompileRequest.from_mapping(
@@ -612,7 +612,7 @@ class ProgressiveSelectionTest(unittest.TestCase):
             "graph:path-2",
         ])
 
-    def test_supplementary_loci_paths_do_not_expand_past_target_after_coverage(self):
+    def test_distinct_query_selected_paths_can_expand_past_target_within_hard_limits(self):
         request = CompileRequest.from_mapping(
             {
                 "alias": "test",
@@ -648,11 +648,8 @@ class ProgressiveSelectionTest(unittest.TestCase):
 
         selected, omissions = select_candidates(candidates, request, ("bridge",))
 
-        self.assertEqual([item.id for item in selected], ["graph:path-0"])
-        self.assertIn(
-            ("graph:path-1", "lower_marginal_value"),
-            [(item.candidate_id, item.reason) for item in omissions],
-        )
+        self.assertEqual([item.id for item in selected], ["graph:path-0", "graph:path-1"])
+        self.assertEqual(omissions, ())
 
 
 if __name__ == "__main__":

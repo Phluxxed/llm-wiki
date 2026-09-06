@@ -15,6 +15,7 @@ from .contracts import (
     StopState,
 )
 from .providers.base import CandidateEvidence
+from .providers.utils import matched_question_terms, question_terms
 from .state import state_compatibility
 
 
@@ -36,17 +37,73 @@ def select_candidates(
     candidates: list[CandidateEvidence],
     request: CompileRequest,
     required: tuple[str, ...],
+    *,
+    include_supplements: bool = True,
 ) -> tuple[tuple[EvidenceRecord, ...], tuple[Omission, ...]]:
-    ordered = sorted(candidates, key=lambda item: _rank(item, request.state_view, required))
+    terms = question_terms(request.question)
+    relevance = {
+        item.id: set(item.relevance_terms if item.relevance_terms is not None
+                     else matched_question_terms(item.content, terms))
+        for item in candidates
+    }
+    query_providers = {"text", "frontmatter", "loci", "source", "temporal"}
+    strongest = max((len(relevance[item.id]) for item in candidates
+                     if item.provider in query_providers), default=0)
+    ordered = sorted(candidates, key=lambda item: (
+        0 if item.provider == "seed" else 2 if item.provider == "source" else 1,
+        -len(relevance[item.id]),
+        _rank(item, request.state_view, required),
+    ))
     selected: list[EvidenceRecord] = []
     omissions: list[Omission] = []
     seen: set[tuple] = set()
     used_bytes = 0
     used_content_bytes = 0
 
-    for candidate in ordered:
-        locator_identity = json.dumps(candidate.locator, sort_keys=True, separators=(",", ":"))
-        identity = (candidate.page, candidate.source, locator_identity, candidate.content)
+    # Finish the existing compact selection before considering supplements, so
+    # later claims cannot crowd out its supporting sources. Each deferred item
+    # is reconsidered once, without another provider call or relevance rule.
+    pending = [(candidate, False) for candidate in ordered]
+    for candidate, supplement in pending:
+        explicit = (candidate.provider == "seed" or candidate.page in request.seeds
+                    or "explicit_seed_discovery" in candidate.selection_signals)
+        if (candidate.provider in query_providers
+                and not relevance[candidate.id] and not explicit):
+            omissions.append(Omission(candidate.id, "question_mismatch", _candidate_cost(candidate)))
+            continue
+        if candidate.provider == "source" and not explicit:
+            linked_pages = {signal.removeprefix("source_for:")
+                            for signal in candidate.selection_signals if signal.startswith("source_for:")}
+            claims = [item for item in selected if item.provider not in {"source", "project"}]
+            supports_selected_claim = any(
+                item.page in linked_pages and bool(relevance[item.id] & relevance[candidate.id])
+                for item in claims
+            )
+            # A source may answer a question about the source itself. Otherwise
+            # its declared provenance must connect to a selected relevant claim;
+            # unrelated provenance cannot independently fill an authority slot.
+            named_source = len(matched_question_terms(candidate.source or "", terms)) >= 2
+            selected_claim_terms = set().union(*(relevance[item.id] for item in claims))
+            direct_source_answer = bool(terms) and (
+                named_source or (len(relevance[candidate.id]) == strongest
+                                 and selected_claim_terms <= relevance[candidate.id])
+            )
+            if not supports_selected_claim and not direct_source_answer:
+                if include_supplements and not supplement:
+                    pending.append((candidate, True))
+                    continue
+                omissions.append(Omission(candidate.id, "unsupported_source", _candidate_cost(candidate)))
+                continue
+        locator = dict(candidate.locator)
+        if "start_line" in locator and "end_line" in locator:
+            # Seed and section providers may name the same exact span
+            # differently. A heading label does not make its text distinct.
+            locator.pop("section", None)
+        locator_identity = json.dumps(locator, sort_keys=True, separators=(",", ":"))
+        identity = (
+            candidate.page, candidate.source, candidate.provider == "source",
+            locator_identity, candidate.content,
+        )
         if identity in seen:
             # A project fallback may intentionally share a whole-body span
             # with an internal graph discovery candidate.  Keep it when its
@@ -63,7 +120,6 @@ def select_candidates(
             if not is_useful_project_fallback:
                 omissions.append(Omission(candidate.id, "duplicate", _candidate_cost(candidate)))
                 continue
-        seen.add(identity)
         compatibility = state_compatibility(candidate.authored_state, request.state_view)
         if compatibility == "lineage_only" and "lineage" not in required:
             omissions.append(Omission(candidate.id, "state_mismatch", _candidate_cost(candidate)))
@@ -81,11 +137,18 @@ def select_candidates(
             and "project_orientation_fallback" in candidate.selection_signals
         )
         if (
-            candidate.provider != "seed"
+            not supplement
+            and candidate.provider != "seed"
             and not mandatory_project_fallback
             and not (set(record.roles) & uncovered)
             and not supplementary_retrieval
         ):
+            if include_supplements and (
+                candidate.provider in query_providers and relevance[candidate.id]
+                or _is_query_selected_graph_evidence(candidate)
+            ):
+                pending.append((candidate, True))
+                continue
             omissions.append(Omission(candidate.id, "lower_marginal_value", record.byte_cost))
             continue
         if len(selected) >= request.budget.max_items:
@@ -113,6 +176,7 @@ def select_candidates(
                 continue
             record = fitted
         selected.append(record)
+        seen.add(identity)
         used_bytes += record.byte_cost
         used_content_bytes += _content_bytes(record.content)
 
@@ -304,15 +368,34 @@ def _response_with_evidence(
     dropped: tuple[EvidenceRecord, ...],
 ) -> CompiledContext:
     coverage_state = coverage(response.coverage.required_roles, evidence)
-    if not dropped or not coverage_state.uncovered_roles:
+    original_by_id = {item.id: item for item in response.evidence}
+    finalizer_excerpt = any(
+        "hard_limit_excerpt" in item.selection_reasons
+        and (
+            (original := original_by_id.get(item.id)) is None
+            or item.content != original.content
+            or item.byte_cost != original.byte_cost
+            or item.truncated != original.truncated
+            or "hard_limit_excerpt" not in original.selection_reasons
+        )
+        for item in evidence
+    )
+    if not dropped and not finalizer_excerpt:
         stop = response.stop
+        continuation = response.continuation
+    elif not dropped:
+        stop = StopState(
+            reason="byte_budget_exhausted",
+            sufficient=not coverage_state.uncovered_roles,
+            detail="Complete response ceiling limited the candidate evidence returned",
+        )
         continuation = response.continuation
     else:
         remaining_count = len(dropped) + _continuation_count(response.continuation)
         stop = StopState(
             reason="byte_budget_exhausted",
-            sufficient=False,
-            detail="Complete response ceiling was reached before coverage was complete",
+            sufficient=not coverage_state.uncovered_roles,
+            detail="Complete response ceiling limited the candidate evidence returned",
         )
         continuation = {
             "reason": "hard_limit_reached",
@@ -492,7 +575,9 @@ def _rank(candidate: CandidateEvidence, state_view: str, required: tuple[str, ..
         state_compatibility(candidate.authored_state, state_view)
     ]
     authority_rank = 0 if candidate.authority_signals else 1
-    if "seed_authored_multi_bridge" in candidate.selection_signals:
+    if "exact_title" in candidate.selection_signals:
+        route_rank = 0
+    elif "seed_authored_multi_bridge" in candidate.selection_signals:
         route_rank = 0
     elif "explicit_seed_bridge" in candidate.selection_signals:
         route_rank = 1

@@ -54,3 +54,51 @@ Rejected because it would still violate the caller's ceiling and disguise an imp
 - Atomic graph evidence is never converted into a partial quotation during final response fitting.
 - Loci can still retrieve broadly, but redundant top-ranked hits no longer enter the selected answer automatically.
 - Existing clients must tolerate the additive `reporting` field and `evidence[].atomic` field, as required for versioned JSON object evolution.
+
+## Amendment — 2026-09-06: Preserve useful evidence, then admit distinct relevant candidates
+
+This dated amendment records the accepted W2.5.3 correction. The original July
+context, decision, alternatives, and consequences above remain the historical
+record; this amendment supersedes only the role-only supplementary-selection
+clause. The complete-response budget, atomic-evidence, and reporting safety
+contract remains unchanged. Implementation, tests, and deployment are separate
+work and are not claimed complete here.
+
+The compiler uses a bounded two-pass selection:
+
+1. Preserve the existing deterministic initial set, including explicit seeds,
+   relevant claims, admissible supporting sources, project fallback, and
+   query-selected graph evidence. Keep that set first in returned evidence
+   order.
+2. Reconsider distinct, question-qualified candidates that were omitted only
+   for `lower_marginal_value` because their roles were already covered. Use
+   the existing relevance/ranking order and the existing exact-duplicate,
+   source-support, query-match, and state checks. Recheck source links against
+   retained claims; a previously skipped source is not entitled to admission.
+   This pass may admit distinct same-role evidence after all roles are covered.
+
+The existing hard item, content-byte, complete-response-byte, and estimated-
+token ceilings apply to both passes. Additional ordinary candidates must still
+pass the existing query-relevance checks. Graph supplements remain limited to
+the existing query-selected path contract; arbitrary graph-neighbourhood
+material is not promoted. Final response fitting removes supplements before
+the preserved initial set. This is an internal ordering decision, not a new
+public tier, identity, or stored state. No extra search, judge, threshold, or
+budget is introduced, and no configured ceiling is increased.
+
+`coverage` remains a report of required, covered, and uncovered evidence roles;
+role coverage is not answerability. For compatibility, `stop.sufficient`
+remains the derived role-coverage boolean. Historical `sufficient` values remain
+accepted and readable. It is not confidence, readiness to answer, or an
+expansion cause, and the new producer does not stop solely because that
+boolean is true: actual budget, provider-degradation, or candidate-exhaustion
+stops remain visible even when all roles are covered. A budget omission or
+finalizer drop likewise retains bounded continuation counts/IDs and omission
+facts without a full-coverage gate, using the existing deterministic
+primary-limit ordering.
+
+The preferred-size targets remain accounting values rather than safety
+ceilings. The compatibility field `target_exceeded_for_coverage` records target
+excess, not proof of why expansion was necessary and not answerability. The
+existing complete-response ceilings, atomic evidence handling, and additive
+`reporting` totals/returned counts remain the safety boundary.

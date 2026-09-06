@@ -643,9 +643,17 @@ class CompiledOmission(StrictOutputModel):
 
 
 class CompiledCoverage(StrictOutputModel):
-    required_roles: list[str]
-    covered_roles: list[str]
-    uncovered_roles: list[str]
+    """Mechanical evidence-role coverage; it does not establish answerability."""
+
+    required_roles: list[str] = Field(
+        description="Evidence roles required by this query; roles describe retrieval function, not answerability."
+    )
+    covered_roles: list[str] = Field(
+        description="Required evidence roles present in selected evidence; mechanical coverage only."
+    )
+    uncovered_roles: list[str] = Field(
+        description="Required evidence roles absent from selected evidence; this does not assess whether an answer exists."
+    )
 
 
 class CompiledBudgetLimits(StrictOutputModel):
@@ -658,8 +666,12 @@ class CompiledBudgetLimits(StrictOutputModel):
 
 
 class CompiledBudgetUsage(StrictOutputModel):
+    """Budget accounting; target excess does not prove a cause or necessity."""
+
     limits: CompiledBudgetLimits
-    target_exceeded_for_coverage: bool
+    target_exceeded_for_coverage: bool = Field(
+        description="Legacy name: true when a target size or item count was exceeded; not proof of why expansion occurred or was needed."
+    )
     evidence_bytes: int
     envelope_bytes: int
     items: int
@@ -668,6 +680,8 @@ class CompiledBudgetUsage(StrictOutputModel):
 
 
 class CompiledStop(StrictOutputModel):
+    """Stop facts; ``sufficient`` is legacy mechanical role coverage only."""
+
     reason: Literal[
         "sufficient",
         "byte_budget_exhausted",
@@ -675,8 +689,12 @@ class CompiledStop(StrictOutputModel):
         "item_budget_exhausted",
         "provider_degraded",
         "candidate_exhausted",
-    ]
-    sufficient: bool
+    ] = Field(
+        description="Stop condition; legacy `sufficient` remains accepted for historical inputs, but the current compiler no longer emits it and reports concrete conditions."
+    )
+    sufficient: bool = Field(
+        description="Legacy mechanical role-coverage result only; it does not assess answerability or readiness to answer."
+    )
     detail: str
 
 

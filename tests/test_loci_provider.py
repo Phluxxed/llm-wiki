@@ -15,7 +15,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from llm_wiki_core.compiler import compile_context
 from llm_wiki_core.contracts import CompileRequest
 from llm_wiki_core.graph_adapter import GraphAdapterError
-from llm_wiki_core.providers.loci import LociMcpGateway, LociProvider, LociRetrieval
+from llm_wiki_core.providers.loci import LociMcpGateway, LociProvider, LociRetrieval, _has_meaningful_query_match
 from llm_wiki_core.providers.loci_transport import LociGatewayError, LociMcpClient
 from tests.wiki_fixture import base_fm, write_md
 
@@ -27,6 +27,14 @@ class FakeLociError(Exception):
 
 
 class LociProviderTest(unittest.TestCase):
+    def test_query_echo_in_search_metadata_is_not_content_relevance(self):
+        question = "How should I water a basil plant indoors?"
+        self.assertFalse(_has_meaningful_query_match(
+            {"query": question, "description": question},
+            "An unrelated deployment note.",
+            question,
+        ))
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)

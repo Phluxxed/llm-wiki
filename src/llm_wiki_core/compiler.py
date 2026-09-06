@@ -223,24 +223,16 @@ def compile_context(
                     ),
                 )
 
+    if project_fallback is not None:
+        initial, _ = select_candidates(candidates, request, roles, include_supplements=False)
+        if not _has_question_derived_project_candidate(
+            initial, project_resolution.project_id, eligible_pages,
+            request.question, resolved_seeds,
+        ):
+            # Project orientation belongs to the initial set. A later weak
+            # supplement must not suppress that established fallback.
+            candidates.append(project_fallback)
     selected, omissions = select_candidates(candidates, request, roles)
-    if (
-        project_fallback is not None
-        and not _has_question_derived_project_candidate(
-            selected,
-            project_resolution.project_id,
-            eligible_pages,
-            request.question,
-            resolved_seeds,
-        )
-    ):
-        # Select once without the fallback so a genuinely useful project
-        # candidate keeps its normal precedence.  If selection discarded all
-        # question-derived project evidence, retry with the mandatory
-        # orientation candidate; hard item/content/byte limits still govern
-        # whether that candidate can be returned.
-        candidates.append(project_fallback)
-        selected, omissions = select_candidates(candidates, request, roles)
     coverage_state = coverage(roles, selected)
     evidence_bytes = sum(item.byte_cost for item in selected)
     sufficient = not coverage_state.uncovered_roles
@@ -248,30 +240,33 @@ def compile_context(
         item.code not in _NON_DEGRADING_DIAGNOSTICS
         for item in diagnostics
     )
-    byte_limited = any(item.reason == "byte_limit" for item in omissions)
-    content_limited = any(item.reason == "content_byte_limit" for item in omissions)
+    byte_limited = (
+        any(item.reason == "byte_limit" for item in omissions)
+        or any("hard_limit_excerpt" in item.selection_reasons for item in selected)
+    )
+    content_limited = (
+        any(item.reason == "content_byte_limit" for item in omissions)
+        or any("content_limit_excerpt" in item.selection_reasons for item in selected)
+    )
     item_limited = any(item.reason == "item_limit" for item in omissions)
-    if sufficient:
-        stop_reason = "sufficient"
-        stop_detail = "All required roles covered"
-    elif not candidates:
+    if not candidates:
         stop_reason = "provider_degraded" if provider_degraded else "no_evidence"
         stop_detail = "No candidate evidence was available"
     elif content_limited:
         stop_reason = "content_budget_exhausted"
-        stop_detail = "Evidence content byte ceiling was reached before coverage was complete"
+        stop_detail = "Evidence content byte ceiling limited the candidate evidence returned"
     elif byte_limited:
         stop_reason = "byte_budget_exhausted"
-        stop_detail = "Hard byte ceiling was reached before coverage was complete"
+        stop_detail = "Hard byte ceiling limited the candidate evidence returned"
     elif item_limited:
         stop_reason = "item_budget_exhausted"
-        stop_detail = "Hard item ceiling was reached before coverage was complete"
+        stop_detail = "Hard item ceiling limited the candidate evidence returned"
     elif provider_degraded:
         stop_reason = "provider_degraded"
-        stop_detail = "Provider degradation may have left required roles uncovered"
+        stop_detail = "Provider degradation may have limited the available evidence"
     else:
         stop_reason = "candidate_exhausted"
-        stop_detail = "Available candidates did not cover every required role"
+        stop_detail = "Available candidates were exhausted; answerability was not assessed"
 
     hard_omissions = tuple(
         item.candidate_id
@@ -279,7 +274,7 @@ def compile_context(
         if item.reason in {"byte_limit", "content_byte_limit", "item_limit"}
     )
     continuation = None
-    if not sufficient and hard_omissions:
+    if hard_omissions:
         continuation = {
             "reason": "hard_limit_reached",
             "uncovered_roles": list(coverage_state.uncovered_roles),

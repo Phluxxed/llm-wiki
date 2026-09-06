@@ -399,6 +399,13 @@ class Omission:
 
 @dataclass(frozen=True)
 class Coverage:
+    """Mechanical evidence-role coverage, not an assessment of answerability.
+
+    ``required_roles``, ``covered_roles``, and ``uncovered_roles`` describe
+    retrieval function only; they do not establish that the question is
+    answered.
+    """
+
     required_roles: tuple[str, ...]
     covered_roles: tuple[str, ...]
     uncovered_roles: tuple[str, ...]
@@ -413,6 +420,12 @@ class Coverage:
 
 @dataclass(frozen=True)
 class BudgetUsage:
+    """Budget accounting; target excess does not prove a cause or necessity.
+
+    ``target_exceeded_for_coverage`` is a retained legacy name that records
+    target excess; it is not proof of why expansion occurred or was needed.
+    """
+
     target_bytes: int
     max_bytes: int
     target_items: int
@@ -450,6 +463,14 @@ class BudgetUsage:
 
 @dataclass(frozen=True)
 class StopState:
+    """Stop facts; ``sufficient`` is legacy mechanical role coverage only.
+
+    The legacy ``sufficient`` stop reason remains accepted for historical
+    inputs, while the current compiler no longer emits that legacy reason and
+    instead reports the concrete stop condition.
+    Neither the bool nor the reason assesses answerability.
+    """
+
     reason: str
     sufficient: bool
     detail: str

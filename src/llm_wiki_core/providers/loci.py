@@ -11,7 +11,7 @@ from ..contracts import Diagnostic
 from ..state import normalize_knowledge_state
 from .base import CandidateEvidence, ProviderContext, ProviderResult
 from .loci_transport import LociGatewayError, LociMcpClient, tool_payload
-from .utils import question_terms
+from .utils import matched_question_terms, question_terms
 
 
 SearchFn = Callable[..., list[dict[str, Any]]]
@@ -335,19 +335,8 @@ def _has_meaningful_query_match(result: Mapping[str, Any], content: str, questio
     terms = question_terms(question)
     if not terms:
         return False
-    searchable = " ".join((*_text_values(result), content)).lower()
-    return any(term in searchable for term in terms)
-
-
-def _text_values(value: Any):
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, Mapping):
-        for nested in value.values():
-            yield from _text_values(nested)
-    elif isinstance(value, (list, tuple)):
-        for nested in value:
-            yield from _text_values(nested)
+    # Search bookkeeping (including an echoed query) is not evidence content.
+    return bool(matched_question_terms(content, terms))
 
 
 def _loci_failure(exc: Exception, *, file_path: str | None = None) -> Diagnostic:

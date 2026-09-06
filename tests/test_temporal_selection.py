@@ -14,7 +14,8 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from llm_wiki_core.compiler import compile_context
 from llm_wiki_core.contracts import CompileRequest, TemporalQuery, TemporalTransition
-from llm_wiki_core.temporal import TemporalContractError
+from llm_wiki_core.temporal import EntityRef, TemporalContractError
+from llm_wiki_core.providers.local import _entity_meaning
 from llm_wiki_core.temporal_persistence import (
     build_temporal_claim_revision,
     eligible_temporal_revisions,
@@ -50,6 +51,21 @@ def _revision(*, decision="accept", recorded_at="2026-01-02T00:00:00Z", world_fr
 
 
 class TemporalSelectionTest(unittest.TestCase):
+    def test_ambiguous_entity_meaning_excludes_observation_metadata(self):
+        ref = EntityRef.from_mapping({
+            "kind": "ambiguous",
+            "surface": "Status service",
+            "candidates": [{
+                "ref": {"kind": "resolved_page", "page": "services/status.md"},
+                "observation_ids": [OBS],
+            }],
+        })
+        meaning = _entity_meaning(ref)
+        self.assertIn("Status service", meaning)
+        self.assertIn("services/status.md", meaning)
+        self.assertNotIn(OBS, meaning)
+        self.assertNotIn("observation", meaning)
+
     def test_raw_mapping_history_is_validated_before_eligibility(self):
         accepted = _revision(recorded_at="2026-01-02T00:00:00Z")
         retired = _revision(

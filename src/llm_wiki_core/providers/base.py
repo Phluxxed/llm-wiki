@@ -26,6 +26,9 @@ class CandidateEvidence:
     retrieval_rank: int | None = None
     truncated: bool = False
     atomic: bool = False
+    # Internal lexical relevance, separate from lifecycle/authority metadata.
+    # None lets selection inspect the actual excerpt; () means no query match.
+    relevance_terms: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

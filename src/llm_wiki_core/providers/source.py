@@ -4,7 +4,7 @@ from ..contracts import Diagnostic
 from ..documents import safe_source_path
 from ..state import normalize_knowledge_state
 from .base import CandidateEvidence, ProviderContext, ProviderResult
-from .utils import page_matches_question, question_terms
+from .utils import matched_question_terms, question_terms
 
 
 MAX_SOURCE_CHARS = 4_000
@@ -17,16 +17,22 @@ class SourceProvider:
         terms = question_terms(context.request.question)
         candidates: list[CandidateEvidence] = []
         diagnostics: list[Diagnostic] = []
-        seen_sources: set[str] = set()
+        source_pages: dict[str, list[str]] = {}
         for path, page in context.pages.items():
-            if path not in context.resolved_seeds and not page_matches_question(
-                page, context.request.question, terms
-            ):
-                continue
-            source = str(page.frontmatter.get("source") or "")
-            if not source or source in seen_sources:
-                continue
-            seen_sources.add(source)
+            # Declared sources may answer the question even when their page's
+            # summary does not. Project eligibility is already owned by context.pages.
+            sources = [str(page.frontmatter.get("source") or "")]
+            evidence = page.frontmatter.get("evidence")
+            if isinstance(evidence, (list, tuple)):
+                prefix = context.config.content.source_directory.rstrip("/") + "/"
+                sources.extend(ref for ref in evidence if isinstance(ref, str) and ref.startswith(prefix))
+            for source in dict.fromkeys(sources):
+                if source:
+                    source_pages.setdefault(source, []).append(path)
+
+        for source, paths in source_pages.items():
+            path = paths[0]
+            page = context.pages[path]
             source_path = safe_source_path(
                 context.wiki_root,
                 source,
@@ -66,6 +72,10 @@ class SourceProvider:
                 continue
 
             content, truncated = _bounded(raw_content)
+            matched = matched_question_terms(content, terms)
+            explicit_seed = bool(set(paths).intersection(context.resolved_seeds))
+            if not matched and not explicit_seed:
+                continue
             state = normalize_knowledge_state(page.frontmatter)
             candidates.append(
                 CandidateEvidence(
@@ -80,11 +90,13 @@ class SourceProvider:
                     },
                     content=content,
                     roles=_source_roles(context.shapes),
-                    selection_signals=(f"source_for:{path}",),
+                    selection_signals=tuple(f"source_for:{linked}" for linked in paths)
+                    + (("explicit_seed_discovery",) if explicit_seed else ()),
                     authored_state="unspecified",
                     derived_flags=(f"linked_page_state:{state.normalized}",),
                     authority_signals=("source_excerpt",),
                     truncated=truncated,
+                    relevance_terms=tuple(sorted(set(matched) | set(matched_question_terms(source, terms)))),
                 )
             )
         return ProviderResult(tuple(candidates), tuple(diagnostics))

@@ -119,10 +119,10 @@ class ProjectCompilerV3Test(unittest.TestCase):
         self.assertTrue(
             any(item["route"] == "project_orientation_fallback" for item in project_evidence)
         )
-        self.assertNotIn(
-            "projects/llm-wiki-work.md",
-            [item["page"] for item in response["evidence"]],
-        )
+        # Matching work may supplement the result, but must not replace the
+        # initial project orientation that was required before supplementation.
+        pages = [item["page"] for item in response["evidence"]]
+        self.assertLess(pages.index("projects/llm-wiki.md"), pages.index("projects/llm-wiki-work.md"))
 
     def test_scope_seed_graph_discovery_does_not_suppress_orientation_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
