@@ -97,10 +97,16 @@ On a durable change, the Steward:
 
 1. Reads the relevant page and existing revision history.
 2. Snapshots mutable evidence under `sources/` when required.
-3. Appends the validated revision; it never edits an earlier entry.
+3. Builds the new record with `build_temporal_claim_revision`, then validates
+   the complete proposed page history with `parse_temporal_claim_revisions`
+   before applying it. The builder validates one record; the history parser
+   also validates append order and relation targets. Normal maintenance appends
+   the validated revision and preserves earlier entries.
 4. Keeps page prose consistent with the folded current state.
 5. Updates `index.md` and appends the required `log.md` row.
-6. Runs the target wiki lint and render commands.
+6. Runs the target wiki lint and render commands. Lint validates every authored
+   `temporal_claim_revisions` history with the same canonical parser; an invalid
+   history or unavailable validator is a verification failure.
 
 Validation failure is a local authoring error, not a partial write. Preserve
 the existing page and history, correct the proposed entry, and retry through

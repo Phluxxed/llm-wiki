@@ -37,6 +37,18 @@ try:
 except ImportError:
     sys.exit("pyyaml required: run `uv venv && uv pip install pyyaml markdown`, then use `.venv/bin/python3`")
 
+try:
+    from llm_wiki_core.temporal import TemporalContractError
+    from llm_wiki_core.temporal_persistence import parse_temporal_claim_revisions
+    _TEMPORAL_IMPORT_ERROR = None
+except ImportError as error:
+    # Keep lint importable so a missing canonical validator becomes a named
+    # verification failure for authored histories instead of an unexplained
+    # startup traceback.
+    TemporalContractError = None
+    parse_temporal_claim_revisions = None
+    _TEMPORAL_IMPORT_ERROR = error
+
 WIKI_ROOT = Path(__file__).parent.parent
 EXCLUDE_FILES = {"wiki-agent.md", "CLAUDE.md", "AGENTS.md", "GEMINI.md", "CONVENTIONS.md", "README.md", "index.md", "log.md"}
 EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", ".venv", "evals", ".eval"}
@@ -109,6 +121,45 @@ def collect_pages() -> list[dict]:
             continue
         pages.append({"file": str(rel), "fm": fm, "text": text, "sections": extract_sections(text)})
     return pages
+
+
+def check_temporal_history(file: str, frontmatter: dict) -> dict | None:
+    """Validate an authored temporal history with the canonical parser."""
+    if "temporal_claim_revisions" not in frontmatter:
+        return None
+    if parse_temporal_claim_revisions is None:
+        return {
+            "file": file,
+            "check": "temporal_history",
+            "code": "TEMPORAL_VALIDATOR_UNAVAILABLE",
+            "field": "temporal_claim_revisions",
+            "detail": (
+                "TEMPORAL_VALIDATOR_UNAVAILABLE: canonical temporal history parser "
+                f"is unavailable: {_TEMPORAL_IMPORT_ERROR}"
+            ),
+        }
+    try:
+        parse_temporal_claim_revisions(frontmatter)
+    except TemporalContractError as error:
+        field = error.details.get("field")
+        issue = {
+            "file": file,
+            "check": "temporal_history",
+            "code": error.code,
+            "detail": f"{error.code}: {error.message}",
+        }
+        if field is not None:
+            issue["field"] = field
+        return issue
+    except (KeyError, TypeError, ValueError, UnicodeError) as error:
+        return {
+            "file": file,
+            "check": "temporal_history",
+            "code": "TEMPORAL_VALIDATOR_FAILED",
+            "field": "temporal_claim_revisions",
+            "detail": f"TEMPORAL_VALIDATOR_FAILED: canonical parser failed: {error}",
+        }
+    return None
 
 
 def _project_issue(file: str, check: str, detail: str, severity: str = "error") -> dict:
@@ -494,6 +545,10 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
         page_type = fm.get("type", "")
         is_entity = page_type in ("entity", "concept")
 
+        temporal_issue = check_temporal_history(f, fm)
+        if temporal_issue is not None:
+            issues.append(temporal_issue)
+
         # Body markdown links to .md files must resolve to existing files
         for raw in BODY_LINK_RE.findall(p["text"]):
             if resolve_link(raw, f, all_md_paths) is None:
@@ -624,6 +679,7 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
 # ── output ────────────────────────────────────────────────────────────────────
 
 CHECK_LABELS = {
+    "temporal_history":   "Temporal history",
     "frontmatter":        "Frontmatter",
     "source_missing":     "Broken source ref",
     "evidence_missing":   "Broken evidence ref",
@@ -690,7 +746,8 @@ def main():
         print(json.dumps(issues, indent=2, ensure_ascii=False))
     else:
         print_report(issues)
+    return 1 if any(issue.get("check") == "temporal_history" for issue in issues) else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
