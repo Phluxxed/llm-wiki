@@ -2,7 +2,7 @@
 
 A skill that scaffolds a persistent, LLM-maintained wiki — inspired by Karpathy's personal wiki pattern.
 
-Drop it into your agent's skills directory, then run `/wikime` in any project to get a fully operational wiki scaffold in seconds.
+Install it in your agent's skills directory, then use `wikime` to create a purpose-aware wiki in a fresh destination.
 
 ## What it sets up
 
@@ -85,7 +85,7 @@ Run wiki scripts with `.venv/bin/python3`. `scripts/eval.py`'s **claude** judge 
 
 ## Usage
 
-In any directory (empty or existing project), run:
+In an empty directory or a fresh destination within a project, run:
 
 ```
 /wikime
@@ -95,7 +95,7 @@ The skill asks two questions — what the wiki is for, and what the primary page
 
 **Supported page types:** use cases, papers, experiments, runbooks, ADRs, agent Brain pages, or anything else you name. The agent generates templates from the wiki purpose; the template h2 sections become the lint-enforced shape for pages of that type.
 
-**Safe on existing projects:** if a `CLAUDE.md`, `AGENTS.md`, or `GEMINI.md` already exists, the skill appends a single pointer line rather than overwriting it. If `wiki-agent.md` already exists, the skill stops — you already have a wiki.
+**Safe on existing projects:** the skill checks for an existing wiki or scaffold-file collisions before any write. For a fresh scaffold, it preserves an existing host instruction file and appends its pointer once. If `wiki-agent.md` already exists, scaffolding stops without changing files; the target manual and `llm-wiki doctor` / `migrate inspect` / `migrate dry-run` own diagnosis. Apply requires explicit consent and the exact plan hash; verification and receipt-based rollback follow the runtime procedure below. Content migrations remain separately authorized work under the target manual.
 
 ## Scripts
 
@@ -186,6 +186,7 @@ Existing wikis migrate only through the explicit receipt-backed flow:
 
 ```bash
 llm-wiki doctor --wiki .
+llm-wiki migrate inspect --wiki .
 llm-wiki migrate dry-run --wiki .
 llm-wiki migrate apply --wiki . --plan-hash <exact-dry-run-hash>
 llm-wiki migrate verify --wiki .
