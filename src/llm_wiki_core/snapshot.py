@@ -156,16 +156,21 @@ def _collect_source_files(root: Path) -> dict[str, bytes]:
     selected = set(pages)
     selected.update(REQUIRED_WIKI_FILES)
     selected.update(relative for relative in OPTIONAL_WIKI_FILES if (root / relative).is_file())
+    evidence_prefix = content.source_directory.rstrip("/") + "/"
     for page in pages.values():
-        source = page.frontmatter.get("source")
-        if not isinstance(source, str) or not source.strip():
-            continue
-        source_path = safe_source_path(root, source, source_directory=content.source_directory)
-        lexical_source = Path(source)
-        candidate = root / lexical_source
-        if source_path is not None and not lexical_source.is_absolute() and candidate.is_file():
-            _validate_source_path(root, candidate, lexical_source.as_posix())
-            selected.add(candidate.resolve().relative_to(root).as_posix())
+        sources = [page.frontmatter.get("source")]
+        evidence = page.frontmatter.get("evidence")
+        if isinstance(evidence, (list, tuple)):
+            sources.extend(ref for ref in evidence if isinstance(ref, str) and ref.startswith(evidence_prefix))
+        for source in sources:
+            if not isinstance(source, str) or not source.strip():
+                continue
+            source_path = safe_source_path(root, source, source_directory=content.source_directory)
+            lexical_source = Path(source)
+            candidate = root / lexical_source
+            if source_path is not None and not lexical_source.is_absolute() and candidate.is_file():
+                _validate_source_path(root, candidate, lexical_source.as_posix())
+                selected.add(candidate.resolve().relative_to(root).as_posix())
 
     collected: dict[str, bytes] = {}
     for relative in sorted(selected):

@@ -4,13 +4,7 @@ from dataclasses import dataclass
 
 from ..documents import WikiPage
 from ..state import normalize_knowledge_state
-from ..temporal import EntityRef, TemporalContractError
-from ..temporal_persistence import (
-    eligible_temporal_revisions,
-    fold_temporal_claim_revisions,
-    parse_temporal_claim_revisions,
-    render_temporal_revision,
-)
+from .temporal import TemporalProvider, _entity_meaning
 from .base import CandidateEvidence, ProviderContext
 from .utils import matched_question_terms, question_terms, text_terms, title_matches_question
 
@@ -111,77 +105,8 @@ class TextProvider:
         return [item[3] for item in ranked[:MAX_TEXT_CANDIDATES]]
 
 
-class TemporalProvider:
-    name = "temporal"
-
-    def collect(self, context: ProviderContext) -> list[CandidateEvidence]:
-        query = context.request.temporal
-        if query is None:
-            return []
-        candidates: list[CandidateEvidence] = []
-        terms = question_terms(context.request.question)
-        for path, page in context.pages.items():
-            raw_revisions = page.frontmatter.get("temporal_claim_revisions")
-            if raw_revisions is None:
-                continue
-            try:
-                revisions = parse_temporal_claim_revisions(raw_revisions)
-                eligible = eligible_temporal_revisions(revisions, query)
-                fold = fold_temporal_claim_revisions(revisions, known_at=query.known_at or query.request_time)
-            except TemporalContractError:
-                continue
-            for revision in eligible:
-                # Match claim meaning, never the rendered timestamps, lifecycle
-                # labels, provenance IDs or an unrelated claim on the same page.
-                subject_matches = set(matched_question_terms(_entity_meaning(revision.subject), terms))
-                detail_matches = set(matched_question_terms(
-                    revision.predicate + " " + _entity_meaning(revision.object_ref), terms
-                ))
-                matched = tuple(sorted(subject_matches | detail_matches))
-                specific_terms = terms - subject_matches - {query.view}
-                subject_only_match = bool(specific_terms) and not bool(specific_terms & detail_matches)
-                if (not matched or subject_only_match) and path not in context.resolved_seeds:
-                    continue
-                contested = revision.revision_id in fold.contested_revision_ids or query.view == "conflict"
-                flags = ["temporal_accepted"]
-                if revision.decision == "qualify":
-                    flags.append("temporal_qualified")
-                if contested:
-                    flags.append("temporal_contested")
-                authority = ["target_wiki_steward", "contested" if contested else "settled"]
-                candidates.append(
-                    CandidateEvidence(
-                        id=f"temporal:{path}#{revision.revision_id}",
-                        provider=self.name,
-                        route=f"temporal_{query.view}",
-                        page=path,
-                        source=str(page.frontmatter.get("source") or "") or None,
-                        locator={
-                            "kind": "temporal_claim",
-                            "claim_key": revision.claim_key,
-                            "revision_ids": [revision.revision_id],
-                            "world_validity": revision.world_validity.to_dict(),
-                            "known_at": query.known_at or query.request_time,
-                        },
-                        content=render_temporal_revision(revision, view=query.view, fold=fold),
-                        roles=("answer", "current_claim", "authority"),
-                        selection_signals=("temporal_accepted", "temporal_steward")
-                        + (("explicit_seed_discovery",) if path in context.resolved_seeds else ()),
-                        authored_state="current",
-                        derived_flags=tuple(flags),
-                        authority_signals=tuple(authority),
-                        atomic=True,
-                        relevance_terms=matched,
-                    )
-                )
-        return candidates
 
 
-def _entity_meaning(ref: EntityRef) -> str:
-    """Entity identity/value without ambiguity-observation bookkeeping."""
-    values = [ref.page, ref.namespace, ref.value, ref.surface]
-    values.extend(_entity_meaning(candidate) for candidate, _ in ref.candidates)
-    return " ".join(value for value in values if value is not None)
 
 
 def _candidate(

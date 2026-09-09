@@ -40,7 +40,13 @@ from .providers.base import CandidateEvidence
 from .providers.local import TemporalProvider, _candidate, _whole_body
 from .providers.utils import page_matches_question, question_terms
 from .query_shape import classify_question, required_roles
-from .selection import coverage, finalize_response_budget, select_candidates
+from .selection import (
+    DeliveryCostContext,
+    coverage,
+    delivery_rendered_bytes,
+    finalize_response_budget,
+    select_candidates,
+)
 
 
 _NON_DEGRADING_DIAGNOSTICS = {"LOCI_GRAPH_PATH_REJECTED"}
@@ -174,8 +180,6 @@ def compile_context(
     providers = tuple(provider for provider in built_in if provider.name in config.compiler.providers) + tuple(
         extra_providers
     )
-    if request.temporal is not None:
-        providers = providers + (TemporalProvider(),)
     candidates: list[CandidateEvidence] = []
     for provider in providers:
         try:
@@ -196,6 +200,51 @@ def compile_context(
             )
 
     project_fallback: CandidateEvidence | None = None
+    if (
+        project_index is not None and project_resolution is not None
+        and request.workspace_identity is not None
+        and project_resolution.status == "matched"
+        and project_scope.anchor_page is not None
+    ):
+        anchor = loaded_pages.get(project_scope.anchor_page)
+        if anchor is not None and project_scope.anchor_page in eligible_pages:
+            project_fallback = _candidate(
+                anchor, provider="project", route="project_orientation_fallback",
+                locator=_whole_body(anchor), content=anchor.body, shapes=shapes,
+                signals=("project_orientation_fallback", f"active_project:{project_resolution.project_id}"),
+            )
+
+    if request.temporal is not None:
+        ordinary = candidates + ([project_fallback] if project_fallback is not None else [])
+        temporal_result = TemporalProvider().collect(context, ordinary)
+        project_fallback = next((item for item in temporal_result.candidates
+                                 if item.route == "project_orientation_fallback"), None)
+        candidates = [item for item in temporal_result.candidates if item.route != "project_orientation_fallback"]
+        diagnostics.extend(temporal_result.diagnostics)
+
+    delivery_context = DeliveryCostContext(
+        contract_version=request.contract_version,
+        temporal=request.temporal.to_dict() if request.temporal is not None else None,
+        project_resolution=(
+            project_resolution.to_dict()
+            if project_resolution is not None
+            else None
+        ),
+        diagnostics=tuple(diagnostics),
+    )
+    if request.budget.max_delivery_bytes is not None:
+        empty_delivery_bytes = delivery_rendered_bytes((), delivery_context)
+        if empty_delivery_bytes > request.budget.max_delivery_bytes:
+            raise ContractError(
+                "BUDGET_TOO_SMALL",
+                "Budget is too small for the complete delivery frame",
+                {
+                    "provided_max_delivery_bytes": request.budget.max_delivery_bytes,
+                    "delivery_format": request.budget.delivery_format,
+                    "minimum_delivery_bytes": empty_delivery_bytes,
+                },
+            )
+
     if project_index is not None and project_resolution is not None:
         candidates = _annotate_project_candidates(
             candidates,
@@ -203,28 +252,14 @@ def compile_context(
             project_scope,
             resolved_seeds,
         )
-        if (
-            request.workspace_identity is not None
-            and project_resolution.status == "matched"
-            and project_scope.anchor_page is not None
-        ):
-            anchor = loaded_pages.get(project_scope.anchor_page)
-            if anchor is not None and project_scope.anchor_page in eligible_pages:
-                project_fallback = _candidate(
-                    anchor,
-                    provider="project",
-                    route="project_orientation_fallback",
-                    locator=_whole_body(anchor),
-                    content=anchor.body,
-                    shapes=shapes,
-                    signals=(
-                        "project_orientation_fallback",
-                        f"active_project:{project_resolution.project_id}",
-                    ),
-                )
-
     if project_fallback is not None:
-        initial, _ = select_candidates(candidates, request, roles, include_supplements=False)
+        initial, _ = select_candidates(
+            candidates,
+            request,
+            roles,
+            include_supplements=False,
+            delivery_context=delivery_context,
+        )
         if not _has_question_derived_project_candidate(
             initial, project_resolution.project_id, eligible_pages,
             request.question, resolved_seeds,
@@ -232,7 +267,12 @@ def compile_context(
             # Project orientation belongs to the initial set. A later weak
             # supplement must not suppress that established fallback.
             candidates.append(project_fallback)
-    selected, omissions = select_candidates(candidates, request, roles)
+    selected, omissions = select_candidates(
+        candidates,
+        request,
+        roles,
+        delivery_context=delivery_context,
+    )
     coverage_state = coverage(roles, selected)
     evidence_bytes = sum(item.byte_cost for item in selected)
     sufficient = not coverage_state.uncovered_roles
@@ -244,6 +284,10 @@ def compile_context(
         any(item.reason == "byte_limit" for item in omissions)
         or any("hard_limit_excerpt" in item.selection_reasons for item in selected)
     )
+    delivery_limited = (
+        any(item.reason == "delivery_byte_limit" for item in omissions)
+        or any("delivered_limit_excerpt" in item.selection_reasons for item in selected)
+    )
     content_limited = (
         any(item.reason == "content_byte_limit" for item in omissions)
         or any("content_limit_excerpt" in item.selection_reasons for item in selected)
@@ -252,6 +296,9 @@ def compile_context(
     if not candidates:
         stop_reason = "provider_degraded" if provider_degraded else "no_evidence"
         stop_detail = "No candidate evidence was available"
+    elif delivery_limited:
+        stop_reason = "delivery_budget_exhausted"
+        stop_detail = "Prompt Evidence delivery byte ceiling limited the candidate evidence returned"
     elif content_limited:
         stop_reason = "content_budget_exhausted"
         stop_detail = "Evidence content byte ceiling limited the candidate evidence returned"
@@ -271,7 +318,12 @@ def compile_context(
     hard_omissions = tuple(
         item.candidate_id
         for item in omissions
-        if item.reason in {"byte_limit", "content_byte_limit", "item_limit"}
+        if item.reason in {
+            "byte_limit",
+            "content_byte_limit",
+            "delivery_byte_limit",
+            "item_limit",
+        }
     )
     continuation = None
     if hard_omissions:
@@ -308,6 +360,8 @@ def compile_context(
                 or len(selected) > request.budget.target_items
             ),
             max_estimated_tokens=request.budget.max_estimated_tokens,
+            max_delivery_bytes=request.budget.max_delivery_bytes,
+            delivery_format=request.budget.delivery_format,
         ),
         stop=StopState(stop_reason, sufficient, stop_detail),
         continuation=continuation,

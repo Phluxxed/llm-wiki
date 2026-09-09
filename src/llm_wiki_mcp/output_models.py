@@ -663,6 +663,8 @@ class CompiledBudgetLimits(StrictOutputModel):
     max_items: int
     max_estimated_tokens: int | None
     max_content_bytes: int | None = None
+    max_delivery_bytes: int | None = None
+    delivery_format: Literal["anvil_prompt_evidence_v1"] | None = None
 
 
 class CompiledBudgetUsage(StrictOutputModel):
@@ -677,6 +679,7 @@ class CompiledBudgetUsage(StrictOutputModel):
     items: int
     estimated_tokens: int
     content_bytes: int | None = None
+    delivery_bytes: int | None = None
 
 
 class CompiledStop(StrictOutputModel):
@@ -686,9 +689,11 @@ class CompiledStop(StrictOutputModel):
         "sufficient",
         "byte_budget_exhausted",
         "content_budget_exhausted",
+        "delivery_budget_exhausted",
         "item_budget_exhausted",
         "provider_degraded",
         "candidate_exhausted",
+        "no_evidence",
     ] = Field(
         description="Stop condition; legacy `sufficient` remains accepted for historical inputs, but the current compiler no longer emits it and reports concrete conditions."
     )

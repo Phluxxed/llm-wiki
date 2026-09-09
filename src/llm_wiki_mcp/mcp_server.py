@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Any, Callable
+from copy import deepcopy
+import hashlib
+from typing import Annotated, Any, Callable, Literal
 
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, TextContent
 
 from llm_wiki_mcp.errors import WikiMcpError
+from llm_wiki_mcp.input_models import (
+    MaintenanceClaimInput,
+    MaintenanceEvidenceInput,
+    TemporalMaintenanceSourceInput,
+    UnifiedMaintenanceSourceInput,
+    WholeSecondTimestamp,
+)
 from llm_wiki_mcp.output_models import (
     WikiAgentManualOutput,
     WikiAroundOutput,
@@ -53,8 +62,62 @@ from llm_wiki_mcp.wiki_runtime import (
 SUCCESS_MARKER = "OK: structured result available; inspect structuredContent."
 
 
+class _LlmWikiMCPServer(MCPServer):
+    """Publish the maintenance input shape without requiring local-ref resolution."""
+
+    async def list_tools(self) -> list[Any]:
+        tools = await super().list_tools()
+        return [
+            tool.model_copy(
+                update={"input_schema": _inline_maintenance_input_schema(tool.input_schema)}
+            )
+            if tool.name == "wiki_build_maintenance"
+            else tool
+            for tool in tools
+        ]
+
+
+def _inline_maintenance_input_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline the acyclic maintenance models for reference-limited MCP hosts.
+
+    ``MaintenanceJsonValue`` intentionally remains a local reference: it is the
+    sole recursive model, while source, claim, time, entity, and evidence
+    shapes become traversable directly from the tool's input schema.
+    """
+
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, Mapping):
+        return deepcopy(schema)
+
+    def inline(value: Any) -> Any:
+        if isinstance(value, list):
+            return [inline(item) for item in value]
+        if not isinstance(value, Mapping):
+            return value
+
+        reference = value.get("$ref")
+        if (
+            isinstance(reference, str)
+            and reference.startswith("#/$defs/")
+            and reference != "#/$defs/MaintenanceJsonValue"
+        ):
+            definition = definitions.get(reference.removeprefix("#/$defs/"))
+            if isinstance(definition, Mapping):
+                return {
+                    **inline(definition),
+                    **{key: inline(item) for key, item in value.items() if key != "$ref"},
+                }
+
+        return {
+            key: deepcopy(item) if key == "$defs" else inline(item)
+            for key, item in value.items()
+        }
+
+    return inline(schema)
+
+
 def create_server() -> MCPServer:
-    mcp = MCPServer(
+    mcp = _LlmWikiMCPServer(
         "llm-wiki",
         log_level="ERROR",
         instructions=(
@@ -169,6 +232,8 @@ def create_server() -> MCPServer:
         target_items: int = 24,
         max_items: int = 96,
         max_estimated_tokens: int | None = None,
+        max_delivery_bytes: int | None = None,
+        delivery_format: Literal["anvil_prompt_evidence_v1"] | None = None,
         contract_version: str = "1",
         temporal_view: str | None = None,
         request_time: str | None = None,
@@ -191,6 +256,8 @@ def create_server() -> MCPServer:
                 target_items=target_items,
                 max_items=max_items,
                 max_estimated_tokens=max_estimated_tokens,
+                max_delivery_bytes=max_delivery_bytes,
+                delivery_format=delivery_format,
                 contract_version=contract_version,
                 temporal_view=temporal_view,
                 request_time=request_time,
@@ -253,22 +320,70 @@ def create_server() -> MCPServer:
     @mcp.tool()
     def wiki_build_maintenance(
         alias: str,
-        source: Mapping[str, Any],
+        source: UnifiedMaintenanceSourceInput,
         intent: str,
-        proposed_at: str,
-        claims: list[Mapping[str, Any]] | None = None,
+        proposed_at: WholeSecondTimestamp,
+        claims: list[MaintenanceClaimInput] | None = None,
         pages: list[str] | None = None,
-        evidence: list[Mapping[str, Any]] | None = None,
+        evidence: list[MaintenanceEvidenceInput] | None = None,
     ) -> Annotated[CallToolResult, WikiBuildMaintenanceOutput]:
-        """Build one unified, candidate-only maintenance proposal."""
+        """Build a candidate-only proposal; never mutate a wiki.
+
+        Nested input guide (also applies when a host displays types as unknown):
+        With claims, supply the temporal source below. Omit content_hash to derive
+        it from exact UTF-8 payload_text; a supplied hash must be 64 lowercase hex
+        characters and match those bytes. Without claims, source has ONLY
+        source_kind, source_ref, content_hash (required; no payload to hash).
+        observed_at/proposed_at are timezone-aware whole-second RFC3339 instants.
+        Times are objects: {kind: "known", value: ISO date or RFC3339 instant},
+        {kind: "unknown", reason: text}, or {kind: "open"} for an interval end only.
+        Claims require subject, predicate, object, claim_scope,
+        proposed_world_validity: {from: time, to: time}, signals: [{kind, detail?}],
+        and unknowns: [{field, reason}]. Entity examples are below; external IDs
+        use {kind: "external_id", namespace, value}. Evidence is optional:
+        [{ref: text, content_hash?: lowercase SHA-256, kind?: JSON, note?: JSON}].
+        locator maps string keys to strings or non-negative integers.
+
+        Example call (illustrative facts only; use actual evidence and pages):
+        ```json
+        {
+          "alias": "brain",
+          "intent": "durable_learning",
+          "proposed_at": "2026-08-10T01:00:00Z",
+          "source": {
+            "source_kind": "source:manual", "source_ref": "sources/status.md",
+            "locator": {"line": 10, "section": "status"}, "input_type": "input:markdown",
+            "observed_at": "2026-08-10T00:00:00Z",
+            "source_event_time": {"kind": "unknown", "reason": "not stated"},
+            "retention": "immutable_source", "payload_text": "The service is ready."
+          },
+          "claims": [{
+            "subject": {"kind": "resolved_page", "page": "a.md"},
+            "predicate": "status:has_state",
+            "object": {"kind": "literal", "datatype": "type:text", "value": "ready"},
+            "claim_scope": "default",
+            "proposed_world_validity": {"from": {"kind": "known", "value": "2026-01-01"}, "to": {"kind": "open"}},
+            "signals": [{"kind": "signal:direct", "detail": "explicit statement"}], "unknowns": []
+          }]
+        }
+        ```
+        """
+        source_value = source.model_dump(exclude_none=True)
+        if isinstance(source, TemporalMaintenanceSourceInput) and "content_hash" not in source_value:
+            source_value["content_hash"] = hashlib.sha256(
+                source.payload_text.encode("utf-8")
+            ).hexdigest()
         return _handle_wiki_error(
             lambda: unified_maintenance_proposal(
                 alias,
-                source=source,
+                source=source_value,
                 intent=intent,
-                claims=claims or [],
+                claims=[
+                    claim.model_dump(by_alias=True, exclude_none=True)
+                    for claim in claims or []
+                ],
                 pages=pages or [],
-                evidence=evidence or [],
+                evidence=[item.model_dump(exclude_none=True) for item in evidence or []],
                 proposed_at=proposed_at,
             )
         )

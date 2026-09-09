@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ SearchFn = Callable[..., list[dict[str, Any]]]
 FileFn = Callable[..., dict[str, Any]]
 MAX_RESULTS = 40
 MAX_CONTENT_CHARS = 4_000
+ABSOLUTE_TRANSPORT_PATH = re.compile(r"^/?[a-zA-Z]:[\\\\/]")
 
 
 @dataclass(frozen=True)
@@ -359,7 +361,32 @@ def _loci_failure(exc: Exception, *, file_path: str | None = None) -> Diagnostic
         code=code,
         message="Core loci traversal could not provide indexed context",
         provider="loci",
-        details=details,
+        details=_path_free_metadata(details),
+    )
+
+
+def _path_free_metadata(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            key: _path_free_metadata(item)
+            for key, item in value.items()
+            if not (isinstance(key, str) and _is_absolute_transport_path(key))
+            if not (isinstance(item, str) and _is_absolute_transport_path(item))
+        }
+    if isinstance(value, list):
+        return [
+            _path_free_metadata(item)
+            for item in value
+            if not (isinstance(item, str) and _is_absolute_transport_path(item))
+        ]
+    return value
+
+
+def _is_absolute_transport_path(value: str) -> bool:
+    return (
+        value.startswith(("/", "\\"))
+        or bool(ABSOLUTE_TRANSPORT_PATH.match(value))
+        or value.lower().startswith("file:")
     )
 
 

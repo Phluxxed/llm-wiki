@@ -1,20 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import json
-from typing import Iterable
+import re
+from typing import Any, Iterable, Mapping
 
 from .contracts import (
     CompileRequest,
     CompiledContext,
     ContractError,
     Coverage,
+    Diagnostic,
     EvidenceRecord,
     Omission,
     ResponseReporting,
     StopState,
 )
 from .providers.base import CandidateEvidence
+from .providers.temporal import TEMPORAL_DIAGNOSTIC_RECOVERY
 from .providers.utils import matched_question_terms, question_terms
 from .state import state_compatibility
 
@@ -31,6 +34,34 @@ _PROVIDER_ORDER = {
 }
 _MAX_RETURNED_OMISSIONS = 16
 _MAX_RETURNED_DIAGNOSTICS = 16
+_DELIVERY_DIAGNOSTIC_CODES = frozenset(
+    {
+        "PROJECT_IDENTITY_AMBIGUOUS",
+        "PROJECT_IDENTITY_INVALID",
+        "PROJECT_ALIAS_SHADOWED",
+    }
+)
+_DELIVERY_DIAGNOSTIC_RECOVERY = (
+    "Repair the canonical Brain project identity or workspace mapping before relying on project routing."
+)
+_JS_WHITESPACE = re.compile(
+    r"[\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+"
+)
+_JS_WHITESPACE_CHARS = (
+    "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+
+
+@dataclass(frozen=True)
+class DeliveryCostContext:
+    """Internal projection inputs for the closed Anvil Prompt Evidence profile."""
+
+    contract_version: str
+    project_resolution: Mapping[str, Any] | None = None
+    diagnostics: tuple[Diagnostic, ...] = ()
+    temporal: Mapping[str, Any] | None = None
 
 
 def select_candidates(
@@ -39,6 +70,7 @@ def select_candidates(
     required: tuple[str, ...],
     *,
     include_supplements: bool = True,
+    delivery_context: DeliveryCostContext | None = None,
 ) -> tuple[tuple[EvidenceRecord, ...], tuple[Omission, ...]]:
     terms = question_terms(request.question)
     relevance = {
@@ -50,8 +82,13 @@ def select_candidates(
     strongest = max((len(relevance[item.id]) for item in candidates
                      if item.provider in query_providers), default=0)
     ordered = sorted(candidates, key=lambda item: (
-        0 if item.provider == "seed" else 2 if item.provider == "source" else 1,
+        0 if item.provider == "seed" or (item.provider == "temporal" and item.page in request.seeds)
+        else 2 if item.provider == "source" else 1,
         -len(relevance[item.id]),
+        # Temporal authority governs applicability, not question relevance.
+        # Prefer it on a relevance tie; do not crowd out a better answer merely
+        # because another page has a valid, loosely related temporal claim.
+        0 if request.temporal is not None and item.provider == "temporal" else 1,
         _rank(item, request.state_view, required),
     ))
     selected: list[EvidenceRecord] = []
@@ -71,14 +108,23 @@ def select_candidates(
                 and not relevance[candidate.id] and not explicit):
             omissions.append(Omission(candidate.id, "question_mismatch", _candidate_cost(candidate)))
             continue
-        if candidate.provider == "source" and not explicit:
+        if candidate.provider == "source":
             linked_pages = {signal.removeprefix("source_for:")
                             for signal in candidate.selection_signals if signal.startswith("source_for:")}
             claims = [item for item in selected if item.provider not in {"source", "project"}]
-            supports_selected_claim = any(
-                item.page in linked_pages and bool(relevance[item.id] & relevance[candidate.id])
-                for item in claims
-            )
+            supported_claims = [
+                item for item in claims
+                if bool(relevance[item.id] & relevance[candidate.id])
+                and (
+                    candidate.source in item.locator.get("steward_evidence_refs", ())
+                    if request.temporal is not None and item.provider == "temporal"
+                    else item.page in linked_pages
+                )
+            ]
+            supports_selected_claim = bool(supported_claims)
+            if request.temporal is not None and any("authority" in item.roles for item in supported_claims):
+                candidate = replace(candidate, roles=tuple(dict.fromkeys((*candidate.roles, "authority"))),
+                                    selection_signals=(*candidate.selection_signals, "supports_selected_authority"))
             # A source may answer a question about the source itself. Otherwise
             # its declared provenance must connect to a selected relevant claim;
             # unrelated provenance cannot independently fill an authority slot.
@@ -88,7 +134,7 @@ def select_candidates(
                 named_source or (len(relevance[candidate.id]) == strongest
                                  and selected_claim_terms <= relevance[candidate.id])
             )
-            if not supports_selected_claim and not direct_source_answer:
+            if not explicit and not supports_selected_claim and not direct_source_answer:
                 if include_supplements and not supplement:
                     pending.append((candidate, True))
                     continue
@@ -121,7 +167,9 @@ def select_candidates(
                 omissions.append(Omission(candidate.id, "duplicate", _candidate_cost(candidate)))
                 continue
         compatibility = state_compatibility(candidate.authored_state, request.state_view)
-        if compatibility == "lineage_only" and "lineage" not in required:
+        if (compatibility == "lineage_only" and "lineage" not in required
+                and candidate.provider != "temporal"
+                and "temporal_background" not in candidate.derived_flags):
             omissions.append(Omission(candidate.id, "state_mismatch", _candidate_cost(candidate)))
             continue
 
@@ -175,6 +223,34 @@ def select_candidates(
                 omissions.append(Omission(candidate.id, "byte_limit", record.byte_cost))
                 continue
             record = fitted
+        if request.budget.max_delivery_bytes is not None:
+            context = delivery_context or DeliveryCostContext(
+                contract_version=request.contract_version,
+                temporal=request.temporal.to_dict() if request.temporal is not None else None,
+            )
+            delivery_limit = request.budget.max_delivery_bytes
+            projected_delivery_bytes = delivery_budget_cost_bytes(
+                (*selected, record),
+                context,
+            )
+            if projected_delivery_bytes > delivery_limit:
+                if candidate.atomic:
+                    omissions.append(
+                        Omission(candidate.id, "delivery_byte_limit", record.byte_cost)
+                    )
+                    continue
+                fitted_delivery = _fit_record_to_delivery(
+                    record,
+                    tuple(selected),
+                    context,
+                    delivery_limit,
+                )
+                if fitted_delivery is None:
+                    omissions.append(
+                        Omission(candidate.id, "delivery_byte_limit", record.byte_cost)
+                    )
+                    continue
+                record = fitted_delivery
         selected.append(record)
         seen.add(identity)
         used_bytes += record.byte_cost
@@ -211,9 +287,225 @@ def coverage(required: tuple[str, ...], selected: Iterable[EvidenceRecord]) -> C
     return Coverage(required, covered, uncovered)
 
 
+def delivery_rendered_bytes(
+    evidence: Iterable[EvidenceRecord],
+    context: DeliveryCostContext,
+) -> int:
+    """Return the UTF-8 size of Anvil's untruncated Prompt Evidence render."""
+
+    records = tuple(evidence)
+    relevant = None
+    if records:
+        relevant = _delivery_section(
+            "Prompt Evidence",
+            "\n\n".join(_delivery_evidence_block(item) for item in records),
+        )
+
+    diagnostics = _delivery_diagnostics(context)
+    diagnostic_section = None
+    if diagnostics:
+        diagnostic_section = _delivery_section(
+            "Diagnostics",
+            "\n".join(
+                "\n".join(
+                    (
+                        f"- code: {code}",
+                        f"- message: {_delivery_one_line(message)}",
+                        f"- recovery: {_delivery_one_line(recovery)}",
+                    )
+                )
+                for code, message, recovery in diagnostics
+            ),
+        )
+
+    pages: list[str] = []
+    seen_pages: set[str] = set()
+    for item in records:
+        if item.page and item.page not in seen_pages:
+            seen_pages.add(item.page)
+            pages.append(item.page)
+    resolution = context.project_resolution if context.contract_version == "3" else None
+    matched_project = (
+        resolution.get("page")
+        if isinstance(resolution, Mapping) and resolution.get("status") == "matched"
+        else None
+    )
+    temporal_line = ()
+    if context.temporal is not None:
+        temporal_query = {key: context.temporal[key] for key in ("view", "request_time", "world_at", "known_at", "transition")
+                          if key in context.temporal}
+        temporal_line = ("- temporal_query: " + json.dumps(temporal_query, ensure_ascii=False, separators=(",", ":")),)
+    route = _delivery_section(
+        "Recall Route",
+        "\n".join(
+            (
+                f"- current_project: {_delivery_code(matched_project) if matched_project else 'unknown_project'}",
+                "- kernel_pages: none",
+                "- evidence_pages: "
+                + (
+                    ", ".join(_delivery_code(page) for page in pages)
+                    if pages
+                    else "none"
+                ),
+            ) + temporal_line
+        ),
+    )
+
+    prefix_parts = ["## Brain Context"]
+    if relevant is not None:
+        prefix_parts.extend(("", relevant))
+    if diagnostic_section is not None:
+        prefix_parts.extend(("", diagnostic_section))
+    prefix = "\n".join(prefix_parts)
+    full = f"{prefix}\n\n{route}\n"
+    return len(full.encode("utf-8"))
+
+
+def _delivery_section(title: str, body: str) -> str:
+    return f"### {title}\n\n{body}"
+
+
+def _delivery_code(value: str) -> str:
+    return f"`{value}`"
+
+
+def _delivery_evidence_block(record: EvidenceRecord) -> str:
+    origin = record.page if record.page is not None else record.source
+    if origin is None:
+        origin = record.id
+    roles = (
+        ", ".join(_delivery_code(role) for role in record.roles)
+        if record.roles
+        else "none"
+    )
+    return "\n".join(
+        (
+            f"#### `{origin}`",
+            "",
+            _delivery_trim(record.content),
+            "",
+            f"- evidence_id: `{record.id}`",
+            f"- roles: {roles}",
+        )
+    )
+
+
+def _delivery_diagnostics(
+    context: DeliveryCostContext,
+) -> tuple[tuple[str, str, str], ...]:
+    if context.contract_version != "3":
+        return ()
+    result: list[tuple[str, str, str]] = []
+    for diagnostic in context.diagnostics:
+        if diagnostic.code in _DELIVERY_DIAGNOSTIC_CODES:
+            result.append(
+                (
+                    diagnostic.code,
+                    diagnostic.message,
+                    _DELIVERY_DIAGNOSTIC_RECOVERY,
+                )
+            )
+    resolution = context.project_resolution
+    if (
+        isinstance(resolution, Mapping)
+        and resolution.get("status") == "ambiguous"
+        and not any(code == "PROJECT_IDENTITY_AMBIGUOUS" for code, _, _ in result)
+    ):
+        result.append(
+            (
+                "PROJECT_IDENTITY_AMBIGUOUS",
+                "llm-wiki reported multiple projects for the observed workspace identity.",
+                _DELIVERY_DIAGNOSTIC_RECOVERY,
+            )
+        )
+    for diagnostic in context.diagnostics:
+        if diagnostic.code in TEMPORAL_DIAGNOSTIC_RECOVERY:
+            host_code = "BRAIN_TEMPORAL_HISTORY_INVALID" if diagnostic.code == "TEMPORAL_HISTORY_INVALID" else "BRAIN_TEMPORAL_UNCERTAIN"
+            result.append((host_code, diagnostic.message, TEMPORAL_DIAGNOSTIC_RECOVERY[diagnostic.code]))
+    return tuple(result)
+
+
+def delivery_budget_cost_bytes(
+    evidence: Iterable[EvidenceRecord],
+    context: DeliveryCostContext,
+) -> int:
+    """Return the bounded packing cost for the closed delivery profile.
+
+    Anvil supplies its own ``PROJECT_IDENTITY_AMBIGUOUS`` diagnostic when a
+    v3 response has an ambiguous project resolution and the explicit compiler
+    diagnostic is absent from the JSON envelope. Selection can therefore
+    reserve against both the ordinary render and that fallback render without
+    introducing a second fitting pass during response finalization.
+    """
+
+    records = tuple(evidence)
+    actual = delivery_rendered_bytes(records, context)
+    resolution = context.project_resolution
+    if (
+        context.contract_version != "3"
+        or not isinstance(resolution, Mapping)
+        or resolution.get("status") != "ambiguous"
+    ):
+        return actual
+    compact_context = DeliveryCostContext(
+        contract_version=context.contract_version,
+        project_resolution=context.project_resolution,
+        temporal=context.temporal,
+        diagnostics=tuple(
+            diagnostic
+            for diagnostic in context.diagnostics
+            if diagnostic.code != "PROJECT_IDENTITY_AMBIGUOUS"
+        ),
+    )
+    return max(actual, delivery_rendered_bytes(records, compact_context))
+
+
+def _delivery_trim(value: str) -> str:
+    return value.strip(_JS_WHITESPACE_CHARS)
+
+
+def _delivery_one_line(value: str) -> str:
+    return _JS_WHITESPACE.sub(" ", value).strip(_JS_WHITESPACE_CHARS)
+
+
+def _fit_record_to_delivery(
+    record: EvidenceRecord,
+    prefix: tuple[EvidenceRecord, ...],
+    context: DeliveryCostContext,
+    max_bytes: int,
+) -> EvidenceRecord | None:
+    reasons = tuple(dict.fromkeys((*record.selection_reasons, "delivered_limit_excerpt")))
+    source = record.content.removesuffix("\n\n[truncated]") if record.truncated else record.content
+    low = 0
+    high = len(source)
+    best: EvidenceRecord | None = None
+    while low <= high:
+        middle = (low + high) // 2
+        content = _excerpt(source, middle)
+        if not content:
+            low = middle + 1
+            continue
+        candidate = _with_record_cost(
+            replace(
+                record,
+                content=content,
+                selection_reasons=reasons,
+                truncated=True,
+                byte_cost=0,
+            )
+        )
+        if delivery_budget_cost_bytes((*prefix, candidate), context) <= max_bytes:
+            best = candidate
+            low = middle + 1
+        else:
+            high = middle - 1
+    return best
+
+
 def finalize_response_budget(response: CompiledContext) -> CompiledContext:
     omissions = _prioritize_omissions(response.omissions)
-    diagnostics = response.diagnostics
+    critical_diagnostics = tuple(d for d in response.diagnostics if d.code in TEMPORAL_DIAGNOSTIC_RECOVERY)
+    diagnostics = critical_diagnostics + tuple(d for d in response.diagnostics if d.code not in TEMPORAL_DIAGNOSTIC_RECOVERY)
     reported_omissions = omissions[:_MAX_RETURNED_OMISSIONS]
     reported_diagnostics = diagnostics[:_MAX_RETURNED_DIAGNOSTICS]
     full = _with_reporting(
@@ -226,17 +518,17 @@ def finalize_response_budget(response: CompiledContext) -> CompiledContext:
     full = _with_budget_accounting(full)
     limit = _effective_response_limit(full)
     if _serialized_size(full) <= limit:
-        return full
+        return _assert_delivery_budget(full)
 
     compact = _compact_continuation(
-        _with_reporting(full, (), (), len(omissions), len(diagnostics))
+        _with_reporting(full, (), critical_diagnostics, len(omissions), len(diagnostics))
     )
     compact, budget_omissions = _fit_evidence(compact, limit)
     all_omissions = _prioritize_omissions((*budget_omissions, *omissions))
     compact = _with_reporting(
         compact,
         (),
-        (),
+        critical_diagnostics,
         len(all_omissions),
         len(diagnostics),
     )
@@ -292,7 +584,25 @@ def finalize_response_budget(response: CompiledContext) -> CompiledContext:
             "Complete response exceeded its enforced budget",
             {"effective_max_bytes": limit, "actual_bytes": _serialized_size(compact)},
         )
-    return compact
+    return _assert_delivery_budget(compact)
+
+
+def _assert_delivery_budget(response: CompiledContext) -> CompiledContext:
+    """Validate the actual rendered delivery after normal JSON finalization."""
+
+    max_delivery = response.budget.max_delivery_bytes
+    actual_delivery = response.budget.delivery_bytes
+    if max_delivery is not None and actual_delivery is not None and actual_delivery > max_delivery:
+        raise ContractError(
+            "BUDGET_ENFORCEMENT_FAILED",
+            "Prompt Evidence delivery exceeded its enforced byte allowance",
+            {
+                "max_delivery_bytes": max_delivery,
+                "delivery_bytes": actual_delivery,
+                "delivery_format": response.budget.delivery_format,
+            },
+        )
+    return response
 
 
 def _fit_evidence(
@@ -497,6 +807,7 @@ def _prioritize_omissions(omissions: tuple[Omission, ...]) -> tuple[Omission, ..
     priority = {
         "byte_limit": 0,
         "content_byte_limit": 0,
+        "delivery_byte_limit": 0,
         "item_limit": 1,
         "state_mismatch": 2,
         "duplicate": 3,
@@ -532,6 +843,19 @@ def _with_budget_accounting(response: CompiledContext) -> CompiledContext:
     while True:
         evidence_bytes = sum(item.byte_cost for item in current.evidence)
         content_bytes = sum(len(item.content.encode("utf-8")) for item in current.evidence)
+        delivery_bytes = (
+            delivery_rendered_bytes(
+                current.evidence,
+                DeliveryCostContext(
+                    contract_version=current.contract_version,
+                    project_resolution=current.project_resolution,
+                    diagnostics=current.diagnostics,
+                    temporal=current.temporal.to_dict() if current.temporal is not None else None,
+                ),
+            )
+            if current.budget.max_delivery_bytes is not None
+            else None
+        )
         total_bytes = _serialized_size(current)
         envelope_bytes = total_bytes - evidence_bytes
         estimated_tokens = (total_bytes + 3) // 4
@@ -554,6 +878,7 @@ def _with_budget_accounting(response: CompiledContext) -> CompiledContext:
             and estimated_tokens == current.budget.estimated_tokens
             and len(current.evidence) == current.budget.items
             and target_exceeded == current.budget.target_exceeded_for_coverage
+            and delivery_bytes == current.budget.delivery_bytes
         ):
             return current
         current = replace(
@@ -566,6 +891,7 @@ def _with_budget_accounting(response: CompiledContext) -> CompiledContext:
                 items=len(current.evidence),
                 estimated_tokens=estimated_tokens,
                 target_exceeded_for_coverage=target_exceeded,
+                delivery_bytes=delivery_bytes,
             ),
         )
 

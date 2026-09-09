@@ -8,6 +8,8 @@ from typing import Any, Mapping
 
 CONTRACT_VERSION = "1"
 SUPPORTED_CONTRACT_VERSIONS = {"1", "2", "3"}
+ANVIL_PROMPT_EVIDENCE_DELIVERY_FORMAT = "anvil_prompt_evidence_v1"
+SUPPORTED_DELIVERY_FORMATS = {ANVIL_PROMPT_EVIDENCE_DELIVERY_FORMAT}
 TEMPORAL_VIEWS = {"current", "historical", "transition", "lineage", "conflict"}
 _RFC3339_INSTANT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -42,6 +44,8 @@ class CompileBudget:
     target_items: int = 24
     max_items: int = 96
     max_estimated_tokens: int | None = None
+    max_delivery_bytes: int | None = None
+    delivery_format: str | None = None
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any] | None) -> CompileBudget:
@@ -55,6 +59,8 @@ class CompileBudget:
             "target_items",
             "max_items",
             "max_estimated_tokens",
+            "max_delivery_bytes",
+            "delivery_format",
         }
         if unknown:
             field_name = f"budget.{sorted(unknown)[0]}"
@@ -71,6 +77,37 @@ class CompileBudget:
         if estimated is not None:
             estimated = _positive_int(estimated, "budget.max_estimated_tokens")
 
+        raw_delivery_bytes = raw.get("max_delivery_bytes")
+        raw_delivery_format = raw.get("delivery_format")
+        if raw_delivery_bytes is None and raw_delivery_format is None:
+            max_delivery_bytes = None
+            delivery_format = None
+        else:
+            if raw_delivery_bytes is None:
+                raise _invalid(
+                    "budget.max_delivery_bytes",
+                    "Delivery format requires max_delivery_bytes",
+                )
+            if raw_delivery_format is None:
+                raise _invalid(
+                    "budget.delivery_format",
+                    "Delivery byte allowance requires delivery_format",
+                )
+            max_delivery_bytes = _positive_int(
+                raw_delivery_bytes,
+                "budget.max_delivery_bytes",
+            )
+            delivery_format = raw_delivery_format
+            if (
+                not isinstance(delivery_format, str)
+                or delivery_format not in SUPPORTED_DELIVERY_FORMATS
+            ):
+                raise _invalid(
+                    "budget.delivery_format",
+                    "Unsupported delivery format",
+                    allowed=sorted(SUPPORTED_DELIVERY_FORMATS),
+                )
+
         if target_bytes > max_bytes:
             raise _invalid("budget.target_bytes", "Target bytes cannot exceed maximum bytes")
         if target_items > max_items:
@@ -85,6 +122,8 @@ class CompileBudget:
             target_items=min(target_items, effective_max_items),
             max_items=effective_max_items,
             max_estimated_tokens=estimated,
+            max_delivery_bytes=max_delivery_bytes,
+            delivery_format=delivery_format,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -97,6 +136,9 @@ class CompileBudget:
         }
         if self.max_content_bytes is not None:
             result["max_content_bytes"] = self.max_content_bytes
+        if self.max_delivery_bytes is not None:
+            result["max_delivery_bytes"] = self.max_delivery_bytes
+            result["delivery_format"] = self.delivery_format
         return result
 
 
@@ -438,6 +480,9 @@ class BudgetUsage:
     content_bytes: int = 0
     max_estimated_tokens: int | None = None
     max_content_bytes: int | None = None
+    max_delivery_bytes: int | None = None
+    delivery_format: str | None = None
+    delivery_bytes: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         limits = {
@@ -458,6 +503,10 @@ class BudgetUsage:
         if self.max_content_bytes is not None:
             limits["max_content_bytes"] = self.max_content_bytes
             result["content_bytes"] = self.content_bytes
+        if self.max_delivery_bytes is not None:
+            limits["max_delivery_bytes"] = self.max_delivery_bytes
+            limits["delivery_format"] = self.delivery_format
+            result["delivery_bytes"] = self.delivery_bytes
         return result
 
 
@@ -604,6 +653,12 @@ def _parse_instant(value: Any, field_name: str) -> str:
         raise _invalid(field_name, "Field must be an RFC 3339 instant") from exc
     if parsed.tzinfo is None:
         raise _invalid(field_name, "Field must include a timezone")
+    # The persisted temporal reader deliberately operates at whole seconds.
+    # Reject unsupported query precision here, before it can be mistaken for
+    # malformed authored history by a provider.
+    fraction = re.search(r"\.(\d+)", candidate)
+    if fraction is not None and any(digit != "0" for digit in fraction.group(1)):
+        raise _invalid(field_name, "Field must be a whole-second instant")
     normalized = parsed.astimezone(timezone.utc).replace(microsecond=parsed.microsecond)
     return normalized.isoformat(timespec="microseconds" if normalized.microsecond else "seconds").replace("+00:00", "Z")
 

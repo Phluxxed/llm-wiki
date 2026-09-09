@@ -616,11 +616,15 @@ def render_temporal_revision(
     if not isinstance(revision, TemporalClaimRevision):
         revision = parse_temporal_claim_revision(revision)
     contested = view == "conflict" or (fold is not None and revision.revision_id in fold.contested_revision_ids)
-    status = "contested" if contested else {
-        "retire": "retired",
-        "supersede": "superseded",
-        "qualify": "qualified",
-    }.get(revision.decision, "settled")
+    status = "settled"
+    if contested:
+        status = "contested"
+    elif revision.decision == "retire" or (fold is not None and revision.revision_id in fold.retired_revision_ids):
+        status = "retired"
+    elif fold is not None and revision.revision_id in fold.superseded_revision_ids:
+        status = "superseded"
+    elif revision.decision == "qualify":
+        status = "qualified"
     payload = {
         "claim_key": revision.claim_key,
         "revision_id": revision.revision_id,

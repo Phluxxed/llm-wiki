@@ -168,6 +168,8 @@ def compiled_context(
     target_items: int = 24,
     max_items: int = 96,
     max_estimated_tokens: int | None = None,
+    max_delivery_bytes: int | None = None,
+    delivery_format: str | None = None,
     contract_version: str = "1",
     temporal_view: str | None = None,
     request_time: str | None = None,
@@ -178,20 +180,28 @@ def compiled_context(
     workspace_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     record = get_wiki(alias)
+    budget: dict[str, Any] = {
+        "target_bytes": target_bytes,
+        "max_bytes": max_bytes,
+        "max_content_bytes": max_content_bytes,
+        "target_items": target_items,
+        "max_items": max_items,
+        "max_estimated_tokens": max_estimated_tokens,
+    }
+    if max_delivery_bytes is not None or delivery_format is not None:
+        budget.update(
+            {
+                "max_delivery_bytes": max_delivery_bytes,
+                "delivery_format": delivery_format,
+            }
+        )
     request_data: dict[str, Any] = {
         "contract_version": contract_version,
         "alias": record["alias"],
         "question": question,
         "seeds": seeds or [],
         "state_view": state_view,
-        "budget": {
-            "target_bytes": target_bytes,
-            "max_bytes": max_bytes,
-            "max_content_bytes": max_content_bytes,
-            "target_items": target_items,
-            "max_items": max_items,
-            "max_estimated_tokens": max_estimated_tokens,
-        },
+        "budget": budget,
     }
     if temporal_view is not None:
         temporal: dict[str, Any] = {

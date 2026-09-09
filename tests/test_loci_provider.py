@@ -15,15 +15,16 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from llm_wiki_core.compiler import compile_context
 from llm_wiki_core.contracts import CompileRequest
 from llm_wiki_core.graph_adapter import GraphAdapterError
-from llm_wiki_core.providers.loci import LociMcpGateway, LociProvider, LociRetrieval, _has_meaningful_query_match
+from llm_wiki_core.providers.loci import LociMcpGateway, LociProvider, LociRetrieval, _has_meaningful_query_match, _loci_failure
 from llm_wiki_core.providers.loci_transport import LociGatewayError, LociMcpClient
 from tests.wiki_fixture import base_fm, write_md
 
 
 class FakeLociError(Exception):
-    def __init__(self, code: str):
+    def __init__(self, code: str, details=None):
         super().__init__(code)
         self.code = code
+        self.details = details
 
 
 class LociProviderTest(unittest.TestCase):
@@ -449,7 +450,27 @@ class LociProviderTest(unittest.TestCase):
 
     def test_unindexed_repo_degrades_with_structured_diagnostic(self):
         def search(*args, **kwargs):
-            raise FakeLociError("REPO_NOT_INDEXED")
+            raise FakeLociError(
+                "REPO_NOT_INDEXED",
+                {
+                    "repo": str(self.root),
+                    "safe_code": "repo-not-indexed",
+                    "relative_file": "notes/overview.md",
+                    "/absolute/key": "discarded",
+                    "nested": {
+                        "safe": "retained",
+                        "file_uri": "file:///private/var/folders/snapshot-wiki",
+                        "items": [
+                            "safe-item",
+                            "/private/var/folders/snapshot-wiki",
+                            r"C:\snapshot\wiki",
+                            r"\\server\share\wiki",
+                            "file:///private/var/folders/list-snapshot",
+                            {"safe_nested": "retained", "path": "/discarded"},
+                        ],
+                    },
+                },
+            )
 
         provider = LociProvider(search_fn=search, file_fn=lambda *args, **kwargs: {})
 
@@ -458,6 +479,24 @@ class LociProviderTest(unittest.TestCase):
         diagnostic = next(item for item in response["diagnostics"] if item["provider"] == "loci")
         self.assertEqual(diagnostic["code"], "LOCI_REPO_NOT_INDEXED")
         self.assertNotIn("REPO_NOT_INDEXED", diagnostic["message"])
+        self.assertEqual(diagnostic["details"]["type"], "FakeLociError")
+        self.assertEqual(diagnostic["details"]["safe_code"], "repo-not-indexed")
+        self.assertEqual(diagnostic["details"]["relative_file"], "notes/overview.md")
+        self.assertEqual(diagnostic["details"]["nested"]["safe"], "retained")
+        self.assertEqual(
+            diagnostic["details"]["nested"]["items"],
+            ["safe-item", {"safe_nested": "retained"}],
+        )
+        self.assertNotIn("repo", diagnostic["details"])
+        self.assertNotIn("/absolute/key", diagnostic["details"])
+        self.assertNotIn("file_uri", diagnostic["details"]["nested"])
+
+    def test_failure_file_hint_obeys_the_same_path_free_boundary(self):
+        error = FakeLociError("LOCI_MCP_TIMEOUT")
+        for file_path in ("/private/wiki/page.md", r"C:\wiki\page.md", r"\\server\wiki\page.md", "FILE:///wiki/page.md"):
+            with self.subTest(file_path=file_path):
+                self.assertNotIn("file", _loci_failure(error, file_path=file_path).details)
+        self.assertEqual(_loci_failure(error, file_path="notes/page.md").details["file"], "notes/page.md")
 
     def test_loci_result_cannot_read_outside_wiki_root(self):
         def search(*args, **kwargs):

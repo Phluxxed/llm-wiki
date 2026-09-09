@@ -12,6 +12,7 @@ from typing import Any
 from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from llm_wiki_mcp.output_models import WikiCompileContextOutput
 from tests.wiki_fixture import base_fm, create_wiki_root, write_md
 
 
@@ -86,6 +87,86 @@ class McpCompilerTest(unittest.TestCase):
         ).encode("utf-8")
         self.assertLessEqual(len(serialized), 10_000)
         self.assertIn("reporting", result["compiled"])
+
+    def test_stdio_arithmetic_without_evidence_returns_typed_no_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            wiki = create_wiki_root(tmp / "wiki")
+            (wiki / ".llm-wiki.toml").write_text(
+                'schema_version = "1"\n'
+                'runtime_contract = "2"\n'
+                '[compiler]\n'
+                'providers = ["seed", "frontmatter", "text", "source"]\n',
+                encoding="utf-8",
+            )
+
+            result = asyncio.run(_no_evidence_round_trip(tmp / "home", wiki))
+
+        self.assertFalse(result["is_error"])
+        structured = result["structured_content"]
+        self.assertEqual(structured["kind"], "compiled_context")
+        self.assertEqual(structured["evidence"], [])
+        self.assertEqual(structured["stop"]["reason"], "no_evidence")
+        self.assertFalse(structured["stop"]["sufficient"])
+
+        schema = result["schema"]
+        self.assertIsNotNone(schema)
+        assert schema is not None
+        self.assertIn(
+            "no_evidence",
+            schema["$defs"]["CompiledStop"]["properties"]["reason"]["enum"],
+        )
+
+        validated = WikiCompileContextOutput.model_validate(structured)
+        self.assertIsNotNone(validated.stop)
+        assert validated.stop is not None
+        self.assertEqual(validated.stop.reason, "no_evidence")
+        self.assertFalse(validated.stop.sufficient)
+
+    def test_stdio_provider_degradation_keeps_evidence_and_typed_stop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            wiki = create_wiki_root(tmp / "wiki")
+            (wiki / "sources").mkdir()
+            (wiki / "sources" / "runtime.md").write_text(
+                "llm-wiki owns traversal.", encoding="utf-8"
+            )
+            write_md(
+                wiki / "systems" / "runtime.md",
+                base_fm(
+                    title="Runtime",
+                    source="sources/runtime.md",
+                    knowledge_state="current",
+                ),
+                "Runtime summary.",
+            )
+            (wiki / ".llm-wiki.toml").write_text(
+                'schema_version = "1"\n'
+                'runtime_contract = "2"\n'
+                '[compiler]\n'
+                'providers = ["seed", "frontmatter", "text", "source", "loci"]\n',
+                encoding="utf-8",
+            )
+
+            result = asyncio.run(_provider_degraded_round_trip(tmp / "home", wiki))
+
+        self.assertFalse(result["is_error"])
+        structured = result["structured_content"]
+        self.assertEqual(structured["kind"], "compiled_context")
+        self.assertTrue(structured["evidence"])
+        self.assertEqual(structured["stop"]["reason"], "provider_degraded")
+        self.assertNotEqual(structured["stop"]["reason"], "no_evidence")
+        self.assertTrue(
+            any(
+                diagnostic["code"] == "LOCI_MCP_CONFIG_MISSING"
+                for diagnostic in structured["diagnostics"]
+            )
+        )
+
+        validated = WikiCompileContextOutput.model_validate(structured)
+        self.assertIsNotNone(validated.stop)
+        assert validated.stop is not None
+        self.assertEqual(validated.stop.reason, "provider_degraded")
 
     def test_invalid_compiler_input_keeps_structured_error_envelope(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -196,6 +277,58 @@ async def _compile_round_trip(home: Path, wiki: Path):
             "schemas": schemas,
             "context": context.structured_content,
             "compiled": compiled.structured_content,
+        }
+
+
+async def _no_evidence_round_trip(home: Path, wiki: Path):
+    params = await _session(home)
+    async with Client(stdio_client(params), mode="auto") as client:
+        tools = await client.list_tools()
+        schema = next(
+            tool.output_schema
+            for tool in tools.tools
+            if tool.name == "wiki_compile_context"
+        )
+        await client.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
+        result = await client.call_tool(
+            "wiki_compile_context",
+            {
+                "alias": "test",
+                "question": "938471239847 + 719283746512",
+                "target_bytes": 1_000,
+                "max_bytes": 8_000,
+                "target_items": 1,
+                "max_items": 2,
+            },
+        )
+        return {
+            "is_error": result.is_error,
+            "schema": schema,
+            "structured_content": result.structured_content,
+        }
+
+
+async def _provider_degraded_round_trip(home: Path, wiki: Path):
+    params = await _session(home)
+    assert params.env is not None
+    params.env.pop("LOCI_BASE_DIR", None)
+    params.env.pop("LOCI_STORE_NAMESPACE", None)
+    async with Client(stdio_client(params), mode="auto") as client:
+        await client.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
+        result = await client.call_tool(
+            "wiki_compile_context",
+            {
+                "alias": "test",
+                "question": "What does Runtime own?",
+                "target_bytes": 1_000,
+                "max_bytes": 8_000,
+                "target_items": 2,
+                "max_items": 4,
+            },
+        )
+        return {
+            "is_error": result.is_error,
+            "structured_content": result.structured_content,
         }
 
 

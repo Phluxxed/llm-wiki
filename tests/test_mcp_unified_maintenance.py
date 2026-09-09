@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -11,6 +12,7 @@ from typing import Any
 
 from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.server import MCPServer
 
 from tests.wiki_fixture import base_fm, create_wiki_root, write_md
 
@@ -18,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from llm_wiki_mcp.errors import WikiMcpError
+from llm_wiki_mcp.mcp_server import create_server
 from llm_wiki_core.maintenance import build_candidate_proposal
 from llm_wiki_mcp.wiki_runtime import wiki_build_maintenance
 
@@ -173,8 +176,48 @@ class UnifiedMaintenanceRuntimeTest(unittest.TestCase):
         self.assertEqual(error.exception.code, "INVALID_INPUT")
         self.assertEqual(error.exception.details["surface"], "wiki_build_maintenance")
 
+    def test_claim_source_reports_original_contract_failures(self):
+        cases = (
+            (
+                {"source_kind": "source:manual", "source_ref": "sources/status.md", "content_hash": "a" * 64},
+                "source has invalid fields (missing",
+            ),
+            (
+                _source(content_hash="sha256:" + "a" * 64),
+                "source.content_hash must be lowercase SHA-256",
+            ),
+            (
+                _source(content_hash="0" * 64),
+                "source.content_hash does not match source.payload_text",
+            ),
+            (_source(source_event_time="2026-08-10T00:00:00Z"), "time must be an object"),
+        )
+        for source, expected in cases:
+            with self.subTest(expected=expected), self.assertRaises(WikiMcpError) as error:
+                wiki_build_maintenance(
+                    "brain",
+                    source=source,
+                    intent="durable_learning",
+                    claims=[_claim()],
+                    proposed_at="2026-08-10T01:00:00Z",
+                )
+            self.assertEqual(error.exception.code, "INVALID_INPUT")
+            self.assertIn(expected, error.exception.message)
+
 
 class UnifiedMaintenanceMcpTest(unittest.TestCase):
+    def test_published_schema_only_changes_unified_maintenance(self):
+        server = create_server()
+        raw_tools = asyncio.run(MCPServer.list_tools(server))
+        published_tools = asyncio.run(server.list_tools())
+        raw_schemas = {tool.name: tool.input_schema for tool in raw_tools}
+        published_schemas = {tool.name: tool.input_schema for tool in published_tools}
+
+        for name, schema in raw_schemas.items():
+            if name != "wiki_build_maintenance":
+                with self.subTest(name=name):
+                    self.assertEqual(published_schemas[name], schema)
+
     def test_stdio_registers_and_round_trips_unified_builder(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -183,12 +226,66 @@ class UnifiedMaintenanceMcpTest(unittest.TestCase):
             result = asyncio.run(_round_trip(tmp / "home", wiki))
         self.assertIn("wiki_build_maintenance", result["tools"])
         schema = result["schema"]
+        input_schema = result["input_schema"]
         self.assertIsNotNone(schema)
         assert schema is not None
         self.assertEqual(schema["type"], "object")
         self.assertEqual(schema["title"], "WikiBuildMaintenanceOutput")
         self.assertFalse(schema["additionalProperties"])
         self.assertIn("error", schema["properties"])
+        self.assertEqual(input_schema["type"], "object")
+        self.assertEqual(
+            input_schema["properties"]["proposed_at"]["pattern"],
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$",
+        )
+        source_schema = input_schema["properties"]["source"]
+        self.assertEqual(len(source_schema["anyOf"]), 2)
+        definitions = input_schema["$defs"]
+        for source_variant in source_schema["anyOf"]:
+            self.assertNotIn("$ref", source_variant)
+            self.assertEqual(source_variant["type"], "object")
+            self.assertIn("source_kind", source_variant["properties"])
+        temporal_source_schema = source_schema["anyOf"][1]
+        source_event_time = temporal_source_schema["properties"]["source_event_time"]
+        for variant in source_event_time["oneOf"]:
+            self.assertNotIn("$ref", variant)
+            self.assertEqual(variant["type"], "object")
+            self.assertIn("kind", variant["properties"])
+        claim_schema = input_schema["properties"]["claims"]["anyOf"][0]["items"]
+        self.assertNotIn("$ref", claim_schema)
+        self.assertEqual(claim_schema["type"], "object")
+        self.assertIn("subject", claim_schema["properties"])
+        self.assertEqual(
+            claim_schema["properties"]["proposed_world_validity"]["type"], "object"
+        )
+        for entity_variant in claim_schema["properties"]["subject"]["oneOf"]:
+            self.assertNotIn("$ref", entity_variant)
+            self.assertEqual(entity_variant["type"], "object")
+            self.assertIn("kind", entity_variant["properties"])
+        evidence_schema = input_schema["properties"]["evidence"]["anyOf"][0]["items"]
+        self.assertNotIn("$ref", evidence_schema)
+        self.assertEqual(evidence_schema["type"], "object")
+        self.assertIn("ref", evidence_schema["properties"])
+        temporal_source = definitions["TemporalMaintenanceSourceInput"]
+        self.assertEqual(
+            temporal_source["properties"]["content_hash"]["description"],
+            "Optional SHA-256 digest of the exact UTF-8 bytes of `payload_text`. "
+            "If omitted, the MCP boundary derives it from those bytes; if supplied, it is verified.",
+        )
+        self.assertIn("source_event_time", temporal_source["required"])
+        claim_definition = definitions["MaintenanceClaimInput"]
+        self.assertEqual(
+            set(claim_definition["required"]),
+            {
+                "subject",
+                "predicate",
+                "object",
+                "claim_scope",
+                "proposed_world_validity",
+                "signals",
+                "unknowns",
+            },
+        )
         for field in {
             "schema_version",
             "proposal_id",
@@ -207,9 +304,19 @@ class UnifiedMaintenanceMcpTest(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertIn(field, schema["properties"])
         self.assertFalse(result["result"].is_error)
-        self.assertEqual(result["result"].structured_content["schema_version"], "unified-maintenance/1")
-        self.assertEqual(result["result"].structured_content["classification"]["change_class"], "knowledge_revision")
+        self.assertEqual(
+            result["result"].structured_content["schema_version"], "unified-maintenance/1"
+        )
+        self.assertEqual(
+            result["result"].structured_content["classification"]["change_class"],
+            "knowledge_revision",
+        )
         self.assertFalse(result["result"].structured_content["mutation"]["allowed"])
+        self.assertFalse(result["derived_hash"].is_error)
+        self.assertEqual(
+            result["derived_hash"].structured_content["source"]["content_hash"],
+            hashlib.sha256(b"The service is ready.").hexdigest(),
+        )
         self.assertEqual(result["result"].content[0].text, "OK: structured result available; inspect structuredContent.")
         for name in ("correction", "work_history", "detected_gap", "wiki_hygiene"):
             with self.subTest(intent=name):
@@ -222,6 +329,7 @@ class UnifiedMaintenanceMcpTest(unittest.TestCase):
         self.assertEqual(result["detected_gap"].structured_content["classification"]["change_class"], "no_change")
         self.assertEqual(result["wiki_hygiene"].structured_content["classification"]["change_class"], "wiki_hygiene")
         self.assertTrue(result["invalid"].is_error)
+        self.assertTrue(result["invalid_input"].is_error)
         expected_error = {
             "code": "INVALID_INPUT",
             "message": "unified maintenance: intent is unsupported",
@@ -248,6 +356,11 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
             for tool in tools.tools
             if tool.name == "wiki_build_maintenance"
         )
+        input_schema = next(
+            tool.input_schema
+            for tool in tools.tools
+            if tool.name == "wiki_build_maintenance"
+        )
         await client.call_tool("wiki_register", arguments={"alias": "brain", "path": str(wiki)})
         result = await client.call_tool(
             "wiki_build_maintenance",
@@ -259,6 +372,16 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
                 "proposed_at": "2026-08-10T01:00:00Z",
             },
         )
+        # Exercise the published example, not a separately maintained facsimile:
+        # reference/depth-limited hosts still expose the tool description.
+        description = next(tool.description for tool in tools.tools if tool.name == "wiki_build_maintenance")
+        assert description is not None
+        example = json.loads(description.split("```json", 1)[1].split("```", 1)[0])
+        assert example["source"] == {key: value for key, value in _source().items() if key != "content_hash"}
+        assert example["claims"] == [_claim()]
+        for field in ("proposed_world_validity", "source_event_time", "signals", "unknowns", "content_hash"):
+            assert field in description
+        derived_hash = await client.call_tool("wiki_build_maintenance", arguments=example)
         correction = await client.call_tool(
             "wiki_build_maintenance",
             arguments={
@@ -311,15 +434,28 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
                 "proposed_at": "2026-08-10T01:00:00Z",
             },
         )
+        invalid_input = await client.call_tool(
+            "wiki_build_maintenance",
+            arguments={
+                "alias": "brain",
+                "source": {**_source(), "unexpected": True},
+                "intent": "durable_learning",
+                "claims": [_claim()],
+                "proposed_at": "2026-08-10T01:00:00Z",
+            },
+        )
         return {
             "tools": [tool.name for tool in tools.tools],
             "schema": schema,
+            "input_schema": input_schema,
             "result": result,
+            "derived_hash": derived_hash,
             "correction": correction,
             "work_history": work_history,
             "detected_gap": detected_gap,
             "wiki_hygiene": wiki_hygiene,
             "invalid": invalid,
+            "invalid_input": invalid_input,
         }
 
 

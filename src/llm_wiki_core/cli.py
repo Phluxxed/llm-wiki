@@ -39,6 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
     compile_parser.add_argument("--target-items", type=int, default=24)
     compile_parser.add_argument("--max-items", type=int, default=96)
     compile_parser.add_argument("--max-estimated-tokens", type=int)
+    compile_parser.add_argument("--max-delivery-bytes", type=int)
+    compile_parser.add_argument(
+        "--delivery-format",
+        choices=("anvil_prompt_evidence_v1",),
+    )
     compile_parser.add_argument("--contract-version", default="1")
     compile_parser.add_argument("--temporal-view", choices=("current", "historical", "transition", "lineage", "conflict"))
     compile_parser.add_argument("--request-time")
@@ -118,20 +123,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "from": args.transition_from,
                         "to": args.transition_to,
                     }
+            budget = {
+                "target_bytes": args.target_bytes,
+                "max_bytes": args.max_bytes,
+                "max_content_bytes": args.max_content_bytes,
+                "target_items": args.target_items,
+                "max_items": args.max_items,
+                "max_estimated_tokens": args.max_estimated_tokens,
+            }
+            if args.max_delivery_bytes is not None or args.delivery_format is not None:
+                budget.update(
+                    {
+                        "max_delivery_bytes": args.max_delivery_bytes,
+                        "delivery_format": args.delivery_format,
+                    }
+                )
             request_data = {
                 "contract_version": args.contract_version,
                 "alias": args.alias,
                 "question": args.question,
                 "seeds": args.seeds,
                 "state_view": args.state_view,
-                "budget": {
-                    "target_bytes": args.target_bytes,
-                    "max_bytes": args.max_bytes,
-                    "max_content_bytes": args.max_content_bytes,
-                    "target_items": args.target_items,
-                    "max_items": args.max_items,
-                    "max_estimated_tokens": args.max_estimated_tokens,
-                },
+                "budget": budget,
             }
             if temporal is not None:
                 request_data["temporal"] = temporal

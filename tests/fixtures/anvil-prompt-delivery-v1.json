@@ -1,0 +1,208 @@
+{
+  "name": "anvil_prompt_delivery_v1",
+  "delivery_format": "anvil_prompt_evidence_v1",
+  "cases": [
+    {
+      "name": "matched_project_unicode_and_diagnostics",
+      "contract_version": "3",
+      "project_resolution": {
+        "status": "matched",
+        "project_id": "alpha",
+        "page": "projects/alpha.md",
+        "matched_by": "remote"
+      },
+      "diagnostics": [
+        {
+          "code": "PROJECT_ALIAS_SHADOWED",
+          "message": "Directory alias\n names a different project\u2003than its remote.",
+          "provider": "project",
+          "details": {
+            "directory_alias": "alpha",
+            "project_id": "alpha"
+          }
+        }
+      ],
+      "evidence": [
+        {
+          "id": "seed:projects/alpha.md",
+          "provider": "seed",
+          "route": "exact_seed",
+          "page": "projects/alpha.md",
+          "source": null,
+          "locator": {
+            "section": "Overview"
+          },
+          "content": "Alpha owns the café route.\n\n",
+          "roles": [
+            "endpoint",
+            "authority"
+          ],
+          "authored_state": "current",
+          "derived_flags": [],
+          "authority_signals": [],
+          "selection_reasons": [],
+          "byte_cost": 0,
+          "truncated": false,
+          "atomic": false
+        },
+        {
+          "id": "source:東京",
+          "provider": "source",
+          "route": "source_excerpt",
+          "page": null,
+          "source": "sources/東京.md",
+          "locator": {},
+          "content": "東京 evidence — retained.  ",
+          "roles": [],
+          "authored_state": "current",
+          "derived_flags": [],
+          "authority_signals": [],
+          "selection_reasons": [],
+          "byte_cost": 0,
+          "truncated": false,
+          "atomic": false
+        }
+      ],
+      "expected": {
+        "markdown_bytes": 618
+      }
+    },
+    {
+      "name": "ambiguous_project_injects_compiler_diagnostic",
+      "contract_version": "3",
+      "project_resolution": {
+        "status": "ambiguous",
+        "matched_by": "alias",
+        "candidates": [
+          {
+            "project_id": "alpha",
+            "page": "projects/alpha.md"
+          },
+          {
+            "project_id": "beta",
+            "page": "projects/beta.md"
+          }
+        ],
+        "candidate_count": 2
+      },
+      "diagnostics": [],
+      "evidence": [],
+      "expected": {
+        "markdown_bytes": 364
+      }
+    },
+    {
+      "name": "legacy_evidence_route_without_project_metadata",
+      "contract_version": "1",
+      "project_resolution": null,
+      "diagnostics": [
+        {
+          "code": "PROVIDER_FAILED",
+          "message": "ignored for the closed project profile",
+          "provider": "text",
+          "details": {}
+        }
+      ],
+      "evidence": [
+        {
+          "id": "loci:docs/guide.md#section",
+          "provider": "loci",
+          "route": "indexed_section",
+          "page": "docs/guide.md",
+          "source": null,
+          "locator": {
+            "file": "docs/guide.md"
+          },
+          "content": "Guide content.",
+          "roles": [
+            "answer"
+          ],
+          "authored_state": "current",
+          "derived_flags": [],
+          "authority_signals": [],
+          "selection_reasons": [],
+          "byte_cost": 0,
+          "truncated": false,
+          "atomic": false
+        }
+      ],
+      "expected": {
+        "markdown_bytes": 248
+      }
+    },
+    {
+      "name": "current_temporal_warnings_without_settled_evidence",
+      "contract_version": "3",
+      "project_resolution": null,
+      "temporal": {
+        "view": "current",
+        "request_time": "2026-09-06T12:00:00Z",
+        "world_at": "2026-09-06T12:00:00Z",
+        "known_at": "2026-09-06T12:00:00Z"
+      },
+      "diagnostics": [
+        {
+          "code": "TEMPORAL_CONFLICT",
+          "message": "Deploy mode remains\ncontested — 東京.",
+          "provider": "temporal",
+          "details": {}
+        },
+        {
+          "code": "TEMPORAL_HISTORY_INVALID",
+          "message": "The mode history is invalid.",
+          "provider": "temporal",
+          "details": {}
+        },
+        {
+          "code": "TEMPORAL_STATE_UNCERTAIN",
+          "message": "The runbook has no known time.",
+          "provider": "temporal",
+          "details": {}
+        }
+      ],
+      "evidence": [],
+      "expected": {
+        "markdown_bytes": 899
+      }
+    },
+    {
+      "name": "lineage_without_invented_world_date",
+      "contract_version": "3",
+      "project_resolution": null,
+      "temporal": {
+        "view": "lineage",
+        "request_time": "2026-09-06T12:00:00Z",
+        "known_at": "2026-09-06T12:00:00Z"
+      },
+      "diagnostics": [],
+      "evidence": [],
+      "expected": {
+        "markdown_bytes": 224
+      }
+    },
+    {
+      "name": "transition_range_with_project_fallback_diagnostic",
+      "contract_version": "3",
+      "project_resolution": {
+        "status": "ambiguous",
+        "matched_by": "alias",
+        "candidates": [],
+        "candidate_count": 0
+      },
+      "temporal": {
+        "view": "transition",
+        "request_time": "2026-09-06T12:00:00Z",
+        "known_at": "2026-09-06T12:00:00Z",
+        "transition": {
+          "from": "2026-07-01",
+          "to": "2026-09-01"
+        }
+      },
+      "diagnostics": [],
+      "evidence": [],
+      "expected": {
+        "markdown_bytes": 529
+      }
+    }
+  ]
+}

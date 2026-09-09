@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stdout
+import hashlib
 import io
 import json
 import stat
@@ -91,6 +92,50 @@ class SnapshotPublicationTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, "SNAPSHOT_UNAVAILABLE")
         self.assertEqual(raised.exception.details["failures"][0]["code"], "SNAPSHOT_INTEGRITY_FAILED")
+
+    def test_evidence_only_source_is_published_byte_for_byte_and_hashed(self):
+        wiki = create_wiki_root(self.root / "wiki", with_scripts=False)
+        (wiki / ".llm-wiki.toml").write_text(
+            'schema_version = "1"\n'
+            'runtime_contract = "2"\n'
+            "\n"
+            "[content]\n"
+            'source_directory = "references"\n'
+            "\n"
+            "[compiler]\n"
+            'providers = ["source"]\n',
+            encoding="utf-8",
+        )
+        source_bytes = b"Evidence-only source\nwith exact bytes: \xe2\x98\x83\n"
+        source = wiki / "references" / "evidence-only.md"
+        source.parent.mkdir()
+        source.write_bytes(source_bytes)
+        write_md(
+            wiki / "projects" / "anvil.md",
+            base_fm(title="Anvil", evidence=["references/evidence-only.md"]),
+            "Project facts.",
+        )
+        output = self.root / "snapshots"
+
+        first = publish_snapshot(wiki, alias="brain", output_root=output)
+        snapshot_root = Path(first["snapshot_wiki_root"]).parent
+        snapshot_source = Path(first["snapshot_wiki_root"]) / "references" / "evidence-only.md"
+        manifest = json.loads((snapshot_root / "snapshot.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(snapshot_source.read_bytes(), source_bytes)
+        self.assertIn(
+            {
+                "path": "references/evidence-only.md",
+                "bytes": len(source_bytes),
+                "sha256": hashlib.sha256(source_bytes).hexdigest(),
+            },
+            manifest["files"],
+        )
+
+        source.write_bytes(source_bytes + b"changed\n")
+        second = publish_snapshot(wiki, alias="brain", output_root=output)
+
+        self.assertNotEqual(first["digest"], second["digest"])
 
     def test_reader_rejects_snapshot_with_content_digest_mismatch(self):
         wiki = create_wiki_root(self.root / "wiki", with_scripts=False)
