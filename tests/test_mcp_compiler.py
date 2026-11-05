@@ -32,8 +32,11 @@ class McpCompilerTest(unittest.TestCase):
                 wiki / "systems" / "runtime.md",
                 base_fm(
                     title="Runtime",
+                    status="stable",
                     source="sources/runtime.md",
                     knowledge_state="current",
+                    generated={"by": "writer/v2", "at": "2026-01-01T00:00:00Z"},
+                    verified={"by": "process:check", "at": "2026-01-02T00:00:00Z"},
                 ),
                 "Runtime summary.",
             )
@@ -79,6 +82,8 @@ class McpCompilerTest(unittest.TestCase):
         self.assertEqual(result["compiled"]["kind"], "compiled_context")
         self.assertEqual(result["compiled"]["query"]["question"], "What does Runtime own?")
         self.assertTrue(result["compiled"]["stop"]["sufficient"])
+        concept = next(item for item in result["compiled"]["evidence"] if item["provider"] != "source")
+        self.assertEqual(concept["metadata"]["trust"], "machine-confirmed")
         serialized = json.dumps(
             result["compiled"],
             ensure_ascii=False,

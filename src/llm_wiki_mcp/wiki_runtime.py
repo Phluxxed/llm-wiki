@@ -10,6 +10,7 @@ from llm_wiki_core.config import ContentConfig, inspect_wiki_config
 from llm_wiki_core.compiler import compile_context as compile_wiki_context
 from llm_wiki_core.contracts import CompileRequest, ContractError
 from llm_wiki_core.legacy import LegacyRuntime
+from llm_wiki_core.okf import has_metadata, interpret_metadata
 from llm_wiki_core.maintenance import (
     MAINTENANCE_CANDIDATE_KINDS,
     build_candidate_proposal,
@@ -505,11 +506,15 @@ def get_page(alias: str, page: str, max_chars: int = 4_000) -> dict[str, Any]:
     runtime = _legacy_runtime(alias)
     resolved = _page_or_error(page, runtime)
     limit = _bounded_int(max_chars, default=4_000, upper=MAX_PAGE_CHARS)
-    return {
+    result = {
         "kind": "page",
         **runtime.page_record(resolved),
         "content": runtime.page_content(resolved, max_chars=limit),
     }
+    frontmatter = runtime.pages[resolved].frontmatter
+    if has_metadata(frontmatter):
+        result["metadata"] = interpret_metadata(frontmatter)
+    return result
 
 
 def get_source_excerpt(

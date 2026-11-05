@@ -116,11 +116,15 @@ When adding a new source:
 
 1. Save it to `sources/` with a descriptive filename
 2. Decide which primary type the derived page belongs to and use that template
-3. Set `source: sources/filename.md` in the wiki page frontmatter
+3. Add `sources: [{resource: /sources/filename.md}]` in the wiki page frontmatter
 
-If `source:` is only an identity/URL manifest, also set `source_mode: manifest`. Manifest and binary sources require judge-readable evidence: persist extracted text or a claim-complete evidence pack in `sources/` and set `evidence:` to one path or a YAML list of paths. Evidence packs must identify the inspected revision/sections and contain enough source material to support every factual claim in the derived page; URLs or an agent-authored summary alone are not evidence. Keep each page's combined grounding material within the evaluator's 48,000-character budget; curate larger extractions into bounded, claim-complete packs because eval fails oversized bundles instead of silently truncating them.
+Native `sources` lists every supporting resource; use `/sources/...` for wiki-root-relative local inputs. Preserve legacy `source` and `evidence` fields for compatibility. If legacy `source:` is only an identity/URL manifest, also set `source_mode: manifest`. Manifest and binary sources require judge-readable evidence: persist extracted text or a claim-complete evidence pack in `sources/` and set `evidence:` to one path or a YAML list of paths. Evidence packs must identify the inspected revision/sections and contain enough source material to support every factual claim in the derived page; URLs or an agent-authored summary alone are not evidence. Keep each page's combined grounding material within the evaluator's 48,000-character budget; curate larger extractions into bounded, claim-complete packs because eval fails oversized bundles instead of silently truncating them.
 
 ```yaml
+sources:
+  - resource: /sources/example-repo-manifest.md
+  - resource: /sources/example-repo-evidence.md
+# Compatibility extensions for existing grounding consumers:
 source: sources/example-repo-manifest.md
 source_mode: manifest
 evidence:
@@ -179,17 +183,32 @@ Newly scaffolded wikis should have a matching template for every primary type. T
 
 ## OKF Conformance
 
-This wiki is a conformant **[Open Knowledge Format (OKF) v0.1](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)** bundle — a directory of markdown files with YAML frontmatter — held to a *strict superset* of the spec: every page is valid OKF, but lint enforces more than OKF requires. In practice this means any OKF-aware tool can read and write this wiki without bespoke integration.
+The root `index.md` declares `okf_version: "0.2"`. The pinned
+[Open Knowledge Format 0.2 specification](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/62432a095456147ee71e70ac6e4dc0d2dea3ac30/okf/SPEC.md)
+requires `type` on concept documents. Local lint additionally enforces the
+organizational fields and template sections used by this wiki.
 
-What conformance adds to every page's frontmatter, on top of the existing fields:
+Use native metadata deliberately:
 
-| Field | Meaning | Notes |
-| --- | --- | --- |
-| `type` | OKF's required routing field; also our colour/filter signal | Auto-defaulted from the primary directory slug |
-| `description` | One-line summary | Used by index entries, search snippets, previews |
-| `timestamp` | ISO 8601 datetime of last meaningful change | Distinct from `created` (creation) and `last_reviewed` (last human review) |
+| Field | Meaning |
+| --- | --- |
+| `sources` | Supporting resource list; local paths begin at the wiki root with `/` |
+| `status` | `draft`, `stable`, or `deprecated`; stable does not mean independently verified |
+| `generated` | Actual generation actor in `by`, optional timezone-aware generation time in `at` |
+| `verified` | Actual verification entries with `by` and timezone-aware `at`; consumers also normalize a single mapping |
+| `stale_after` | Intentional timezone-aware review deadline |
 
-Plus: the root `index.md` declares `okf_version: "0.1"`, and every non-reserved `.md` file has a parseable frontmatter block. Lint checks all of this.
+Record provenance prospectively. Omit unknown generation/verification data;
+owner, Git identity, legacy timestamp, or review date do not prove it.
+Preserve legacy last-change `timestamp` and local `source`/`evidence` extensions
+when migrating existing pages; keep former workflow labels in `workflow_status`.
+Trust and freshness are advisory retrieval signals that prompt evidence review,
+not truth scores or automatic maintenance authority.
+
+The working corpus includes immutable raw source inputs, templates, controls,
+and tooling. Those are not all OKF concept documents. `llm-wiki export-okf --wiki <root> --output <separate-new-dir>`
+produces the interchange bundle; copying the complete working tree does not
+establish conformance. Export preserves the working inputs and temporal history.
 
 ## Risk Register Status Legend
 
@@ -204,7 +223,7 @@ Plus: the root `index.md` declares `okf_version: "0.1"`, and every non-reserved 
 | Script | Command | Output |
 | --- | --- | --- |
 | `scripts/lint.py` | `.venv/bin/python3 scripts/lint.py` | Structural health check — template-required sections, broken refs, open risks, index consistency |
-| `scripts/query.py` | `.venv/bin/python3 scripts/query.py --status Draft --json` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks`; add `--json` for agents |
+| `scripts/query.py` | `.venv/bin/python3 scripts/query.py --status draft --json` | Frontmatter queries — filter by `--status`, `--category`, `--type`, `--tag`, `--stale`, `--risks`; add `--json` for agents |
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --agent-overview --json` | Agent graph overview — hubs, orphans, unresolved risks/questions, and recent log context |
 | `scripts/query.py` | `.venv/bin/python3 scripts/query.py --context-pack <page> --json` | Deterministic agent context pack with inclusion reasons |
 | `scripts/render.py` | `.venv/bin/python3 scripts/render.py` | Generates `wiki.html` — single-file reader with Home / Page / Search / Graph / Risks / Recent changes / Open questions / Entities views |

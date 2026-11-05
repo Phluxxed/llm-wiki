@@ -97,6 +97,23 @@ The skill asks two questions — what the wiki is for, and what the primary page
 
 **Safe on existing projects:** the skill checks for an existing wiki or scaffold-file collisions before any write. For a fresh scaffold, it preserves an existing host instruction file and appends its pointer once. If `wiki-agent.md` already exists, scaffolding stops without changing files; the target manual and `llm-wiki doctor` / `migrate inspect` / `migrate dry-run` own diagnosis. Apply requires explicit consent and the exact plan hash; verification and receipt-based rollback follow the runtime procedure below. Content migrations remain separately authorized work under the target manual.
 
+## OKF 0.2 and standalone use
+
+llm-wiki owns the standalone CLI and MCP runtime. A host can use
+`wiki_compile_context`, inspect provenance/freshness advisories, and maintain
+accepted changes directly under the wiki manual. Anvil is not required.
+Host hooks and automatic prompt injection are separate optional integrations.
+
+New pages use native OKF 0.2 `sources`, `status`, and truthful prospective
+`generated`/`verified` metadata. Missing provenance stays unknown; freshness
+warnings are advisory. Legacy `timestamp`, `source`, and `evidence` remain
+readable extensions, and `workflow_status` preserves previous workflow labels.
+
+The working corpus includes raw inputs and support files. Use `llm-wiki export-okf --wiki <root> --output <separate-new-dir>`
+for interchange rather than treating the complete working tree as a pure OKF bundle. See the [pinned OKF 0.2 specification](docs/okf/SPEC-0.2.md), copied from
+upstream commit `62432a095456147ee71e70ac6e4dc0d2dea3ac30`; its SHA-256 is
+`26aa5da029278939f914e578107242d9607d4f2dc5fe153272b82f9ed1030101`.
+
 ## Scripts
 
 | Script | Command | Output |

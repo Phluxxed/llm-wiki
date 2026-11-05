@@ -70,6 +70,24 @@ class SourceProviderTest(unittest.TestCase):
         self.assertEqual(diagnostic["provider"], "source")
         self.assertEqual(diagnostic["details"]["source"], "../secret.md")
 
+    def test_plural_local_source_is_retrieved_without_fetching_external_resources(self):
+        write_md(
+            self.root / "systems" / "plural.md",
+            base_fm(
+                title="Plural", status="stable",
+                sources=[{"resource": "/sources/runtime.md"}, {"resource": "https://example.com/no-fetch"}],
+                verified={"by": "human:vik", "at": "2026-01-01T00:00:00Z"},
+            ),
+            "Plural source references.",
+        )
+        response = compile_context(self.root, CompileRequest.from_mapping({
+            "alias": "test", "question": "What does canonical runtime own?", "seeds": ["systems/plural.md"],
+        })).to_dict()
+        source = next(item for item in response["evidence"] if item["provider"] == "source")
+        self.assertEqual(source["source"], "sources/runtime.md")
+        self.assertIn("canonical runtime owns traversal", source["content"])
+        self.assertNotIn("metadata", source)
+
 
 if __name__ == "__main__":
     unittest.main()

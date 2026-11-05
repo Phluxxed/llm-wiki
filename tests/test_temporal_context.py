@@ -202,6 +202,28 @@ class TemporalContextTest(unittest.TestCase):
                     self.assertIn("TEMPORAL_STATE_UNCERTAIN", [d["code"] for d in response["diagnostics"]])
                     self.assertLessEqual(len(json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode()), limit)
 
+    def test_provenance_annotation_preserves_revision_identity_and_known_time_authority(self):
+        accepted = revision("Deploy mode is blue")
+        frontmatter = self.page([accepted])
+        frontmatter.update({
+            "status": "stable",
+            "generated": {"by": "writer/v2", "at": "2026-01-02T00:00:00Z"},
+            "verified": {"by": "human:vik", "at": "2026-10-01T00:00:00Z"},
+        })
+        write_md(self.root / "mode.md", frontmatter, "Deploy mode is blue.")
+        before = (self.root / "mode.md").read_bytes()
+        self.source()
+
+        response = self.compile()
+
+        claim = next(item for item in response["evidence"] if item["provider"] == "temporal")
+        self.assertEqual(json.loads(claim["content"])["revision_id"], accepted.revision_id)
+        self.assertEqual(claim["authored_state"], "current")
+        self.assertIn("authority", claim["roles"])
+        self.assertEqual(claim["metadata"]["trust"], "unverified")
+        self.assertIn("verification_after_known_at", claim["derived_flags"])
+        self.assertEqual((self.root / "mode.md").read_bytes(), before)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -90,6 +90,38 @@ class MaintenancePacketTest(unittest.TestCase):
         self.assertTrue(first["unknowns"])
         self.assertNotEqual(first["status"], "clean")
 
+    def test_declared_stale_and_verification_gap_share_existing_review_pipeline(self):
+        root = create_wiki_root(Path(self._tmp.name) / "native", with_scripts=False)
+        for state in ("current", "historical", "unspecified"):
+            write_md(root / "notes" / f"{state}.md", base_fm(
+                status="stable", knowledge_state=state,
+                generated={"by": "writer/v2", "at": "2026-10-02T00:00:00Z"},
+                verified={"by": "human:vik", "at": "2026-10-01T00:00:00Z"},
+                stale_after="2026-10-03T00:00:00Z",
+            ), "Native current-content check.")
+        packet = build_maintenance_packet(root, alias="native", as_of=date(2026, 10, 3))
+        proposals = [candidate for candidate in packet["candidates"] if candidate["page"] is not None]
+        self.assertEqual({candidate["kind"] for candidate in proposals}, {"stale_current_claim", "verification_due"})
+        self.assertEqual({candidate["page"] for candidate in proposals}, {"notes/current.md"})
+        verification = next(candidate for candidate in proposals if candidate["kind"] == "verification_due")
+        self.assertIn("verification_predates_generation", verification["evidence"][0]["derived_flags"])
+        self.assertEqual(verification["disposition"], "candidate_only")
+        self.assertFalse(packet["mutation"]["allowed"])
+
+    def test_declared_fresh_deadline_preserves_distinct_review_age_signal(self):
+        root = create_wiki_root(Path(self._tmp.name) / "fresh", with_scripts=False)
+        write_md(root / "a.md", base_fm(
+            status="stable", knowledge_state="current", last_reviewed="2020-01-01",
+            stale_after="2026-11-01T00:00:00Z",
+            verified={"by": "process:check", "at": "2026-10-01T00:00:00Z"},
+        ), "Still within its declared review deadline.")
+        packet = build_maintenance_packet(root, alias="fresh", as_of=date(2026, 10, 3))
+        reviews = [candidate for candidate in packet["candidates"] if candidate["kind"] == "stale_current_claim"]
+        self.assertEqual(len(reviews), 1)
+        self.assertEqual(reviews[0]["evidence"][0]["locator"]["field"], "last_reviewed")
+        self.assertIn("review-age", reviews[0]["diagnostic"])
+        self.assertFalse(any(candidate["kind"] == "verification_due" for candidate in packet["candidates"]))
+
 
 class MaintenanceCandidateProposalTest(unittest.TestCase):
     def test_builds_strong_read_only_proposal_for_durable_outcome(self):

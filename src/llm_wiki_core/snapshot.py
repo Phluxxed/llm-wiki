@@ -12,6 +12,7 @@ from typing import Any, Mapping
 
 from .config import CONFIG_FILENAME, ContentConfig, inspect_wiki_config
 from .documents import collect_pages, safe_source_path
+from .okf import local_source_refs
 
 
 SNAPSHOT_CONTRACT_VERSION = "1"
@@ -156,15 +157,10 @@ def _collect_source_files(root: Path) -> dict[str, bytes]:
     selected = set(pages)
     selected.update(REQUIRED_WIKI_FILES)
     selected.update(relative for relative in OPTIONAL_WIKI_FILES if (root / relative).is_file())
-    evidence_prefix = content.source_directory.rstrip("/") + "/"
     for page in pages.values():
-        sources = [page.frontmatter.get("source")]
-        evidence = page.frontmatter.get("evidence")
-        if isinstance(evidence, (list, tuple)):
-            sources.extend(ref for ref in evidence if isinstance(ref, str) and ref.startswith(evidence_prefix))
-        for source in sources:
-            if not isinstance(source, str) or not source.strip():
-                continue
+        for source in local_source_refs(
+            page.frontmatter, source_directory=content.source_directory, page_path=page.path,
+        ):
             source_path = safe_source_path(root, source, source_directory=content.source_directory)
             lexical_source = Path(source)
             candidate = root / lexical_source

@@ -137,6 +137,24 @@ class SnapshotPublicationTest(unittest.TestCase):
 
         self.assertNotEqual(first["digest"], second["digest"])
 
+    def test_plural_source_survives_publication_with_nested_metadata_unchanged(self):
+        wiki = create_wiki_root(self.root / "wiki", with_scripts=False)
+        source = wiki / "sources" / "plural.md"
+        source.parent.mkdir()
+        source.write_bytes(b"Immutable plural source.\n")
+        page = wiki / "notes" / "a.md"
+        write_md(page, base_fm(
+            status="stable", sources=[{"resource": "../sources/plural.md"}],
+            generated={"by": "writer/v2", "at": "2026-10-01T00:00:00Z", "extension": ["preserve"]},
+        ), "A body.")
+        before = page.read_bytes()
+
+        result = publish_snapshot(wiki, alias="brain", output_root=self.root / "snapshots")
+
+        published = Path(result["snapshot_wiki_root"])
+        self.assertEqual((published / "sources" / "plural.md").read_bytes(), source.read_bytes())
+        self.assertEqual((published / "notes" / "a.md").read_bytes(), before)
+
     def test_reader_rejects_snapshot_with_content_digest_mismatch(self):
         wiki = create_wiki_root(self.root / "wiki", with_scripts=False)
         write_md(wiki / "projects" / "anvil.md", base_fm(title="Anvil"), "Published facts.")

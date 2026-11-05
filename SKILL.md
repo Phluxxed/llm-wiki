@@ -72,7 +72,7 @@ evidence packs are separate immutable files.
 | `wiki-agent.md` | Generate the operating authority described below. |
 | Agent pointer file | Append the pointer below once, preserving existing content; create it if absent. |
 | `README.md` | Purpose, directory map, and `Scripts & Tooling` quick start using the installed commands. |
-| `index.md` | Root YAML `okf_version: "0.1"`, then an empty catalog section per primary type plus entities; show a commented bullet-link-and-description example. |
+| `index.md` | Root YAML `okf_version: "0.2"`, then an empty catalog section per primary type plus entities; show a commented bullet-link-and-description example. |
 | `log.md` | Initial `## [YYYY-MM-DD] init | Created wiki: ...` entry listing created files. |
 | `_templates/{type}.md` | One purpose-specific page template per primary type. |
 | `_templates/entity.md` | Entity/concept template described below. |
@@ -86,12 +86,19 @@ in `GEMINI.md` for Gemini CLI; Claude Code uses `@wiki-agent.md` in `CLAUDE.md`.
 Create only the current host's pointer. An existing pointer file is the sole
 append exception to the scaffold's no-overwrite boundary.
 
-Primary templates need `title`, `category`, `status`, `owner`, `tags`, `created`,
-`last_reviewed`, `type`, `description` and `timestamp` frontmatter. Pre-fill the
+Primary templates need `title`, `category`, `status: draft`, `owner`, `tags`,
+`created`, `last_reviewed`, `type`, and `description` frontmatter. Pre-fill the
 chosen `type` so it matches `_templates/{type}.md`; the template's h2 headings
-are its lint-enforced sections. Include `source` for derived pages; add
-`source_mode`/`evidence` only when the source contract requires them, without
-empty evidence placeholders. Follow the adapted conventions for the details.
+are its lint-enforced sections. Derived pages declare `sources` entries such as
+`{resource: /sources/actual-file.md}`. Fill date fields with actual dates.
+
+Generation is prospective: add `generated` only with the actual `by` actor and
+optional timezone-aware `at`. Add `verified` only for actual identified checks;
+set `stale_after` only for an intentional timezone-aware review deadline. Omit
+unsupported provenance instead of deriving it from owner, review date, Git
+identity, or migration time. Preserve legacy `timestamp`, `source`, and
+`evidence` extensions when updating an existing wiki. Follow the adapted
+conventions for grounding and conformant export.
 
 The entity template uses the same applicable metadata, `type: entity`,
 `category: Entities & Concepts`, and `mentioned_in: []`. Its required sections
@@ -108,15 +115,17 @@ State these operating boundaries once in the manual:
 - Read this manual before mutation. User authority and the target wiki's
   stewardship rules govern content writes; runtime diagnostics and maintenance
   proposals do not grant permission to change pages.
-- Use `wiki_compile_context` or `llm-wiki compile-context` for question-shaped
-  retrieval; report coverage/degradation limits. Retrieval rank grants no
+- Use standalone `wiki_compile_context` or `llm-wiki compile-context` for question-shaped
+  retrieval; inspect advisory trust/freshness and coverage/degradation limits. Retrieval rank grants no
   authority. Use the local templates and conventions for ingest/update work.
 - Run structural lint, render and diff review after wiki writes. Lint checks
   structure and references; it does not establish semantic consistency or
   detect live source drift. Those need an explicit semantic/source review.
 - Keep live judge eval opt-in and risk-triggered. Follow the local conventions'
-  zero-model preview, explicit call cap and single deliberate final-gate rules.
-  Routine initialization and page/index/log maintenance do not need a judge.
+  zero-model preview (`--plan-judge-calls`), explicit call cap
+  (`--max-judge-calls`), candidate scope (`--changed-since`), and single
+  deliberate final-gate rules. Routine initialization and page/index/log
+  maintenance do not need a judge.
 
 The generated manual owns ongoing operations; keep the scaffold procedure in
 this skill.

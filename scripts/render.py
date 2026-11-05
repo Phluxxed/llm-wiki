@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import wiki_graph
+from llm_wiki_core.okf import interpret_metadata
 
 try:
     import yaml
@@ -917,6 +918,9 @@ function renderPage(path) {
     : '';
   const evidence =
     railBlock('Source', sourceHtml) +
+    railBlock('Trust and freshness', '<p>' + escHtml((page.metadata || {}).trust || 'unverified') + ' · ' + escHtml((page.metadata || {}).freshness || 'unknown') + '</p>' +
+      ((page.metadata || {}).flags || []).filter(flag => flag !== 'verification_missing').map(flag => '<p>' + escHtml(flag.replaceAll('_', ' ')) + '</p>').join('') +
+      ((page.metadata || {}).sources || []).map(source => '<p>' + escHtml(source.title || sourceLabel((source.resource || '').replace(/^[/]/, ''))) + '</p>').join('')) +
     railBlock('Open questions', qsHtml, pageQs.length) +
     railBlock('Grounded in', railLinks(out), out.length) +
     railBlock('Referenced by', railLinks(inc), inc.length);
@@ -1631,6 +1635,8 @@ def render_html(
                 "type": p["type"],
                 "category": p["fm"].get("category") or "",
                 "status": p["fm"].get("status") or "",
+                "workflow_status": p["fm"].get("workflow_status") or "",
+                "metadata": interpret_metadata(p["fm"]),
                 "owner": p["fm"].get("owner") or "",
                 "tags": list(p["tags"]),
                 "created": str(p["fm"].get("created") or ""),

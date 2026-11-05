@@ -307,7 +307,7 @@ def load_pages(wiki_root: Path) -> list[dict]:
 # Per-page structural issues — about whether pages are well-formed, not whether the
 # index/sources are in sync (that's lint's job, not a quality signal).
 STRUCTURAL_CHECKS = {"frontmatter", "missing_section", "broken_body_link",
-                     "okf_no_frontmatter", "okf_version_missing"}
+                     "okf_no_frontmatter", "okf_version_missing", "okf_metadata"}
 
 
 def check_structural(pages: list[dict], wiki_root: Path) -> MetricResult:

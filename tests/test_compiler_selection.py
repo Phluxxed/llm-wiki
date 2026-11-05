@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import sys
 import tempfile
 import unittest
@@ -126,6 +127,43 @@ class ProgressiveSelectionTest(unittest.TestCase):
             }
         )
         return compile_context(self.root, request).to_dict()
+
+    def test_advisory_metadata_breaks_ties_without_overriding_relevance_or_seeds(self):
+        request = CompileRequest.from_mapping({"alias": "test", "question": "runtime ownership"})
+        base = CandidateEvidence(
+            id="a:unverified", provider="frontmatter", route="exact_title", page="a.md", source=None,
+            locator={"start_line": 1, "end_line": 1}, content="runtime ownership",
+            roles=("answer",), selection_signals=("exact_title",), authored_state="current",
+            derived_flags=(), authority_signals=(), relevance_terms=("runtime", "ownership"),
+        )
+        verified = replace(base, id="z:verified", page="z.md", metadata={
+            "trust": "human-reviewed", "freshness": "unknown", "status": "stable",
+        })
+        selected, _ = select_candidates([base, verified], request, ("answer",), include_supplements=False)
+        self.assertEqual(selected[0].id, verified.id)
+        stale = replace(verified, metadata={**verified.metadata, "freshness": "stale"})
+        selected, _ = select_candidates([base, stale], request, ("answer",), include_supplements=False)
+        self.assertEqual(selected[0].id, base.id)
+        better_match = replace(base, relevance_terms=("runtime", "ownership", "detail"))
+        selected, _ = select_candidates([better_match, verified], request, ("answer",), include_supplements=False)
+        self.assertEqual(selected[0].id, base.id)
+        explicit = replace(base, provider="seed", selection_signals=("exact_seed",))
+        selected, _ = select_candidates([explicit, verified], request, ("answer",), include_supplements=False)
+        self.assertEqual(selected[0].id, base.id)
+
+    def test_native_metadata_is_counted_in_serialized_evidence_budget(self):
+        write_md(self.root / "systems" / "llm-wiki.md", base_fm(
+            title="llm-wiki", status="stable", source="sources/runtime.md", knowledge_state="current",
+            generated={"by": "writer/v2", "at": "2026-01-01T00:00:00Z", "note": "metadata " * 80},
+            verified={"by": "process:check", "at": "2026-01-02T00:00:00Z"},
+        ), "llm-wiki owns traversal behavior.")
+        response = self.compile({"target_bytes": 6500, "max_bytes": 6500})
+        self.assertLessEqual(len(json.dumps(response, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()), 6500)
+        record = next(item for item in response["evidence"] if "metadata" in item)
+        self.assertEqual(record["metadata"]["trust"], "machine-confirmed")
+        self.assertEqual(record["authored_state"], "current")
+        self.assertNotIn("machine-confirmed", record["authority_signals"])
+        self.assertEqual(record["byte_cost"], len(json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()))
 
     def test_low_starting_target_expands_until_coverage_is_sufficient(self):
         response = self.compile(

@@ -465,6 +465,21 @@ class RequiredFrontmatterTest(unittest.TestCase):
         write_md(self.wiki_root / "policies/foo.md", fm, "")
         self.assertTrue(any("timestamp" in d for d in self._details()))
 
+    def test_generated_change_replaces_legacy_timestamp(self):
+        fm = self._conformant_fm()
+        del fm["timestamp"]
+        fm["generated"] = {"by": "process:test", "at": "2026-06-17T00:00:00Z"}
+        write_md(self.wiki_root / "policies/foo.md", fm, "")
+        self.assertEqual(self._run(), [])
+
+    def test_invalid_native_verification_is_reported(self):
+        (self.wiki_root / "index.md").write_text('---\nokf_version: "0.2"\n---\n')
+        fm = self._conformant_fm(status="stable", verified={"by": "human:vik", "at": "2026-06-17"})
+        write_md(self.wiki_root / "policies/foo.md", fm, "")
+        lint = reload_lint_with_root(self.wiki_root)
+        issues = lint.run_checks(lint.collect_pages(), set(), set(), lint.collect_all_md_paths())
+        self.assertTrue(any(i["check"] == "okf_metadata" for i in issues))
+
     def test_empty_type_flagged(self):
         write_md(self.wiki_root / "policies/foo.md", self._conformant_fm(type=""), "")
         self.assertTrue(any("type" in d for d in self._details()))

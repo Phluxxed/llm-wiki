@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..contracts import Diagnostic
 from ..documents import safe_source_path
+from ..okf import local_source_refs
 from ..state import normalize_knowledge_state
 from .base import CandidateEvidence, ProviderContext, ProviderResult
 from .utils import matched_question_terms, question_terms
@@ -21,12 +22,11 @@ class SourceProvider:
         for path, page in context.pages.items():
             # Declared sources may answer the question even when their page's
             # summary does not. Project eligibility is already owned by context.pages.
-            sources = [str(page.frontmatter.get("source") or "")]
-            evidence = page.frontmatter.get("evidence")
-            if isinstance(evidence, (list, tuple)):
-                prefix = context.config.content.source_directory.rstrip("/") + "/"
-                sources.extend(ref for ref in evidence if isinstance(ref, str) and ref.startswith(prefix))
-            for source in dict.fromkeys(sources):
+            for source in local_source_refs(
+                page.frontmatter,
+                source_directory=context.config.content.source_directory,
+                page_path=path,
+            ):
                 if source:
                     source_pages.setdefault(source, []).append(path)
 

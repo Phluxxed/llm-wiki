@@ -8,9 +8,9 @@ Usage:
 
 Checks performed (structural/mechanical — no LLM required):
   - Mandatory sections present in primary pages (from matching template when present) and entity pages
-  - Required YAML frontmatter fields present (incl. OKF: type, description, timestamp)
-  - OKF v0.1: non-reserved .md files have parseable frontmatter (§9.1)
-  - OKF v0.1: root index.md declares okf_version (§11)
+  - Required YAML frontmatter fields present (including type, description and a meaningful-change time)
+  - Working-wiki profile: maintained .md files have parseable frontmatter (§9.1)
+  - OKF 0.2: root index.md declares okf_version (§11)
   - source frontmatter points to an existing file in sources/
   - Pages without a source field whose body references sources/X (likely missed ingest)
   - Body markdown links whose target .md file does not exist (broken refs / typos)
@@ -30,6 +30,8 @@ import argparse
 import json
 import re
 import sys
+
+from llm_wiki_core.okf import validate_metadata, local_source_refs
 from pathlib import Path
 
 try:
@@ -55,11 +57,9 @@ EXCLUDE_DIRS = {"sources", "_templates", "scripts", ".git", ".obsidian", ".venv"
 LINK_TARGET_EXCLUDE_DIRS = {".git", ".obsidian", ".venv", "evals", ".eval"}
 
 REQUIRED_FRONTMATTER = {"title", "category", "status", "owner", "tags", "created", "last_reviewed",
-                        "type", "description", "timestamp"}
-# `type`, `description`, `timestamp` make a wiki page a conformant OKF v0.1 concept
-# (strict superset): `type` is OKF's one required routing field (and our colour
-# signal), `description` a one-line summary, `timestamp` the ISO 8601 last
-# meaningful change — distinct from `created` (creation) and `last_reviewed`.
+                        "type", "description"}
+# Local authoring requirements exceed OKF: type is the standard required field.
+# A meaningful-change time may be generated.at or a retained legacy timestamp.
 PRIMARY_MANDATORY_SECTIONS = {"What This Is", "How It Works", "Risk Register", "Prerequisites"}
 ENTITY_MANDATORY_SECTIONS = {"What It Is", "How We Use It", "Where It Appears"}
 OPEN_RISK_STATUS = "🔲"
@@ -489,7 +489,10 @@ def collect_unparseable_md() -> list[str]:
 
 
 def check_okf_conformance() -> list[dict]:
-    """OKF v0.1 conformance checks that operate outside the collect_pages() set.
+    """Working-wiki profile checks outside the collect_pages() set.
+
+    This intentionally excludes immutable evidence and operating files. Use
+    export-okf to validate a complete standards-conforming exchange bundle.
 
     §9.1 — every non-reserved .md has parseable frontmatter (with a non-empty
     `type`; the non-empty/required part is covered by REQUIRED_FRONTMATTER once
@@ -509,7 +512,7 @@ def check_okf_conformance() -> list[dict]:
             issues.append({
                 "file": "index.md",
                 "check": "okf_version_missing",
-                "detail": 'root index.md should declare okf_version (OKF §11), e.g. okf_version: "0.1"',
+                "detail": 'root index.md should declare okf_version (OKF §11), e.g. okf_version: "0.2"',
             })
     return issues
 
@@ -562,6 +565,21 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
         for field in REQUIRED_FRONTMATTER:
             if field not in fm or fm[field] is None or fm[field] == "":
                 issues.append({"file": f, "check": "frontmatter", "detail": f"missing field: {field}"})
+
+        if not fm.get("timestamp") and not (isinstance(fm.get("generated"), dict) and fm["generated"].get("at")):
+            issues.append({"file": f, "check": "frontmatter", "detail": "missing timestamp or generated.at"})
+        if not isinstance(fm.get("type"), str) or not fm["type"].strip():
+            issues.append({"file": f, "check": "okf_metadata", "detail": "type must be a nonempty string"})
+        metadata = dict(fm)
+        index = WIKI_ROOT / "index.md"
+        version = parse_frontmatter(index.read_text(encoding="utf-8")).get("okf_version") if index.exists() else None
+        if str(version) != "0.2":
+            metadata.pop("status", None)  # Legacy workflow vocabulary.
+        for detail in validate_metadata(metadata):
+            issues.append({"file": f, "check": "okf_metadata", "detail": detail})
+        for ref in local_source_refs(fm):
+            if ref.startswith("sources/") and not (WIKI_ROOT / ref).is_file():
+                issues.append({"file": f, "check": "source_missing", "detail": f"provenance resource '{ref}' not found"})
 
         # source field resolves
         src = fm.get("source", "")
@@ -661,6 +679,7 @@ def run_checks(pages: list[dict], source_files: set[str], index_entries: set[str
         for p in pages
         for ref in reference_list(p["fm"].get("evidence"))
     )
+    wiki_sources.update(Path(ref).name for p in pages for ref in local_source_refs(p["fm"]))
     for src_file in sorted(source_files):
         if src_file not in wiki_sources:
             issues.append({"file": f"sources/{src_file}", "check": "orphan_source", "detail": "no wiki page has source pointing here"})
@@ -695,6 +714,7 @@ CHECK_LABELS = {
     "not_in_index":       "Not in index",
     "orphan_source":      "Orphan source",
     "index_dead_link":    "Dead index link",
+    "okf_metadata": "OKF: invalid metadata",
     "okf_no_frontmatter": "OKF: missing frontmatter",
     "okf_version_missing": "OKF: index missing okf_version",
     "project_identity": "Project identity",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -12,6 +12,7 @@ from typing import Any, Mapping, Sequence
 from .config import ContentConfig, inspect_wiki_config
 from .doctor import inspect_runtime
 from .documents import WikiPage, collect_pages, safe_source_path
+from .okf import has_metadata, interpret_metadata, local_source_refs
 from .state import normalize_knowledge_state
 from .temporal import TemporalFactCandidate, _build_temporal_candidate_packet
 
@@ -24,6 +25,7 @@ MAINTENANCE_CANDIDATE_KINDS = (
     "explicit_contradiction",
     "source_gap",
     "stale_current_claim",
+    "verification_due",
     "supersession_gap",
     "relationship_gap",
     "relationship_revision",
@@ -132,12 +134,13 @@ def build_maintenance_packet(
     *,
     alias: str,
     stale_after_days: int = 180,
-    as_of: date | None = None,
+    as_of: date | datetime | None = None,
 ) -> dict[str, Any]:
     root = Path(wiki_root).expanduser().resolve()
     if stale_after_days < 1:
         raise ValueError("stale_after_days must be positive")
-    as_of = as_of or date.today()
+    evaluation_time = as_of if as_of is not None else datetime.now(timezone.utc)
+    as_of = evaluation_time.date() if isinstance(evaluation_time, datetime) else evaluation_time
     config_inspection = inspect_wiki_config(root)
     content = config_inspection.config.content if config_inspection.config is not None else ContentConfig()
     pages = collect_pages(root, content=content)
@@ -168,7 +171,18 @@ def build_maintenance_packet(
     for path, page in pages.items():
         state = normalize_knowledge_state(page.frontmatter)
         if state.normalized == "current":
+            metadata = interpret_metadata(page.frontmatter, as_of=evaluation_time) if has_metadata(page.frontmatter) else None
             reviewed = _as_date(page.frontmatter.get("last_reviewed"))
+            if metadata is not None and metadata["freshness"] == "stale":
+                candidates.append(
+                    _candidate(
+                        kind="stale_current_claim",
+                        page=path,
+                        diagnostic="Explicitly current page has reached its declared stale_after instant",
+                        review_question="Should this content be re-verified, revised, or retired?",
+                        evidence=[_field_evidence(page, "stale_after", derived_flags=["okf_stale"])],
+                    )
+                )
             if reviewed is not None:
                 age = (as_of - reviewed).days
                 if age > stale_after_days:
@@ -187,6 +201,24 @@ def build_maintenance_packet(
                             ],
                         )
                     )
+            if metadata is not None and metadata["trust"] == "unverified":
+                candidates.append(
+                    _candidate(
+                        kind="verification_due",
+                        page=path,
+                        diagnostic="Explicitly current page has no usable verification of its current content",
+                        review_question="Can current content be verified against its declared sources or resource?",
+                        evidence=[_field_evidence(
+                            page, "verified",
+                            content=json.dumps({
+                                "generated": metadata["generated"],
+                                "verified": metadata["verified"],
+                                "errors": metadata["errors"],
+                            }, ensure_ascii=False, sort_keys=True),
+                            derived_flags=metadata["flags"],
+                        )],
+                    )
+                )
         if state.normalized == "superseded" and not _references(page.frontmatter.get("superseded_by")):
             candidates.append(
                 _candidate(
@@ -254,6 +286,14 @@ def _source_gap_candidates(root: Path, page: WikiPage, content: ContentConfig) -
         fields.extend(("evidence", str(value)) for value in evidence if value)
     elif evidence:
         fields.append(("evidence", str(evidence)))
+    existing_refs = {reference for _, reference in fields}
+    fields.extend(
+        ("sources", reference)
+        for reference in local_source_refs(
+            page.frontmatter, source_directory=content.source_directory, page_path=page.path,
+        )
+        if reference not in existing_refs
+    )
 
     for field, reference in fields:
         resolved = safe_source_path(root, reference, source_directory=content.source_directory)

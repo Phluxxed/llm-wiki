@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -23,6 +24,7 @@ from .contracts import (
     StopState,
 )
 from .documents import collect_pages
+from .okf import has_metadata, interpret_metadata
 from .project import ProjectIndex, ProjectScope
 from .providers import (
     FrontmatterProvider,
@@ -221,6 +223,31 @@ def compile_context(
                                  if item.route == "project_orientation_fallback"), None)
         candidates = [item for item in temporal_result.candidates if item.route != "project_orientation_fallback"]
         diagnostics.extend(temporal_result.diagnostics)
+
+    # Interpret provenance once, after temporal applicability has been decided.
+    # Raw source excerpts retain their own source authority; verification of a
+    # derived concept does not verify the source file itself.
+    evaluated_at = request.temporal.request_time if request.temporal is not None else datetime.now(timezone.utc)
+    known_at = request.temporal.known_at if request.temporal is not None else None
+    page_metadata = {
+        path: interpret_metadata(page.frontmatter, as_of=evaluated_at, known_at=known_at)
+        for path, page in eligible_pages.items() if has_metadata(page.frontmatter)
+    }
+
+    def annotate(candidate: CandidateEvidence) -> CandidateEvidence:
+        metadata = page_metadata.get(candidate.page) if candidate.provider != "source" else None
+        if metadata is None:
+            return candidate
+        return replace(
+            candidate,
+            metadata=metadata,
+            derived_flags=tuple(dict.fromkeys((*candidate.derived_flags, *metadata["flags"]))),
+            selection_signals=(*candidate.selection_signals, f"okf_trust:{metadata['trust']}", f"okf_freshness:{metadata['freshness']}"),
+        )
+
+    candidates = [annotate(candidate) for candidate in candidates]
+    if project_fallback is not None:
+        project_fallback = annotate(project_fallback)
 
     delivery_context = DeliveryCostContext(
         contract_version=request.contract_version,

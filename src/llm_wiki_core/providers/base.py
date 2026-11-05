@@ -29,6 +29,7 @@ class CandidateEvidence:
     # Internal lexical relevance, separate from lifecycle/authority metadata.
     # None lets selection inspect the actual excerpt; () means no query match.
     relevance_terms: tuple[str, ...] | None = None
+    metadata: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)

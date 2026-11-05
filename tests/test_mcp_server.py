@@ -71,7 +71,11 @@ class McpServerTest(unittest.TestCase):
                 base_fm(title="A", source="a.txt"),
                 "See [B](./b.md)",
             )
-            write_md(wiki / "b.md", base_fm(title="B"), "B body.")
+            write_md(wiki / "b.md", base_fm(
+                title="B", status="stable",
+                generated={"by": "writer/v2", "at": "2026-01-01T00:00:00Z"},
+                verified={"by": "human:vik", "at": "2026-01-02T00:00:00Z"},
+            ), "B body.")
 
             result = asyncio.run(_round_trip(tmp / "home", wiki))
 
@@ -109,6 +113,8 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(result["manual"]["kind"], "wiki_agent_manual")
         self.assertIn("Wiki Agent", result["manual"]["operating_manual"])
         self.assertIn("B body.", result["page"]["content"])
+        self.assertEqual(result["page"]["metadata"]["trust"], "human-reviewed")
+        self.assertIsInstance(result["page"]["metadata"]["verified"], list)
         self.assertTrue(result["context"])
         self.assertEqual(
             result["success_text"],

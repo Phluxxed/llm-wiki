@@ -409,7 +409,9 @@ class WikiGetPageOutput(SuccessOrErrorOutput):
     source: str | None = None
     description: str | None = None
     content: str | None = None
+    metadata: dict[str, JsonValue] | None = None
     success_fields = frozenset({"kind", *PageRecord.model_fields, "content"})
+    success_field_variants = (success_fields, success_fields | {"metadata"})
 
 
 class WikiGetSourceExcerptOutput(SuccessOrErrorOutput):
@@ -634,6 +636,7 @@ class CompiledEvidence(StrictOutputModel):
     byte_cost: int
     truncated: bool
     atomic: bool
+    metadata: dict[str, JsonValue] | None = None
 
 
 class CompiledOmission(StrictOutputModel):
@@ -978,6 +981,7 @@ MaintenanceCandidateKind = Literal[
     "explicit_contradiction",
     "source_gap",
     "stale_current_claim",
+    "verification_due",
     "supersession_gap",
     "relationship_gap",
     "relationship_revision",

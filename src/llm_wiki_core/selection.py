@@ -913,6 +913,10 @@ def _rank(candidate: CandidateEvidence, state_view: str, required: tuple[str, ..
         route_rank = 3
     coverage_rank = -len(set(candidate.roles) & set(required))
     retrieval_rank = candidate.retrieval_rank if candidate.retrieval_rank is not None else 2**31
+    metadata = candidate.metadata or {}
+    lifecycle_rank = 1 if metadata.get("status") == "deprecated" else 0
+    freshness_rank = 1 if metadata.get("freshness") == "stale" else 0
+    trust_rank = {"human-reviewed": 0, "machine-confirmed": 1}.get(metadata.get("trust"), 2)
     return (
         _PROVIDER_ORDER.get(candidate.provider, 50),
         route_rank,
@@ -920,6 +924,9 @@ def _rank(candidate: CandidateEvidence, state_view: str, required: tuple[str, ..
         authority_rank,
         coverage_rank,
         retrieval_rank,
+        lifecycle_rank,
+        freshness_rank,
+        trust_rank,
         candidate.id,
     )
 
@@ -947,6 +954,7 @@ def _to_record(candidate: CandidateEvidence, required: tuple[str, ...]) -> Evide
             byte_cost=0,
             truncated=candidate.truncated,
             atomic=candidate.atomic,
+            metadata=candidate.metadata,
         )
     )
 

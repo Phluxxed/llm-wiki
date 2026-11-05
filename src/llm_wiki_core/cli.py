@@ -59,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
         dest="workspace_remotes",
     )
 
+    export_parser = commands.add_parser("export-okf", help="Export a conforming OKF 0.2 exchange bundle")
+    export_parser.add_argument("--wiki", required=True)
+    export_parser.add_argument("--output", required=True)
+
     doctor_parser = commands.add_parser("doctor", help="Inspect wiki runtime compatibility")
     doctor_parser.add_argument("--wiki", required=True, help="Path to the wiki root")
 
@@ -159,6 +163,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = compile_context(Path(args.wiki), request).to_dict()
             _print(payload)
             return 0
+        if args.command == "export-okf":
+            from .export_okf import export_okf, ExportError
+            try:
+                _print(export_okf(Path(args.wiki), Path(args.output)))
+                return 0
+            except ExportError as exc:
+                print(json.dumps({"error": exc.to_dict()}), file=sys.stderr)
+                return 2
         if args.command == "doctor":
             _print(inspect_runtime(Path(args.wiki)))
             return 0

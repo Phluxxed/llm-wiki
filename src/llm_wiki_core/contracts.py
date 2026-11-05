@@ -404,9 +404,10 @@ class EvidenceRecord:
     byte_cost: int
     truncated: bool = False
     atomic: bool = False
+    metadata: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "id": self.id,
             "provider": self.provider,
             "route": self.route,
@@ -423,6 +424,9 @@ class EvidenceRecord:
             "truncated": self.truncated,
             "atomic": self.atomic,
         }
+        if self.metadata is not None:
+            result["metadata"] = dict(self.metadata)
+        return result
 
 
 @dataclass(frozen=True)

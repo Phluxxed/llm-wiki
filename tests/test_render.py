@@ -397,6 +397,14 @@ class PageSummaryTest(unittest.TestCase):
         fm = yaml.safe_dump(frontmatter, sort_keys=False).strip()
         path.write_text(f"---\n{fm}\n---\n{body}\n", encoding="utf-8")
 
+    def test_metadata_reaches_reader_without_changing_body(self):
+        self.write_page("papers/example.md", {"type": "paper", "title": "Example", "status": "stable", "sources": [{"resource": "https://example.com", "title": "Evidence"}], "verified": {"by": "human:vik", "at": "2026-01-01T00:00:00Z"}}, "Original excerpt.")
+        page = self._data()["pages"]["papers/example.md"]
+        self.assertEqual(page["metadata"]["trust"], "human-reviewed")
+        self.assertEqual(page["metadata"]["sources"][0]["title"], "Evidence")
+        self.assertIn("Original excerpt.", page["rendered_html"])
+        self.assertNotIn("human-reviewed", page["rendered_html"])
+
     def _data(self):
         import json
         import render
