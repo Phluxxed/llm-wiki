@@ -1,4 +1,6 @@
-# Core loci traversal and graph providers
+# Historical: loci traversal and graph providers
+
+Superseded on 2026-11-05 by [native retrieval](context-compiler.md#native-section-graph-and-source-retrieval) and [ADR-008](decisions/ADR-008-native-wiki-retrieval.md). The material below records the retired runtime contract 2 integration and is not current setup guidance.
 
 loci supplies two independent Context Compiler routes:
 

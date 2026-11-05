@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import hashlib
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -150,62 +148,11 @@ class ProjectCompilerV3Test(unittest.TestCase):
                 self.request(question="How do systems connect?"),
             ).to_dict()
 
-        graph = next(item for item in response["evidence"] if item["provider"] == "graph")
-        self.assertIn("scope_seed_discovery", graph["selection_reasons"])
+        self.assertFalse(any("bridge" in item["roles"] for item in response["evidence"]))
+        self.assertIn("bridge", response["coverage"]["uncovered_roles"])
         fallback = next(item for item in response["evidence"] if item["provider"] == "project")
         self.assertEqual(fallback["route"], "project_orientation_fallback")
 
-    def test_default_loci_scope_discovery_does_not_suppress_orientation_fallback(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = _fixture(Path(tmpdir), graph_backend="loci")
-            write_md(
-                root / "projects" / "alpha.md",
-                base_fm(
-                    title="Alpha",
-                    type="project",
-                    identity={
-                        "project_id": "alpha",
-                        "aliases": ["Alpha"],
-                        "remotes": ["github.com/acme/alpha"],
-                    },
-                ),
-                "Alpha orientation links to [context](alpha-context.md).",
-            )
-            write_md(
-                root / "projects" / "alpha-context.md",
-                base_fm(title="Alpha Context", projects=["alpha"]),
-                "Context-only project material.",
-            )
-
-            seen: dict[str, object] = {}
-
-            def retrieve(context):
-                seen["scope_seeds"] = context.scope_seeds
-                seen["pages"] = tuple(sorted(context.pages))
-                return _scope_only_loci_response(context)
-
-            with patch(
-                "llm_wiki_core.providers.loci_graph.LociGraphMcpGateway.retrieve",
-                side_effect=retrieve,
-            ):
-                response = compile_context(
-                    root,
-                    self.request(question="How do systems connect?"),
-                ).to_dict()
-
-        self.assertEqual(seen["scope_seeds"], ("projects/alpha.md",))
-        self.assertNotIn("projects/beta.md", seen["pages"])
-        graph = next(
-            item
-            for item in response["evidence"]
-            if item["provider"] == "graph" and item["route"] == "evidence_backed_path"
-        )
-        self.assertEqual(graph["roles"], ["support"])
-        self.assertEqual(graph["locator"]["relationship_support"], "ancillary_path")
-        self.assertIn("scope_seed_discovery", graph["selection_reasons"])
-        self.assertNotIn("explicit_seed_bridge", graph["selection_reasons"])
-        fallback = next(item for item in response["evidence"] if item["provider"] == "project")
-        self.assertEqual(fallback["route"], "project_orientation_fallback")
 
     def test_alias_fallback_unknown_and_ambiguous_resolution(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -296,13 +243,12 @@ class ProjectCompilerV3Test(unittest.TestCase):
         )
 
 
-def _fixture(root: Path, *, graph_backend: str = "legacy") -> Path:
+def _fixture(root: Path) -> Path:
     config = (
         'schema_version = "1"\n'
-        'runtime_contract = "2"\n'
+        'runtime_contract = "3"\n'
         '[compiler]\n'
         'providers = ["seed", "frontmatter", "text", "graph", "source"]\n'
-        f'graph_backend = "{graph_backend}"\n'
     )
     root.mkdir(parents=True, exist_ok=True)
     (root / ".llm-wiki.toml").write_text(config, encoding="utf-8")
@@ -353,10 +299,9 @@ def _fixture(root: Path, *, graph_backend: str = "legacy") -> Path:
 def _fallback_selection_fixture(root: Path) -> Path:
     config = (
         'schema_version = "1"\n'
-        'runtime_contract = "2"\n'
+        'runtime_contract = "3"\n'
         '[compiler]\n'
         'providers = ["seed", "frontmatter", "text", "graph", "source"]\n'
-        'graph_backend = "legacy"\n'
     )
     root.mkdir(parents=True, exist_ok=True)
     (root / ".llm-wiki.toml").write_text(config, encoding="utf-8")
@@ -391,79 +336,6 @@ def _fallback_selection_fixture(root: Path) -> Path:
     return root
 
 
-def _scope_only_loci_response(context) -> dict:
-    source_path = "projects/alpha.md"
-    target_path = "projects/alpha-context.md"
-    source_page = context.pages[source_path]
-    target_page = context.pages[target_path]
-    source_line, source_content = next(
-        (line_number, line)
-        for line_number, line in enumerate(source_page.text.splitlines(), start=1)
-        if "alpha-context.md" in line
-    )
-    source_id = f"{source_path}::Alpha#section"
-    target_id = f"{target_path}::Alpha Context#section"
-    edge = {
-        "from": source_id,
-        "to": target_id,
-        "type": "body_link",
-        "directed": True,
-        "namespace": "llm-wiki",
-        "resolution": "declared",
-        "evidence": {
-            "file": source_path,
-            "line": source_line,
-            "content_hash": hashlib.sha256(source_page.text.encode("utf-8")).hexdigest(),
-        },
-    }
-    return {
-        "schema_version": 1,
-        "selection": "explicit",
-        "paths": [
-            {
-                "support_kind": "direct_authored_edge",
-                "semantic_bridge": {
-                    "required": False,
-                    "required_terms": [],
-                    "matched_terms": [],
-                },
-                "retrieval_score": 1.0,
-                "score_components": {},
-                "nodes": [
-                    {
-                        "id": source_id,
-                        "attributes": {
-                            "file": source_path,
-                            "line": 1,
-                            "end_line": len(source_page.text.splitlines()),
-                        },
-                    },
-                    {
-                        "id": target_id,
-                        "attributes": {
-                            "file": target_path,
-                            "line": 1,
-                            "end_line": len(target_page.text.splitlines()),
-                        },
-                    },
-                ],
-                "steps": [
-                    {
-                        "traversed": "forward",
-                        "edge": edge,
-                        "evidence_span": {
-                            "file": source_path,
-                            "start_line": source_line,
-                            "end_line": source_line,
-                            "content": source_content,
-                        },
-                    }
-                ],
-            }
-        ],
-        "rejected_paths": [],
-        "diagnostics": [],
-    }
 
 
 if __name__ == "__main__":

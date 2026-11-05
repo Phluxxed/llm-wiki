@@ -1,10 +1,21 @@
-# Context Compiler v2
+# Context Compiler
 
 The Context Compiler turns a wiki, a real question, optional seeds, a knowledge-state view, and a bounded policy into deterministic evidence. It is shared package behavior: wiki-local query and graph scripts are compatibility adapters, not forks.
 
 ## Retrieval contract
 
-`wiki_compile_context` and `llm-wiki compile-context` use the same versioned request/response path. Discovery can search more broadly than the returned packet. The accepted 2026-09-06 selection correction first preserves the existing deterministic initial set, including explicit seeds, relevant claims, admissible supporting sources, project fallback, and query-selected graph evidence. It then makes one bounded pass over distinct, question-qualified candidates previously omitted only for `lower_marginal_value` because their roles were already covered, in the existing relevance order. Same-role evidence may therefore be admitted after all required roles are covered. The existing query-relevance, duplicate, source-support, and state checks still apply; graph supplements still require the query-selected path contract. Selection stops for actual candidate exhaustion, provider degradation, or the existing item, content-byte, complete-response-byte, or estimated-token ceilings, not role coverage alone. Initial evidence remains before supplements in returned order so final fitting removes supplements first. This accepted correction adds no search, judge, threshold, or budget; implementation and downstream acceptance remain separate work.
+`wiki_compile_context` and `llm-wiki compile-context` use the same versioned
+request/response path. Discovery can search more broadly than the returned
+packet. Selection first preserves explicit seeds, relevant claims, admissible
+supporting sources, project fallback, and authored graph evidence needed for
+uncovered roles. A bounded second pass may admit distinct, question-qualified
+section or source candidates whose roles are already covered. The existing
+query-relevance, duplicate, source-support, and state checks still apply.
+Graph evidence does not receive an automatic supplementary entitlement.
+Selection stops for candidate exhaustion, provider degradation, or the existing
+item, content-byte, complete-response-byte, or estimated-token ceilings, not
+role coverage alone. Initial evidence precedes supplements so final fitting
+removes supplements first. This adds no model call, search service, or budget.
 
 Targets are preferred-size and accounting values, not safety ceilings. `target_bytes` and `target_items` may be exceeded while admissible evidence is retained or reconsidered. `max_bytes` limits the complete serialized response, `max_items` limits selected evidence records, and `max_estimated_tokens` is an additional complete-response ceiling when supplied. The token estimate is deterministic at one token per four serialized UTF-8 bytes, rounded up; it is a transport guard rather than a model-specific tokenizer claim. A request whose complete response envelope cannot fit fails with `BUDGET_TOO_SMALL` instead of returning an oversized result. The compatibility field `target_exceeded_for_coverage` records target excess, not proof of why expansion was necessary and not answerability.
 
@@ -45,23 +56,45 @@ there is no hidden clock, model call, network call, or canonical storage write.
 
 ## Configuration
 
-Every current wiki declares `.llm-wiki.toml` with `schema_version = "1"` and `runtime_contract = "2"`. Content exclusions, source directory, providers, compiler targets/maximums, state field, and manual stewardship live there. Secrets, absolute registry identity, and machine-specific paths are rejected.
+Every current wiki declares `.llm-wiki.toml` with `schema_version = "1"` and
+`runtime_contract = "3"`. Content exclusions, source directory, providers,
+compiler targets/maximums, state field, and manual stewardship live there.
+Secrets, absolute registry identity, and machine-specific paths are rejected.
+The runtime contract is distinct from compiler request contracts: requests
+using contracts 1, 2, and 3 keep their existing shapes.
 
-The default provider set is `seed`, `frontmatter`, `text`, `graph`, `source`, and `loci`. loci owns both indexed section navigation and the default graph mechanics for managed wikis through its local `loci-mcp` stdio service; it does not need to share the `llm-wiki` Python environment. Removing `"loci"` from `[compiler].providers` opts out of indexed-section retrieval. Removing `"graph"` opts out of graph retrieval.
+The supported provider set is exactly `seed`, `frontmatter`, `text`, `graph`,
+and `source`. Remove a name from `[compiler].providers` to disable that route.
+Doctor reports each provider as `ready`, `disabled`, or `unavailable`; it does
+not probe an external retrieval service.
 
-`compiler.graph_backend` accepts exactly `loci` or `legacy` and defaults to `loci`. The legacy value is an explicit rollback to the previous local shortest-path provider. A failed loci graph request reports a diagnostic and returns no graph candidates; it never silently invokes the legacy backend. Other enabled providers continue independently.
+## Native section, graph, and source retrieval
 
-## Graph retrieval and relationship sufficiency
+Retrieval reads the configured local wiki snapshot. Seed and frontmatter
+providers locate explicit pages and authored metadata; the text provider
+matches local page sections. The graph provider follows authored Markdown
+links and `mentioned_in` relationships with bounded local traversal. The source
+provider admits declared source evidence and reports missing or unsupported
+source material. No external index service, graph mirror, or retrieval process
+is required.
 
-The loci graph backend builds a machine-local mirror containing the wiki pages plus generated graph profile and contribution files. The source wiki is never given `.loci` files or otherwise mutated by a compile. The cache defaults to `${XDG_CACHE_HOME:-~/.cache}/llm-wiki/graph` and may be relocated with `LLM_WIKI_GRAPH_CACHE_DIR`.
-
-Every returned path, node, edge, evidence line, and content hash is checked against the original wiki snapshot. Paths are atomic compiler candidates: an over-budget path is omitted rather than truncated. Retrieval score affects ordering only; it does not create knowledge state, authority, or answerability.
-
-For inferred relationship questions, llm-wiki uses Loci's explained anchors to distinguish a path that crosses the question's separate subject clusters from a nearby path within only one cluster. Only a cross-subject path carries the `bridge` role and can satisfy relationship coverage. Ancillary paths may still be returned as `support`, but they cannot make the compiler claim the requested relationship exists. Explicitly seeded endpoint retrieval treats a validated path between those seeds as bridge evidence. Graph supplements in the second selection pass remain limited to query-selected paths under this contract; arbitrary graph-neighbourhood material is not promoted. llm-wiki still owns final selection, coverage, sufficiency, stop semantics, and budget enforcement. See [loci provider](loci-provider.md).
-
-`LOCI_GRAPH_PATH_REJECTED` records normal negative evidence from a successful graph request. It remains visible in diagnostics but does not by itself mean the provider degraded. If all available paths are rejected or only ancillary support remains, an uncovered relationship stops as `candidate_exhausted`; transport, contract, or freshness failures remain visible as provider degradation regardless of role coverage, unless a reached budget supplies the primary stop reason.
+Graph candidates carry the authored link line or metadata field and its page
+identity. A discovered path is evidence of those authored relationships; it
+does not establish a causal or semantic relationship beyond their content.
+The compiler still owns question relevance, source support, knowledge-state
+filtering, evidence-role coverage, final selection, and complete-response
+budgets. Missing relationships remain an evidence gap rather than a reason to
+invent a link. Retrieval rank grants no authority or answerability.
 
 ## Migration and rollback
+
+Runtime contract 2 requires migration even when its configuration is otherwise
+valid. Doctor reports `migration_required` and identifies old official adapters
+as `outdated_adapter`. Dry-run upgrades the runtime declaration and adapters,
+removes the retired provider and graph-backend setting, and preserves supported
+local provider choices and unrelated policy. Unknown configuration is blocked
+for review rather than silently discarded. Fresh scaffolds already use runtime
+contract 3.
 
 Inspect and dry-run perform no writes. Apply requires the exact dry-run hash, accepts only `.llm-wiki.toml` and the two compatibility adapters as targets, backs up replaced files, writes a receipt before mutation, uses atomic replacement, verifies the result, and automatically restores target files on failure.
 

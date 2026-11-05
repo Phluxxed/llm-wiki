@@ -19,6 +19,7 @@ Use an ADR when a decision changes architecture, public behavior, dependency pos
 | [ADR-002](./ADR-002-agent-scoped-mcp-context-server.md) | Accepted | 2026-06-23 | Serve wiki context over local, agent-scoped MCP. |
 | [ADR-003](./ADR-003-canonical-runtime-and-versioned-wiki-contract.md) | Accepted | 2026-07-12 | Centralize shared behavior in a versioned runtime contract. |
 | [ADR-004](./ADR-004-question-shaped-state-aware-context-compiler.md) | Accepted | 2026-07-12 | Compile question-shaped context with explicit knowledge state. |
-| [ADR-005](./ADR-005-loci-first-class-default-traversal.md) | Accepted | 2026-07-13 | Make loci core, default-on traversal with explicit degradation. |
+| [ADR-005](./ADR-005-loci-first-class-default-traversal.md) | Superseded by ADR-008 | 2026-07-13 | Make loci core, default-on traversal with explicit degradation. |
 | [ADR-006](./ADR-006-budget-and-lock-live-judge-evals.md) | Accepted | 2026-07-14 | Require previewed, capped, and serialized live judge evaluation. |
 | [ADR-007](./ADR-007-enforce-complete-response-context-budgets.md) | Accepted | 2026-07-20 | Enforce complete-response ceilings and use bounded two-pass selection for distinct relevant evidence. |
+| [ADR-008](./ADR-008-native-wiki-retrieval.md) | Accepted | 2026-11-05 | Retrieve local sections, native links, and declared sources with five local providers. |

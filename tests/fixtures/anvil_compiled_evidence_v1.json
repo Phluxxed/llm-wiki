@@ -97,7 +97,7 @@
     "contract_version": "1",
     "alias": "anvil-fixture",
     "schema_version": "1",
-    "runtime_contract": "2",
+    "runtime_contract": "3",
     "question": "How are Runtime and Adapter related?",
     "shapes": [
       "relationship"

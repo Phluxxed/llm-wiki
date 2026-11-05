@@ -97,7 +97,7 @@ class SnapshotPublicationTest(unittest.TestCase):
         wiki = create_wiki_root(self.root / "wiki", with_scripts=False)
         (wiki / ".llm-wiki.toml").write_text(
             'schema_version = "1"\n'
-            'runtime_contract = "2"\n'
+            'runtime_contract = "3"\n'
             "\n"
             "[content]\n"
             'source_directory = "references"\n'

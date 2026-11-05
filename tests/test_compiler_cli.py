@@ -203,10 +203,9 @@ class CompilerCliTest(unittest.TestCase):
         contract = json.loads(ANVIL_FIXTURE.read_text(encoding="utf-8"))
         (self.root / ".llm-wiki.toml").write_text(
             'schema_version = "1"\n'
-            'runtime_contract = "2"\n'
+            'runtime_contract = "3"\n'
             '[compiler]\n'
-            'providers = ["seed", "frontmatter", "text", "graph", "source"]\n'
-            'graph_backend = "legacy"\n',
+            'providers = ["seed", "frontmatter", "text", "graph", "source"]\n',
             encoding="utf-8",
         )
         write_md(

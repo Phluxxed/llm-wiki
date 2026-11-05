@@ -163,7 +163,7 @@ class ExportOkfTests(unittest.TestCase):
         self.assertEqual(list(self.parent.glob(".bundle.export-*")), [])
 
     def test_configured_source_directory_and_exclusions(self):
-        (self.root / ".llm-wiki.toml").write_text('schema_version = "1"\nruntime_contract = "2"\n[content]\nsource_directory = "inputs"\nexclude_directories = ["private"]\n')
+        (self.root / ".llm-wiki.toml").write_text('schema_version = "1"\nruntime_contract = "3"\n[content]\nsource_directory = "inputs"\nexclude_directories = ["private"]\n')
         write_md(self.root / "private/excluded.md", {"type": "Note"}, "Excluded")
         write_md(self.root / "notes/a.md", {"type": "Note", "source": "inputs/raw.md"}, "Included")
         (self.root / "inputs").mkdir()

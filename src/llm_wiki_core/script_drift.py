@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 from .config import CURRENT_RUNTIME_CONTRACT
@@ -28,12 +29,21 @@ KNOWN_CUSTOMIZATION_HASHES = {
     },
 }
 ADAPTER_MARKER = f"# llm-wiki-adapter runtime_contract={CURRENT_RUNTIME_CONTRACT}"
-KNOWN_ADAPTER_HASHES = {
+KNOWN_PREVIOUS_ADAPTER_HASHES = {
     "scripts/query.py": {
         "9f03b60619f0f038ab455426560e047271669f3054cb7ebb24bf4aa7564a4f02",
     },
     "scripts/wiki_graph.py": {
         "5bb0ee0e6007acb2f8acd3969657a6c2f245f484a265e253c3793470857eada9",
+    },
+}
+
+KNOWN_ADAPTER_HASHES = {
+    "scripts/query.py": {
+        "99aa2ae7b0936034284d1ab1ac8addd39c8960d92792672cebdf8097afd70b24",
+    },
+    "scripts/wiki_graph.py": {
+        "9f3de8a822e1bd0c01f9b77f97cbf2f02865d14bb407b65a5e92bcc9f2f4fc24",
     },
 }
 
@@ -52,6 +62,9 @@ def inspect_script(path: Path, relative: str) -> dict:
     if digest in KNOWN_ADAPTER_HASHES.get(relative, set()):
         status = "compatible_adapter"
         customizations: tuple[str, ...] = ()
+    elif digest in KNOWN_PREVIOUS_ADAPTER_HASHES.get(relative, set()):
+        status = "outdated_adapter"
+        customizations = ()
     elif digest in KNOWN_LEGACY_HASHES.get(relative, set()):
         status = "canonical_legacy_copy"
         customizations = ()
@@ -62,6 +75,7 @@ def inspect_script(path: Path, relative: str) -> dict:
         status = "modified_unknown"
         customizations = ()
     result = {"status": status, "sha256": digest, "customizations": list(customizations)}
-    if ADAPTER_MARKER in text and status == "modified_unknown":
-        result["claimed_adapter_contract"] = CURRENT_RUNTIME_CONTRACT
+    marker = re.search(r"(?m)^# llm-wiki-adapter runtime_contract=([0-9]+)$", text)
+    if marker is not None and status == "modified_unknown":
+        result["claimed_adapter_contract"] = marker.group(1)
     return result

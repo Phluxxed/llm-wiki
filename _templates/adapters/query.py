@@ -1,6 +1,6 @@
 """Thin compatibility entrypoint for the canonical llm-wiki runtime."""
 
-# llm-wiki-adapter runtime_contract=2
+# llm-wiki-adapter runtime_contract=3
 from pathlib import Path
 
 try:

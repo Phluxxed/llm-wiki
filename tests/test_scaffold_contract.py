@@ -23,14 +23,15 @@ from tests.wiki_fixture import base_fm, create_wiki_root, write_md
 
 
 class ScaffoldContractTest(unittest.TestCase):
-    def test_fresh_scaffold_enables_loci_by_default(self):
+    def test_fresh_scaffold_enables_only_native_providers(self):
         config = (REPO_ROOT / "_templates" / "llm-wiki.toml").read_text(encoding="utf-8")
 
         self.assertIn(
-            'providers = ["seed", "frontmatter", "text", "graph", "source", "loci"]',
+            'providers = ["seed", "frontmatter", "text", "graph", "source"]',
             config,
         )
-        self.assertIn('graph_backend = "loci"', config)
+        self.assertNotIn('graph_backend', config)
+        self.assertNotIn('loci', config)
 
     def test_scaffold_and_migration_install_the_same_adapters(self):
         self.assertEqual(
@@ -95,7 +96,7 @@ class ScaffoldContractTest(unittest.TestCase):
 
             self.assertEqual(config.status, "compatible")
             self.assertEqual(doctor["compatibility"]["status"], "compatible")
-            self.assertEqual(compiled.runtime_contract, "2")
+            self.assertEqual(compiled.runtime_contract, "3")
             self.assertEqual(legacy["kind"], "context_pack")
             self.assertEqual(lint.returncode, 0, lint.stderr)
             self.assertEqual(render.returncode, 0, render.stderr)

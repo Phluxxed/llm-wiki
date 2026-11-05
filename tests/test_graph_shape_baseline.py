@@ -238,90 +238,31 @@ class TraceScoringTests(unittest.TestCase):
         self.assertEqual(trace["estimated_tokens"], 8)
         self.assertEqual(trace["generic_hub_path_rate"], 1.0)
 
-    def test_record_trace_reconstructs_loci_evidence_backed_path(self):
+
+
+    def test_record_trace_reconstructs_native_atomic_path_spans(self):
         fixture = {
             "expected_pages": ["left.md", "right.md"],
             "bridge_paths_any": [["left.md", "hub.md", "right.md"]],
             "bridge_literals_any": ["authored bridge"],
-            "forbidden_paths": [],
-            "required_literals": [],
-            "answerable": True,
+            "forbidden_paths": [], "required_literals": [], "answerable": True,
         }
-        records = [
-            {
-                "id": "graph:loci:opaque-hash",
-                "provider": "graph",
-                "route": "evidence_backed_path",
-                "page": "hub.md",
-                "source": None,
-                "locator": {
-                    "nodes": [
-                        {"id": "left", "file": "left.md"},
-                        {"id": "hub", "file": "hub.md"},
-                        {"id": "right", "file": "right.md"},
-                    ]
-                },
-                "content": "authored bridge",
-            }
-        ]
-
+        records = [{
+            "id": "graph:path:left.md->hub.md:body_link|hub.md->right.md:body_link",
+            "provider": "graph", "route": "connecting_path", "page": "left.md",
+            "locator": {"spans": [
+                {"id": "graph:left.md->hub.md:body_link", "page": "left.md", "start_line": 1, "end_line": 1},
+                {"id": "graph:hub.md->right.md:body_link", "page": "hub.md", "start_line": 2, "end_line": 2},
+            ]},
+            "content": "authored bridge", "atomic": True,
+        }]
         trace = self.baseline.record_trace(
-            records,
-            fixture=fixture,
-            generic_hubs={"hub.md"},
-            sufficient=True,
-            tool_calls=4,
-            latency_ms=2.5,
-            classified_shapes=["relationship"],
-            diagnostics=[],
+            records, fixture=fixture, generic_hubs={"hub.md"}, sufficient=True,
+            tool_calls=0, latency_ms=1.0, classified_shapes=["relationship"], diagnostics=[],
         )
-
         self.assertEqual(trace["pages"], ["hub.md", "left.md", "right.md"])
         self.assertEqual(trace["paths"], [["left.md", "hub.md", "right.md"]])
-        self.assertEqual(trace["tool_calls"], 4)
-
-    def test_record_trace_does_not_stitch_separate_loci_paths(self):
-        fixture = {
-            "shape": "false_hub_shortcut",
-            "expected_pages": ["left.md", "right.md"],
-            "bridge_paths_any": [],
-            "bridge_literals_any": [],
-            "forbidden_paths": [["left.md", "hub.md", "right.md"]],
-            "required_literals": [],
-            "answerable": False,
-        }
-
-        def path_record(record_id, nodes):
-            return {
-                "id": record_id,
-                "provider": "graph",
-                "route": "evidence_backed_path",
-                "page": nodes[0],
-                "locator": {
-                    "nodes": [
-                        {"id": f"{file_path}::root", "file": file_path}
-                        for file_path in nodes
-                    ]
-                },
-                "content": "exact edge evidence",
-            }
-
-        trace = self.baseline.record_trace(
-            [
-                path_record("graph:loci:first", ["left.md", "hub.md"]),
-                path_record("graph:loci:second", ["hub.md", "right.md"]),
-            ],
-            fixture=fixture,
-            generic_hubs={"hub.md"},
-            sufficient=False,
-            tool_calls=1,
-            latency_ms=1.0,
-            classified_shapes=["relationship"],
-            diagnostics=[],
-        )
-
-        self.assertNotIn(["left.md", "hub.md", "right.md"], trace["paths"])
-        self.assertFalse(self.baseline.score_trace(fixture, trace)["unsupported_shortcut"])
+        self.assertTrue(self.baseline.score_trace(fixture, trace)["path_complete"])
 
     def test_compiled_response_shapes_uses_public_query_envelope(self):
         response = {"query": {"shapes": ["lookup", "relationship"]}}

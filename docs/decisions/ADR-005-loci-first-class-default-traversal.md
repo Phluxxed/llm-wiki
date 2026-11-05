@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-008](./ADR-008-native-wiki-retrieval.md) on 2026-11-05. The decision below records runtime contract 2 history.
 
 ## Date
 

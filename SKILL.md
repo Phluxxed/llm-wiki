@@ -68,7 +68,7 @@ evidence packs are separate immutable files.
 | Destination | Source or generation rule |
 | --- | --- |
 | `CONVENTIONS.md` | Purpose-adapted bundle template above. |
-| `.llm-wiki.toml` | Copy [_templates/llm-wiki.toml](_templates/llm-wiki.toml). |
+| `.llm-wiki.toml` | Copy [_templates/llm-wiki.toml](_templates/llm-wiki.toml): schema 1, runtime contract 3, five local providers. |
 | `wiki-agent.md` | Generate the operating authority described below. |
 | Agent pointer file | Append the pointer below once, preserving existing content; create it if absent. |
 | `README.md` | Purpose, directory map, and `Scripts & Tooling` quick start using the installed commands. |
@@ -116,8 +116,9 @@ State these operating boundaries once in the manual:
   stewardship rules govern content writes; runtime diagnostics and maintenance
   proposals do not grant permission to change pages.
 - Use standalone `wiki_compile_context` or `llm-wiki compile-context` for question-shaped
-  retrieval; inspect advisory trust/freshness and coverage/degradation limits. Retrieval rank grants no
-  authority. Use the local templates and conventions for ingest/update work.
+  retrieval over local page sections, authored links and declared sources.
+  Inspect advisory trust/freshness and coverage/degradation limits. Retrieval
+  rank grants no authority. Use the local templates and conventions for ingest/update work.
 - Run structural lint, render and diff review after wiki writes. Lint checks
   structure and references; it does not establish semantic consistency or
   detect live source drift. Those need an explicit semantic/source review.

@@ -18,7 +18,7 @@ class DocumentationContractTest(unittest.TestCase):
             REPO_ROOT / "README.md",
             REPO_ROOT / "docs" / "context-compiler.md",
             REPO_ROOT / "docs" / "brain-steward-integration.md",
-            REPO_ROOT / "docs" / "loci-provider.md",
+            REPO_ROOT / "docs" / "decisions" / "ADR-008-native-wiki-retrieval.md",
             REPO_ROOT / "docs" / "releases" / "2026-07-12-context-compiler-v2.md",
         ]
         for path in files:

@@ -19,10 +19,9 @@ from tests.wiki_fixture import base_fm, create_wiki_root, write_md
 def _configure_compiler(root: Path) -> None:
     (root / ".llm-wiki.toml").write_text(
         'schema_version = "1"\n'
-        'runtime_contract = "2"\n'
+        'runtime_contract = "3"\n'
         '[compiler]\n'
-        'providers = ["seed", "frontmatter", "text", "source"]\n'
-        'graph_backend = "legacy"\n',
+        'providers = ["seed", "frontmatter", "text", "source"]\n',
         encoding="utf-8",
     )
 
@@ -84,8 +83,8 @@ class QuestionRelevanceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = create_wiki_root(Path(tmpdir) / "wiki", with_scripts=False)
             (root / ".llm-wiki.toml").write_text(
-                'schema_version = "1"\nruntime_contract = "2"\n'
-                '[compiler]\nproviders = ["seed"]\ngraph_backend = "legacy"\n',
+                'schema_version = "1"\nruntime_contract = "3"\n'
+                '[compiler]\nproviders = ["seed"]\n',
                 encoding="utf-8",
             )
             revision = _revision("api.md", "billing:price", "ten credits", label="api-price")

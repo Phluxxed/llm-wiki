@@ -11,14 +11,12 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
 
 
 CURRENT_SCHEMA_VERSION = "1"
-CURRENT_RUNTIME_CONTRACT = "2"
+CURRENT_RUNTIME_CONTRACT = "3"
 CONFIG_FILENAME = ".llm-wiki.toml"
 
 DEFAULT_EXCLUDES = (".git", ".venv", "node_modules")
-LEGACY_DEFAULT_PROVIDERS = ("seed", "frontmatter", "text", "graph", "source")
-DEFAULT_PROVIDERS = (*LEGACY_DEFAULT_PROVIDERS, "loci")
+DEFAULT_PROVIDERS = ("seed", "frontmatter", "text", "graph", "source")
 KNOWN_PROVIDERS = set(DEFAULT_PROVIDERS)
-GRAPH_BACKENDS = {"loci", "legacy"}
 KNOWN_STATES = {
     "current",
     "historical",
@@ -46,7 +44,6 @@ class ContentConfig:
 @dataclass(frozen=True)
 class CompilerConfig:
     providers: tuple[str, ...] = DEFAULT_PROVIDERS
-    graph_backend: str = "loci"
     target_bytes: int = 48_000
     max_bytes: int = 192_000
     target_items: int = 24
@@ -102,6 +99,11 @@ def inspect_wiki_config(wiki_root: str | Path) -> ConfigInspection:
     except (OSError, tomllib.TOMLDecodeError) as exc:
         return _invalid_result(f"Could not parse {CONFIG_FILENAME}", reason=type(exc).__name__)
 
+    return inspect_config_values(raw)
+
+
+def inspect_config_values(raw: Mapping[str, Any]) -> ConfigInspection:
+    """Validate parsed configuration without changing its source representation."""
     try:
         _reject_sensitive_keys(raw)
         schema_version = _required_string(raw, "schema_version")
@@ -117,6 +119,19 @@ def inspect_wiki_config(wiki_root: str | Path) -> ConfigInspection:
                 "SCHEMA_VERSION_UNSUPPORTED",
                 "Wiki configuration schema is not supported",
                 {"found": schema_version, "supported": CURRENT_SCHEMA_VERSION},
+            ),
+        )
+    if runtime_contract == "2":
+        return ConfigInspection(
+            status="migration_required",
+            error=ConfigError(
+                "RUNTIME_MIGRATION_REQUIRED",
+                "Migrate this runtime-2 wiki before using native retrieval",
+                {
+                    "found": runtime_contract,
+                    "supported": CURRENT_RUNTIME_CONTRACT,
+                    "next_action": "llm-wiki migrate inspect --wiki <wiki-root>",
+                },
             ),
         )
     if runtime_contract != CURRENT_RUNTIME_CONTRACT:
@@ -165,12 +180,11 @@ def _compiler_config(raw: Mapping[str, Any]) -> CompilerConfig:
             key="compiler.providers",
             value=unknown_providers,
         )
-    graph_backend = _optional_string(raw, "graph_backend", "loci", prefix="compiler")
-    if graph_backend not in GRAPH_BACKENDS:
+    if "graph_backend" in raw:
         raise _InvalidConfig(
-            "Unknown compiler graph backend",
+            "compiler.graph_backend is retired; native graph retrieval has no backend setting",
             key="compiler.graph_backend",
-            value=graph_backend,
+            value=raw["graph_backend"],
         )
     target_bytes = _positive_int(raw, "target_bytes", 48_000, prefix="compiler")
     max_bytes = _positive_int(raw, "max_bytes", 192_000, prefix="compiler")
@@ -190,7 +204,6 @@ def _compiler_config(raw: Mapping[str, Any]) -> CompilerConfig:
         )
     return CompilerConfig(
         providers=providers,
-        graph_backend=graph_backend,
         target_bytes=target_bytes,
         max_bytes=max_bytes,
         target_items=target_items,

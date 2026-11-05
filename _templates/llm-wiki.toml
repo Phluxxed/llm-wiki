@@ -1,5 +1,5 @@
 schema_version = "1"
-runtime_contract = "2"
+runtime_contract = "3"
 profile = "default"
 
 [content]
@@ -7,8 +7,7 @@ exclude_directories = [".git", ".venv", "node_modules"]
 source_directory = "sources"
 
 [compiler]
-providers = ["seed", "frontmatter", "text", "graph", "source", "loci"]
-graph_backend = "loci"
+providers = ["seed", "frontmatter", "text", "graph", "source"]
 target_bytes = 48000
 max_bytes = 192000
 target_items = 24

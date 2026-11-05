@@ -17,7 +17,7 @@ from tests.wiki_fixture import create_wiki_root
 
 VALID_CONFIG = """\
 schema_version = "1"
-runtime_contract = "2"
+runtime_contract = "3"
 profile = "default"
 """
 
@@ -39,72 +39,41 @@ class DoctorTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_unmodified_legacy_wiki_is_migration_available(self):
-        with (
-            patch("llm_wiki_core.doctor.shutil.which", return_value="/usr/local/bin/loci-mcp"),
-            patch.dict(
-                os.environ,
-                {
-                    "LOCI_BASE_DIR": "/tmp/loci-index",
-                    "LOCI_STORE_NAMESPACE": "test",
-                },
-            ),
-        ):
-            result = doctor("test")
-
+        result = doctor("test")
         self.assertEqual(result["compatibility"]["status"], "migration_available")
         self.assertEqual(result["config"]["status"], "legacy_missing")
-        self.assertEqual(result["runtime"]["contract"], "2")
+        self.assertEqual(result["runtime"]["contract"], "3")
         self.assertEqual(result["scripts"]["scripts/query.py"]["status"], "canonical_legacy_copy")
-        self.assertEqual(result["providers"]["loci"]["status"], "ready")
-        self.assertEqual(result["providers"]["loci"]["transport"], "mcp_stdio")
+        self.assertEqual(result["providers"]["graph"], {"status": "unavailable"})
 
-    def test_default_loci_reports_explicit_degradation_when_mcp_is_missing(self):
-        with patch("llm_wiki_core.doctor.shutil.which", return_value=None):
-            result = doctor("test")
-
-        self.assertEqual(result["providers"]["loci"]["status"], "degraded")
-        self.assertEqual(result["providers"]["loci"]["code"], "LOCI_MCP_UNAVAILABLE")
-        self.assertEqual(result["providers"]["graph"]["backend"], "loci")
-        self.assertEqual(result["providers"]["graph"]["status"], "degraded")
-        self.assertEqual(result["providers"]["graph"]["code"], "LOCI_MCP_UNAVAILABLE")
-        self.assertTrue(result["providers"]["graph"]["rollback_available"])
-        self.assertEqual(result["compatibility"]["status"], "migration_available")
-
-    def test_default_loci_reports_missing_store_identity(self):
+    def test_native_doctor_does_not_probe_loci(self):
+        (self.wiki / ".llm-wiki.toml").write_text(VALID_CONFIG, encoding="utf-8")
         with (
-            patch("llm_wiki_core.doctor.shutil.which", return_value="/fake/loci-mcp"),
-            patch.dict(
-                os.environ,
-                {"LLM_WIKI_HOME": str(self.tmp / "home")},
-                clear=True,
-            ),
+            patch("shutil.which", side_effect=AssertionError("unexpected executable probe")),
+            patch("llm_wiki_core.doctor.subprocess.run", side_effect=AssertionError("unexpected process")),
+            patch.dict(os.environ, {"LLM_WIKI_LOCI_MCP_COMMAND": "/poison/loci"}),
         ):
             result = doctor("test")
+        self.assertEqual(set(result["providers"]), {"seed", "frontmatter", "text", "graph", "source"})
+        self.assertTrue(all(value == {"status": "ready"} for value in result["providers"].values()))
+        self.assertNotIn("graph_backend", result["config"])
 
-        self.assertEqual(result["providers"]["loci"]["status"], "degraded")
-        self.assertEqual(result["providers"]["loci"]["code"], "LOCI_MCP_CONFIG_MISSING")
-        self.assertEqual(
-            result["providers"]["loci"]["missing"],
-            ["LOCI_BASE_DIR", "LOCI_STORE_NAMESPACE"],
-        )
-        self.assertEqual(result["providers"]["graph"]["status"], "degraded")
-        self.assertEqual(result["providers"]["graph"]["code"], "LOCI_MCP_CONFIG_MISSING")
-
-    def test_legacy_graph_backend_is_ready_without_loci_transport(self):
+    def test_graph_readiness_respects_config(self):
         (self.wiki / ".llm-wiki.toml").write_text(
-            VALID_CONFIG
-            + '[compiler]\nproviders = ["graph"]\ngraph_backend = "legacy"\n',
-            encoding="utf-8",
+            VALID_CONFIG + '[compiler]\nproviders = ["text"]\n', encoding="utf-8",
         )
+        result = doctor("test")
+        self.assertEqual(result["providers"]["graph"], {"status": "disabled"})
+        self.assertEqual(result["providers"]["text"], {"status": "ready"})
 
-        with patch("llm_wiki_core.doctor.shutil.which", return_value=None):
-            result = doctor("test")
-
-        self.assertEqual(
-            result["providers"]["graph"],
-            {"status": "ready", "backend": "legacy", "rollback_available": True},
+    def test_runtime_two_reports_actionable_migration(self):
+        (self.wiki / ".llm-wiki.toml").write_text(
+            VALID_CONFIG.replace('runtime_contract = "3"', 'runtime_contract = "2"'), encoding="utf-8",
         )
-        self.assertEqual(result["providers"]["loci"]["status"], "disabled")
+        result = doctor("test")
+        self.assertEqual(result["compatibility"]["status"], "migration_available")
+        self.assertEqual(result["config"]["status"], "migration_required")
+        self.assertEqual(result["providers"]["graph"], {"status": "unavailable"})
 
     def test_unknown_local_script_modification_blocks_automatic_migration(self):
         (self.wiki / "scripts" / "query.py").write_text("# private behavior\n", encoding="utf-8")
@@ -116,19 +85,16 @@ class DoctorTest(unittest.TestCase):
         self.assertIn("scripts/query.py", result["compatibility"]["blockers"])
 
     def test_adapter_marker_cannot_disguise_modified_code(self):
-        (self.wiki / "scripts" / "query.py").write_text(
-            "# llm-wiki-adapter runtime_contract=2\nraise RuntimeError('poison')\n",
-            encoding="utf-8",
-        )
-
-        result = doctor("test")
-
-        self.assertEqual(result["scripts"]["scripts/query.py"]["status"], "modified_unknown")
-        self.assertEqual(
-            result["scripts"]["scripts/query.py"]["claimed_adapter_contract"],
-            "2",
-        )
-        self.assertEqual(result["compatibility"]["status"], "blocked")
+        for contract in ("2", "3"):
+            with self.subTest(contract=contract):
+                (self.wiki / "scripts" / "query.py").write_text(
+                    f"# llm-wiki-adapter runtime_contract={contract}\nraise RuntimeError('poison')\n",
+                    encoding="utf-8",
+                )
+                result = doctor("test")
+                self.assertEqual(result["scripts"]["scripts/query.py"]["status"], "modified_unknown")
+                self.assertEqual(result["scripts"]["scripts/query.py"]["claimed_adapter_contract"], contract)
+                self.assertEqual(result["compatibility"]["status"], "blocked")
 
     def test_compatible_config_reports_runtime_versions(self):
         (self.wiki / ".llm-wiki.toml").write_text(VALID_CONFIG, encoding="utf-8")
@@ -137,7 +103,7 @@ class DoctorTest(unittest.TestCase):
 
         self.assertEqual(result["compatibility"]["status"], "compatible")
         self.assertEqual(result["config"]["schema_version"], "1")
-        self.assertEqual(result["config"]["runtime_contract"], "2")
+        self.assertEqual(result["config"]["runtime_contract"], "3")
 
     def test_incompatible_config_fails_closed(self):
         (self.wiki / ".llm-wiki.toml").write_text(

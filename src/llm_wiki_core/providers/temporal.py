@@ -160,14 +160,23 @@ class TemporalProvider:
                     selection_signals=signals, authored_state="unspecified",
                     authority_signals=("source_excerpt",), derived_flags=item.derived_flags + ("temporal_background",)))
                 continue
-            if item.page in invalid_pages or item.page in late_pages:
+            # Native graph paths carry exact spans from every authored page.
+            # No constituent may bypass the same temporal eligibility checks
+            # that apply to a single-page excerpt.
+            paths = {item.page} if item.page else set()
+            paths.update(span["page"] for span in item.locator.get("spans", ())
+                         if isinstance(span, dict) and isinstance(span.get("page"), str))
+            if paths & (invalid_pages | late_pages):
                 continue
             if restricted_known_time:
                 if relevant and item.page:
                     notices["TEMPORAL_STATE_UNCERTAIN"].add(item.page)
                 continue
-            state = normalize_knowledge_state(context.pages[item.page].frontmatter).normalized if item.page in context.pages else item.authored_state
-            governed = item.page in history_pages
+            state = (
+                item.authored_state if item.locator.get("spans") or item.page not in context.pages
+                else normalize_knowledge_state(context.pages[item.page].frontmatter).normalized
+            )
+            governed = bool(paths & history_pages)
             if governed:
                 prefix = "Temporal context: background prose; accepted temporal claims govern applicability."
                 roles = tuple(r for r in item.roles if r not in {"answer", "authority", "current_claim"})

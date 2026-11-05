@@ -99,7 +99,7 @@ class McpCompilerTest(unittest.TestCase):
             wiki = create_wiki_root(tmp / "wiki")
             (wiki / ".llm-wiki.toml").write_text(
                 'schema_version = "1"\n'
-                'runtime_contract = "2"\n'
+                'runtime_contract = "3"\n'
                 '[compiler]\n'
                 'providers = ["seed", "frontmatter", "text", "source"]\n',
                 encoding="utf-8",
@@ -128,7 +128,7 @@ class McpCompilerTest(unittest.TestCase):
         self.assertEqual(validated.stop.reason, "no_evidence")
         self.assertFalse(validated.stop.sufficient)
 
-    def test_stdio_provider_degradation_keeps_evidence_and_typed_stop(self):
+    def test_stdio_native_providers_need_no_external_store(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             wiki = create_wiki_root(tmp / "wiki")
@@ -147,31 +147,30 @@ class McpCompilerTest(unittest.TestCase):
             )
             (wiki / ".llm-wiki.toml").write_text(
                 'schema_version = "1"\n'
-                'runtime_contract = "2"\n'
+                'runtime_contract = "3"\n'
                 '[compiler]\n'
-                'providers = ["seed", "frontmatter", "text", "source", "loci"]\n',
+                'providers = ["seed", "frontmatter", "text", "source"]\n',
                 encoding="utf-8",
             )
 
-            result = asyncio.run(_provider_degraded_round_trip(tmp / "home", wiki))
+            result = asyncio.run(_native_round_trip(tmp / "home", wiki))
 
         self.assertFalse(result["is_error"])
         structured = result["structured_content"]
         self.assertEqual(structured["kind"], "compiled_context")
         self.assertTrue(structured["evidence"])
-        self.assertEqual(structured["stop"]["reason"], "provider_degraded")
+        self.assertEqual(structured["stop"]["reason"], "candidate_exhausted")
         self.assertNotEqual(structured["stop"]["reason"], "no_evidence")
+        self.assertEqual(structured["diagnostics"], [])
         self.assertTrue(
-            any(
-                diagnostic["code"] == "LOCI_MCP_CONFIG_MISSING"
-                for diagnostic in structured["diagnostics"]
-            )
+            all(item["provider"] in {"seed", "frontmatter", "text", "graph", "source"}
+                for item in structured["evidence"])
         )
 
         validated = WikiCompileContextOutput.model_validate(structured)
         self.assertIsNotNone(validated.stop)
         assert validated.stop is not None
-        self.assertEqual(validated.stop.reason, "provider_degraded")
+        self.assertEqual(validated.stop.reason, "candidate_exhausted")
 
     def test_invalid_compiler_input_keeps_structured_error_envelope(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -239,8 +238,8 @@ class McpCompilerTest(unittest.TestCase):
                     "provided_max_bytes": 100,
                     "provided_max_estimated_tokens": None,
                     "effective_max_bytes": 100,
-                    "minimum_response_bytes": 853,
-                    "minimum_estimated_tokens": 214,
+                    "minimum_response_bytes": 847,
+                    "minimum_estimated_tokens": 212,
                 },
             },
         )
@@ -313,7 +312,7 @@ async def _no_evidence_round_trip(home: Path, wiki: Path):
         }
 
 
-async def _provider_degraded_round_trip(home: Path, wiki: Path):
+async def _native_round_trip(home: Path, wiki: Path):
     params = await _session(home)
     assert params.env is not None
     params.env.pop("LOCI_BASE_DIR", None)

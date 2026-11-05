@@ -2,17 +2,12 @@ from __future__ import annotations
 
 import json
 from importlib.metadata import PackageNotFoundError, version
-import os
 from pathlib import Path
-import shutil
 import subprocess
 from typing import Any
 
-from .config import CURRENT_RUNTIME_CONTRACT, CURRENT_SCHEMA_VERSION, inspect_wiki_config
+from .config import CURRENT_RUNTIME_CONTRACT, CURRENT_SCHEMA_VERSION, DEFAULT_PROVIDERS, inspect_wiki_config
 from .script_drift import inspect_scripts
-
-
-_LOCI_STORE_ENV = ("LOCI_BASE_DIR", "LOCI_STORE_NAMESPACE")
 
 
 def inspect_runtime(wiki_root: str | Path) -> dict[str, Any]:
@@ -21,15 +16,14 @@ def inspect_runtime(wiki_root: str | Path) -> dict[str, Any]:
     scripts = inspect_scripts(root)
     blockers = [path for path, result in scripts.items() if result["status"] == "modified_unknown"]
     adapter_runtime = _adapter_runtime(root, scripts)
-    loci_transport = _loci_transport_status()
-    loci = _loci_status(config, loci_transport)
-    graph = _graph_status(config, loci_transport)
 
-    if config.error is not None:
+    if config.error is not None and config.status != "migration_required":
         compatibility_status = "incompatible"
     elif blockers:
         compatibility_status = "blocked"
-    elif config.status == "legacy_missing":
+    elif config.status in {"legacy_missing", "migration_required"}:
+        compatibility_status = "migration_available"
+    elif any(result["status"] == "outdated_adapter" for result in scripts.values()):
         compatibility_status = "migration_available"
     elif adapter_runtime["status"] == "missing_runtime":
         compatibility_status = "incompatible"
@@ -44,7 +38,6 @@ def inspect_runtime(wiki_root: str | Path) -> dict[str, Any]:
                 "schema_version": config.config.schema_version,
                 "runtime_contract": config.config.runtime_contract,
                 "profile": config.config.profile,
-                "graph_backend": config.config.compiler.graph_backend,
             }
         )
     if config.error is not None:
@@ -68,12 +61,14 @@ def inspect_runtime(wiki_root: str | Path) -> dict[str, Any]:
         "scripts": scripts,
         "adapter_runtime": adapter_runtime,
         "providers": {
-            "seed": {"status": "ready"},
-            "frontmatter": {"status": "ready"},
-            "text": {"status": "ready"},
-            "graph": graph,
-            "source": {"status": "ready"},
-            "loci": loci,
+            name: {
+                "status": (
+                    "unavailable" if config.config is None
+                    else "ready" if name in config.config.compiler.providers
+                    else "disabled"
+                )
+            }
+            for name in DEFAULT_PROVIDERS
         },
         "migration": _migration_status(root),
     }
@@ -126,56 +121,3 @@ def _adapter_runtime(root: Path, scripts: dict[str, dict]) -> dict[str, Any]:
             "detail": output[-500:],
         }
     return {"status": "ready", "python": str(python.relative_to(root))}
-
-
-def _loci_status(config, transport: dict[str, Any]) -> dict[str, Any]:
-    if config.config is not None and "loci" not in config.config.compiler.providers:
-        return {"status": "disabled", "opt_out": True, "transport": "mcp_stdio"}
-    return dict(transport)
-
-
-def _graph_status(config, transport: dict[str, Any]) -> dict[str, Any]:
-    backend = config.config.compiler.graph_backend if config.config is not None else "loci"
-    if config.config is not None and "graph" not in config.config.compiler.providers:
-        return {
-            "status": "disabled",
-            "backend": backend,
-            "rollback_available": True,
-        }
-    if backend == "legacy":
-        return {
-            "status": "ready",
-            "backend": "legacy",
-            "rollback_available": True,
-        }
-    return {
-        **transport,
-        "backend": "loci",
-        "rollback_available": True,
-        "cache": "external_read_only_mirror",
-    }
-
-
-def _loci_transport_status() -> dict[str, Any]:
-    command = os.environ.get("LLM_WIKI_LOCI_MCP_COMMAND", "loci-mcp")
-    if shutil.which(command) is None:
-        return {
-            "status": "degraded",
-            "code": "LOCI_MCP_UNAVAILABLE",
-            "transport": "mcp_stdio",
-            "freshness": "not_checked",
-        }
-    missing = [name for name in _LOCI_STORE_ENV if not os.environ.get(name)]
-    if missing:
-        return {
-            "status": "degraded",
-            "code": "LOCI_MCP_CONFIG_MISSING",
-            "transport": "mcp_stdio",
-            "freshness": "not_checked",
-            "missing": missing,
-        }
-    return {
-        "status": "ready",
-        "transport": "mcp_stdio",
-        "freshness": "checked_on_provider_use",
-    }

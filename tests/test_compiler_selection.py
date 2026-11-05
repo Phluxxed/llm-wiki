@@ -39,7 +39,6 @@ class _NoisyProvider:
                 authored_state="current",
                 derived_flags=(),
                 authority_signals=(),
-                retrieval_rank=index,
             )
             for index in range(self.count)
         ]
@@ -53,13 +52,13 @@ class _AtomicProvider:
             CandidateEvidence(
                 id="graph:atomic",
                 provider="graph",
-                route="evidence_backed_path",
+                route="connecting_path",
                 page="concepts/bridge.md",
                 source=None,
                 locator={"path": ["A", "B"]},
                 content="complete authored path evidence " * 40,
                 roles=("answer", "authority"),
-                selection_signals=("loci_evidence_backed_path",),
+                selection_signals=("connecting_path",),
                 authored_state="current",
                 derived_flags=(),
                 authority_signals=("accepted_adr",),
@@ -361,109 +360,67 @@ class ProgressiveSelectionTest(unittest.TestCase):
             2_000,
         )
 
-    def test_loci_stays_primary_while_distinct_matching_content_can_supplement(self):
+
+    def test_native_sections_do_not_force_unrelated_results_after_coverage(self):
         request = CompileRequest.from_mapping(
             {"alias": "test", "question": "What owns traversal?", "seeds": []}
         )
         candidates = [
             CandidateEvidence(
-                id="frontmatter:systems/wiki.md",
-                provider="frontmatter",
-                route="metadata_match",
-                page="systems/wiki.md",
-                source=None,
-                locator={"file": "systems/wiki.md"},
-                content="Broad page content about traversal.",
-                roles=("answer",),
-                selection_signals=("frontmatter_match",),
-                authored_state="current",
-                derived_flags=(),
-                authority_signals=(),
-            ),
-            CandidateEvidence(
-                id="loci:systems/wiki.md::Ownership#section",
-                provider="loci",
-                route="indexed_section",
-                page="systems/wiki.md",
-                source=None,
-                locator={"file": "systems/wiki.md", "start_line": 10, "end_line": 12},
-                content="Exact traversal ownership section.",
-                roles=("answer",),
-                selection_signals=("indexed_symbol_match",),
-                authored_state="current",
-                derived_flags=(),
-                authority_signals=(),
-            ),
-        ]
-
-        selected, _ = select_candidates(candidates, request, ("answer",))
-
-        self.assertEqual([item.provider for item in selected], ["loci", "frontmatter"])
-
-    def test_loci_retrieval_rank_does_not_force_redundant_results_after_coverage(self):
-        request = CompileRequest.from_mapping(
-            {"alias": "test", "question": "What owns traversal?", "seeds": []}
-        )
-        candidates = [
-            CandidateEvidence(
-                id="loci:z-relevant#section",
-                provider="loci",
-                route="indexed_section",
+                id="text:z-relevant#section",
+                provider="text",
+                route="lexical_section",
                 page="systems/relevant.md",
                 source=None,
                 locator={"file": "systems/relevant.md"},
                 content="The exact traversal answer.",
                 roles=("answer",),
-                selection_signals=("indexed_symbol_match",),
+                selection_signals=("term:traversal",),
                 authored_state="current",
                 derived_flags=(),
                 authority_signals=(),
-                retrieval_rank=0,
             ),
             CandidateEvidence(
-                id="loci:a-irrelevant#section",
-                provider="loci",
-                route="indexed_section",
+                id="text:a-irrelevant#section",
+                provider="text",
+                route="lexical_section",
                 page="systems/irrelevant.md",
                 source=None,
                 locator={"file": "systems/irrelevant.md"},
                 content="Alphabetically earlier but less relevant.",
                 roles=("answer",),
-                selection_signals=("indexed_symbol_match",),
+                selection_signals=("term:traversal",),
                 authored_state="current",
                 derived_flags=(),
                 authority_signals=(),
-                retrieval_rank=1,
             ),
             CandidateEvidence(
-                id="loci:m-third#section",
-                provider="loci",
-                route="indexed_section",
+                id="text:m-third#section",
+                provider="text",
+                route="lexical_section",
                 page="systems/third.md",
                 source=None,
                 locator={"file": "systems/third.md"},
                 content="The third ranked exact section.",
                 roles=("answer",),
-                selection_signals=("indexed_symbol_match",),
+                selection_signals=("term:traversal",),
                 authored_state="current",
                 derived_flags=(),
                 authority_signals=(),
-                retrieval_rank=2,
             ),
             CandidateEvidence(
-                id="loci:b-fourth#section",
-                provider="loci",
-                route="indexed_section",
+                id="text:b-fourth#section",
+                provider="text",
+                route="lexical_section",
                 page="systems/fourth.md",
                 source=None,
                 locator={"file": "systems/fourth.md"},
                 content="The fourth ranked section stays outside the minimum set.",
                 roles=("answer",),
-                selection_signals=("indexed_symbol_match",),
+                selection_signals=("term:traversal",),
                 authored_state="current",
                 derived_flags=(),
                 authority_signals=(),
-                retrieval_rank=3,
             ),
         ]
 
@@ -471,7 +428,7 @@ class ProgressiveSelectionTest(unittest.TestCase):
 
         self.assertEqual(
             [item.id for item in selected],
-            ["loci:z-relevant#section"],
+            ["text:z-relevant#section"],
         )
 
     def test_atomic_graph_path_is_omitted_instead_of_partially_truncated(self):
@@ -491,13 +448,13 @@ class ProgressiveSelectionTest(unittest.TestCase):
         candidate = CandidateEvidence(
             id="graph:path-a-b",
             provider="graph",
-            route="evidence_backed_path",
+            route="connecting_path",
             page="concepts/bridge.md",
             source=None,
             locator={"support_kind": "semantic_bridge"},
             content="complete authored path evidence " * 80,
             roles=("bridge",),
-            selection_signals=("loci_evidence_backed_path",),
+            selection_signals=("connecting_path",),
             authored_state="current",
             derived_flags=(),
             authority_signals=(),
@@ -608,86 +565,7 @@ class ProgressiveSelectionTest(unittest.TestCase):
         self.assertEqual(response["stop"]["reason"], "content_budget_exhausted")
         self.assertIn("content:test", response["continuation"]["remaining_candidate_ids"])
 
-    def test_loci_selected_graph_paths_remain_selected_within_target(self):
-        request = CompileRequest.from_mapping(
-            {
-                "alias": "test",
-                "question": "How does A connect to B?",
-                "seeds": [],
-                "budget": {
-                    "target_bytes": 10_000,
-                    "max_bytes": 20_000,
-                    "target_items": 8,
-                    "max_items": 16,
-                },
-            }
-        )
-        candidates = [
-            CandidateEvidence(
-                id=f"graph:path-{index}",
-                provider="graph",
-                route="evidence_backed_path",
-                page=f"concepts/bridge-{index}.md",
-                source=None,
-                locator={"support_kind": "direct_authored_edge", "rank": index},
-                content=f"complete authored path evidence {index}",
-                roles=("bridge",),
-                selection_signals=("loci_evidence_backed_path",),
-                authored_state="current",
-                derived_flags=(),
-                authority_signals=(),
-                retrieval_rank=index,
-                atomic=True,
-            )
-            for index in range(3)
-        ]
 
-        selected, _ = select_candidates(candidates, request, ("bridge",))
-
-        self.assertEqual([item.id for item in selected], [
-            "graph:path-0",
-            "graph:path-1",
-            "graph:path-2",
-        ])
-
-    def test_distinct_query_selected_paths_can_expand_past_target_within_hard_limits(self):
-        request = CompileRequest.from_mapping(
-            {
-                "alias": "test",
-                "question": "How does A connect to B?",
-                "seeds": [],
-                "budget": {
-                    "target_bytes": 100,
-                    "max_bytes": 5_000,
-                    "target_items": 1,
-                    "max_items": 8,
-                },
-            }
-        )
-        candidates = [
-            CandidateEvidence(
-                id=f"graph:path-{index}",
-                provider="graph",
-                route="evidence_backed_path",
-                page=f"concepts/bridge-{index}.md",
-                source=None,
-                locator={"support_kind": "direct_authored_edge", "rank": index},
-                content="complete authored path evidence",
-                roles=("bridge",),
-                selection_signals=("loci_evidence_backed_path",),
-                authored_state="current",
-                derived_flags=(),
-                authority_signals=(),
-                retrieval_rank=index,
-                atomic=True,
-            )
-            for index in range(2)
-        ]
-
-        selected, omissions = select_candidates(candidates, request, ("bridge",))
-
-        self.assertEqual([item.id for item in selected], ["graph:path-0", "graph:path-1"])
-        self.assertEqual(omissions, ())
 
 
 if __name__ == "__main__":

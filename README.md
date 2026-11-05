@@ -52,27 +52,20 @@ cd ~/llm-wiki
 uv venv
 uv pip install -e .
 
-# Codex personal registry and nested-Loci store identity
+# Codex personal registry
 codex mcp add \
   --env LLM_WIKI_HOME="$HOME/.codex/llm-wiki" \
-  --env LOCI_BASE_DIR="$HOME/.codex/loci-index" \
-  --env LOCI_STORE_NAMESPACE=codex \
   llm-wiki -- llm-wiki-mcp
 
-# Claude work registry and nested-Loci store identity; do not share these with Codex
+# Claude work registry; keep it separate from Codex
 claude mcp add llm-wiki -s local \
   -e LLM_WIKI_HOME="$HOME/.claude/llm-wiki" \
-  -e LOCI_BASE_DIR="$HOME/.claude/loci-index" \
-  -e LOCI_STORE_NAMESPACE=claude \
   -- llm-wiki-mcp
 ```
 
-The MCP server fails closed when `LLM_WIKI_HOME` is absent. Its nested
-`loci-mcp` client also requires the explicit `LOCI_BASE_DIR` and
-`LOCI_STORE_NAMESPACE` of an initialized store; it reports
-`LOCI_MCP_CONFIG_MISSING` rather than guessing a host identity. Codex and
-Claude should use separate registry homes and Loci stores so personal and work
-wikis do not cross over.
+The MCP server fails closed when `LLM_WIKI_HOME` is absent. Codex and
+Claude should use separate registry homes so personal and work wikis do not
+cross over. Retrieval runs directly against the wiki's local files.
 
 Generated wikis should install the canonical package into a project-local `.venv` (resolve the path to the current release checkout; do not write a user-specific path into wiki files):
 
@@ -168,7 +161,13 @@ llm-wiki compile-context --wiki . --alias my-wiki \
 
 The target size is an efficiency goal, not a recall ceiling. The compiler expands selected evidence while required roles remain uncovered, up to the explicit hard maximum, and reports provenance, authored state, omissions, exact byte use, uncovered roles, and its stop reason. See [Context Compiler and migration](docs/context-compiler.md).
 
-Managed wikis use the local `loci-mcp` stdio service for default section navigation and bounded graph retrieval. Graph profile and contribution data live in an external cache mirror; compiling never writes `.loci` data into the wiki. Inferred relationship paths count as bridge evidence only when they cross the question's distinct subject anchors, so a nearby path cannot manufacture sufficiency. If loci is unavailable or unindexed, the response reports that degradation and never silently switches graph retrieval to the legacy backend. Set `compiler.graph_backend = "legacy"` only for explicit rollback. See [loci providers](docs/loci-provider.md).
+Managed wikis use five local providers: `seed`, `frontmatter`, `text`, `graph`,
+and `source`. They retrieve page sections, authored Markdown links and
+`mentioned_in` relationships, and declared source evidence directly from the
+wiki snapshot. Retrieval needs no external index service or cache mirror.
+Configuration schema 1 uses runtime contract 3; runtime 2 wikis need the
+receipt-backed migration below. Compiler request contracts 1, 2, and 3 remain
+unchanged. See [native retrieval and migration](docs/context-compiler.md).
 
 ## MCP tools
 

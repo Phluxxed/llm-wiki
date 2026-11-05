@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import replace
 
 from ..graph import BODY_LINK_RE, Edge, collect_typed_edges, resolve_link
 from ..state import normalize_knowledge_state
 from .base import CandidateEvidence, ProviderContext
-from .utils import page_matches_question, question_terms
+from .utils import page_matches_question, question_terms, title_matches_question
 
 
 class GraphProvider:
@@ -16,13 +17,16 @@ class GraphProvider:
             return []
         edges = collect_typed_edges(context.pages)
         terms = question_terms(context.request.question)
-        question_anchors = {
-            path
-            for path, page in context.pages.items()
+        named_anchors = {
+            path for path, page in context.pages.items()
+            if title_matches_question(page.title, context.request.question)
+        }
+        # Body mentions discover candidates only when the question names no
+        # page. Otherwise a nearby mention could replace a missing endpoint.
+        question_anchors = named_anchors or {
+            path for path, page in context.pages.items()
             if page_matches_question(page, context.request.question, terms)
         }
-        # Project anchors are discovery seeds only.  Explicit caller seeds
-        # remain the sole source of explicit-seed bridge signals.
         explicit_anchors = set(context.resolved_seeds)
         scope_anchors = set(context.scope_seeds)
         anchors = explicit_anchors | scope_anchors
@@ -31,50 +35,79 @@ class GraphProvider:
         if not anchors:
             return []
 
-        path_edges: set[Edge] = set()
+        candidates: list[CandidateEvidence] = []
         sorted_anchors = sorted(anchors)
-        path_edges.update(
-            edge
-            for edge in edges
-            if edge.source in anchors and edge.target in anchors
-        )
         for index, source in enumerate(sorted_anchors):
             for target in sorted_anchors[index + 1 :]:
-                path_edges.update(_shortest_path(source, target, edges, max_depth=3))
+                paths = [(edge,) for edge in edges
+                         if {edge.source, edge.target} == {source, target}]
+                if not paths:
+                    path = _shortest_path(source, target, edges, max_depth=3)
+                    paths = [path] if path else []
+                discovery: tuple[str, ...] = ()
+                question_derived = source in question_anchors or target in question_anchors
+                if not question_derived:
+                    discovery = tuple(
+                        signal for signal, seeds in (
+                            ("scope_seed_discovery", scope_anchors),
+                            ("explicit_seed_discovery", explicit_anchors),
+                        ) if source in seeds or target in seeds
+                    )
+                for path in paths:
+                    candidate = _path_candidate(path, context, discovery)
+                    if candidate is not None:
+                        # Internal scope anchors discover relationships but do not
+                        # supply a user-requested endpoint on their own.
+                        if not ({source, target} <= question_anchors or {source, target} <= explicit_anchors):
+                            candidate = replace(candidate, roles=("support",))
+                        candidates.append(candidate)
         if len(anchors) == 1:
-            path_edges.update(edge for edge in edges if edge.source in anchors or edge.target in anchors)
+            discovery = tuple(
+                signal for signal, seeds in (
+                    ("scope_seed_discovery", scope_anchors),
+                    ("explicit_seed_discovery", explicit_anchors),
+                ) if anchors & seeds
+            )
+            for edge in edges:
+                if edge.source in anchors or edge.target in anchors:
+                    candidate = _edge_candidate(edge, context, discovery)
+                    if candidate is not None:
+                        candidates.append(replace(candidate, roles=("support",)))
+        return candidates
 
-        # A path that reaches a question anchor is question-derived even when
-        # an intermediate edge does not itself mention a query term.  Edges
-        # reached only from the compiler's scope seed (or caller's explicit
-        # seed) must remain distinguishable so they cannot suppress the
-        # mandatory project orientation fallback.
-        question_derived_edges = {
-            edge
-            for edge in path_edges
-            if edge.source in question_anchors or edge.target in question_anchors
-        }
-        for index, source in enumerate(sorted_anchors):
-            for target in sorted_anchors[index + 1 :]:
-                path = _shortest_path(source, target, edges, max_depth=3)
-                if source in question_anchors or target in question_anchors:
-                    question_derived_edges.update(path)
-        discovery_signals: dict[Edge, tuple[str, ...]] = {}
-        for edge in sorted(path_edges):
-            signals: list[str] = []
-            if edge not in question_derived_edges:
-                if edge.source in scope_anchors or edge.target in scope_anchors:
-                    signals.append("scope_seed_discovery")
-                if edge.source in explicit_anchors or edge.target in explicit_anchors:
-                    signals.append("explicit_seed_discovery")
-            if signals:
-                discovery_signals[edge] = tuple(signals)
 
-        candidates = [
-            _edge_candidate(edge, context, discovery_signals.get(edge, ()))
-            for edge in sorted(path_edges)
-        ]
-        return [candidate for candidate in candidates if candidate is not None]
+def _path_candidate(
+    path: tuple[Edge, ...],
+    context: ProviderContext,
+    discovery_signals: tuple[str, ...],
+) -> CandidateEvidence | None:
+    spans = [_edge_candidate(edge, context, discovery_signals) for edge in path]
+    if any(span is None for span in spans):
+        return None
+    if len(spans) == 1:
+        # A declared relationship is indivisible even when its authored line
+        # is longer than the caller's remaining content allowance.
+        return replace(spans[0], atomic=True)
+    first = spans[0]
+    return replace(
+        first,
+        id="graph:path:" + "|".join(span.id.removeprefix("graph:") for span in spans),
+        locator={"spans": [
+            {"id": span.id, "page": span.page, "authored_state": span.authored_state, **span.locator} for span in spans
+        ]},
+        content="\n\n".join(f"{span.page}: {span.content}" for span in spans),
+        selection_signals=tuple(dict.fromkeys(
+            signal for span in spans for signal in span.selection_signals
+            if signal not in {"seed_authored_multi_bridge", "multi_seed_bridge"}
+        )),
+        authored_state=min(
+            (span.authored_state for span in spans),
+            key=("superseded", "historical", "contradicted", "weak", "inferred", "unspecified", "current").index,
+        ),
+        derived_flags=tuple(dict.fromkeys(flag for span in spans for flag in span.derived_flags)),
+        authority_signals=("explicit_current",) if all(span.authored_state == "current" for span in spans) else (),
+        atomic=True,
+    )
 
 
 def _shortest_path(source: str, target: str, edges: list[Edge], max_depth: int) -> tuple[Edge, ...]:

@@ -20,8 +20,8 @@ class EvidenceSupplementTest(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = create_wiki_root(Path(self.temporary.name) / "wiki", with_scripts=False)
         (self.root / ".llm-wiki.toml").write_text(
-            'schema_version = "1"\nruntime_contract = "2"\n'
-            '[compiler]\nproviders = ["text", "source"]\ngraph_backend = "legacy"\n',
+            'schema_version = "1"\nruntime_contract = "3"\n'
+            '[compiler]\nproviders = ["text", "source"]\n',
             encoding="utf-8",
         )
         write_md(

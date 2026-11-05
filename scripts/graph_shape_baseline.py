@@ -7,16 +7,12 @@ import argparse
 import hashlib
 import json
 import math
-import os
-import tempfile
 from collections import deque
 from itertools import combinations
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping
-from unittest.mock import patch
 
-from mcp import Client
 from llm_wiki_core.compiler import _effective_config, compile_context
 from llm_wiki_core.contracts import CompileRequest, Diagnostic
 from llm_wiki_core.documents import WikiPage, collect_pages
@@ -24,7 +20,6 @@ from llm_wiki_core.graph import Edge, collect_typed_edges
 from llm_wiki_core.providers.base import CandidateEvidence, ProviderContext, ProviderResult
 from llm_wiki_core.providers.graph import _edge_candidate
 from llm_wiki_core.providers.local import FrontmatterProvider, SeedProvider, TextProvider
-from llm_wiki_core.providers.loci import LociGateway, LociMcpGateway, LociRetrieval, LociProvider
 from llm_wiki_core.providers.source import SourceProvider
 from llm_wiki_core.providers.utils import page_matches_question, question_terms
 from llm_wiki_core.query_shape import classify_question, required_roles
@@ -138,15 +133,13 @@ def record_trace(
     diagnostics: list[Mapping[str, Any]],
 ) -> dict[str, Any]:
     paths = _selected_graph_paths(records, fixture)
-    legacy_edges = _graph_edges(
-        [record for record in records if record.get("route") != "evidence_backed_path"]
-    )
+    authored_edges = _graph_edges(records)
     pages = {
         str(record["page"])
         for record in records
         if isinstance(record.get("page"), str) and record.get("page")
     }
-    for source, target in legacy_edges:
+    for source, target in authored_edges:
         pages.update((source, target))
     for path in paths:
         pages.update(path)
@@ -177,40 +170,16 @@ def _selected_graph_paths(
     records: list[Mapping[str, Any]],
     fixture: Mapping[str, Any],
 ) -> list[list[str]]:
-    selected: list[list[str]] = []
-    legacy: list[Mapping[str, Any]] = []
-    for record in records:
-        if record.get("route") != "evidence_backed_path":
-            legacy.append(record)
-            continue
-        locator = record.get("locator")
-        nodes = locator.get("nodes") if isinstance(locator, Mapping) else None
-        if not isinstance(nodes, list):
-            continue
-        path = [
-            node.get("file")
-            for node in nodes
-            if isinstance(node, Mapping) and isinstance(node.get("file"), str)
-        ]
-        if len(path) == len(nodes) and len(path) >= 2:
-            selected.append(path)
-    selected.extend(_fixture_paths(_graph_edges(legacy), fixture))
-    return [list(path) for path in dict.fromkeys(tuple(path) for path in selected)]
+    return _fixture_paths(_graph_edges(records), fixture)
 
 
 def _graph_edges(records: list[Mapping[str, Any]]) -> list[tuple[str, str]]:
     edges: set[tuple[str, str]] = set()
     for record in records:
         locator = record.get("locator")
-        nodes = locator.get("nodes") if isinstance(locator, Mapping) else None
-        if record.get("route") == "evidence_backed_path" and isinstance(nodes, list):
-            files = [
-                node.get("file")
-                for node in nodes
-                if isinstance(node, Mapping) and isinstance(node.get("file"), str)
-            ]
-            if len(files) == len(nodes) and len(files) >= 2:
-                edges.update(zip(files, files[1:]))
+        spans = locator.get("spans") if isinstance(locator, Mapping) else None
+        if isinstance(spans, list):
+            edges.update(_graph_edges(spans))
             continue
         record_id = record.get("id")
         if not isinstance(record_id, str) or not record_id.startswith("graph:"):
@@ -286,21 +255,6 @@ def _contains_path(path: list[str], candidate: list[str]) -> bool:
     return any(path[index : index + width] == candidate for index in range(len(path) - width + 1))
 
 
-class CountingLociGateway(LociGateway):
-    def __init__(self) -> None:
-        self._gateway = LociMcpGateway()
-        self.tool_calls = 0
-
-    def retrieve(self, wiki_root: Path, query: str, *, limit: int) -> LociRetrieval:
-        retrieval = self._gateway.retrieve(wiki_root, query, limit=limit)
-        hydrated = any(
-            isinstance(item, Mapping) and isinstance(item.get("content"), str)
-            for item in retrieval.results
-        )
-        self.tool_calls = 1 + int(hydrated)
-        return retrieval
-
-
 def run_baseline(
     contract: Mapping[str, Any],
     roots: Mapping[str, Path],
@@ -310,43 +264,41 @@ def run_baseline(
         for name, root in roots.items()
     }
     fixture_results: list[dict[str, Any]] = []
-    with tempfile.TemporaryDirectory(prefix="llm-wiki-graph-benchmark-") as cache_dir:
-        with patch.dict(os.environ, {"LLM_WIKI_GRAPH_CACHE_DIR": cache_dir}):
-            for fixture in contract["fixtures"]:
-                corpus_name = fixture["corpus"]
-                corpus = corpora[corpus_name]
-                hubs = set(contract["corpora"][corpus_name]["generic_hubs"])
-                request = CompileRequest.from_mapping(
-                    {
-                        "alias": contract["corpora"][corpus_name]["alias"],
-                        "question": fixture["question"],
-                    }
-                )
+    for fixture in contract["fixtures"]:
+        corpus_name = fixture["corpus"]
+        corpus = corpora[corpus_name]
+        hubs = set(contract["corpora"][corpus_name]["generic_hubs"])
+        request = CompileRequest.from_mapping(
+            {
+                "alias": contract["corpora"][corpus_name]["alias"],
+                "question": fixture["question"],
+            }
+        )
 
-                no_graph = _run_without_graph(corpus, request, fixture, hubs)
-                routes = {
-                    "no_graph": no_graph,
-                    "direct_links": _run_graph_depth(corpus, request, fixture, hubs, max_depth=1),
-                    "graph_depth_2": _run_graph_depth(corpus, request, fixture, hubs, max_depth=2),
-                    "graph_depth_3": _run_graph_depth(corpus, request, fixture, hubs, max_depth=3),
-                    "current_compiler": _run_current_compiler(
-                        corpus,
-                        request,
-                        fixture,
-                        hubs,
-                    ),
-                }
-                fixture_results.append(
-                    {
-                        "id": fixture["id"],
-                        "corpus": corpus_name,
-                        "shape": fixture["shape"],
-                        "question": fixture["question"],
-                        "expected_pages": list(fixture["expected_pages"]),
-                        "answerable": bool(fixture["answerable"]),
-                        "routes": routes,
-                    }
-                )
+        no_graph = _run_without_graph(corpus, request, fixture, hubs)
+        routes = {
+            "no_graph": no_graph,
+            "direct_links": _run_graph_depth(corpus, request, fixture, hubs, max_depth=1),
+            "graph_depth_2": _run_graph_depth(corpus, request, fixture, hubs, max_depth=2),
+            "graph_depth_3": _run_graph_depth(corpus, request, fixture, hubs, max_depth=3),
+            "current_compiler": _run_current_compiler(
+                corpus,
+                request,
+                fixture,
+                hubs,
+            ),
+        }
+        fixture_results.append(
+            {
+                "id": fixture["id"],
+                "corpus": corpus_name,
+                "shape": fixture["shape"],
+                "question": fixture["question"],
+                "expected_pages": list(fixture["expected_pages"]),
+                "answerable": bool(fixture["answerable"]),
+                "routes": routes,
+            }
+        )
 
     _assert_corpora_unchanged(corpora)
 
@@ -412,13 +364,11 @@ def _run_without_graph(
         roles,
         (),
     )
-    loci_gateway = CountingLociGateway()
     providers = (
         SeedProvider(),
         FrontmatterProvider(),
         TextProvider(),
         SourceProvider(),
-        LociProvider(gateway=loci_gateway),
     )
     enabled = [
         provider
@@ -434,7 +384,7 @@ def _run_without_graph(
         fixture=fixture,
         generic_hubs=hubs,
         sufficient=not selected_coverage.uncovered_roles,
-        tool_calls=loci_gateway.tool_calls,
+        tool_calls=0,
         latency_ms=(perf_counter() - start) * 1000,
         classified_shapes=list(shapes),
         diagnostics=[item.to_dict() for item in diagnostics],
@@ -670,42 +620,14 @@ def _run_current_compiler(
     fixture: Mapping[str, Any],
     hubs: set[str],
 ) -> dict[str, Any]:
-    tool_calls = 0
-    original_call_tool = Client.call_tool
-
-    async def counted_call_tool(
-        client: Client,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-        read_timeout_seconds: float | None = None,
-        progress_callback: Any = None,
-        *,
-        input_responses: Any = None,
-        request_state: str | None = None,
-        meta: Any = None,
-    ):
-        nonlocal tool_calls
-        tool_calls += 1
-        return await original_call_tool(
-            client,
-            name,
-            arguments,
-            read_timeout_seconds,
-            progress_callback,
-            input_responses=input_responses,
-            request_state=request_state,
-            meta=meta,
-        )
-
     start = perf_counter()
-    with patch.object(Client, "call_tool", new=counted_call_tool):
-        response = compile_context(corpus["root"], request).to_dict()
+    response = compile_context(corpus["root"], request).to_dict()
     trace = record_trace(
         response["evidence"],
         fixture=fixture,
         generic_hubs=hubs,
         sufficient=bool(response["stop"]["sufficient"]),
-        tool_calls=tool_calls,
+        tool_calls=0,
         latency_ms=(perf_counter() - start) * 1000,
         classified_shapes=compiled_response_shapes(response),
         diagnostics=list(response["diagnostics"]),

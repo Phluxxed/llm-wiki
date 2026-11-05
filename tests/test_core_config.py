@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -14,7 +15,7 @@ from llm_wiki_core.config import DEFAULT_PROVIDERS, inspect_wiki_config
 
 VALID_CONFIG = """\
 schema_version = "1"
-runtime_contract = "2"
+runtime_contract = "3"
 profile = "default"
 
 [content]
@@ -55,27 +56,28 @@ class WikiConfigTest(unittest.TestCase):
         self.assertIsNone(result.config)
         self.assertIsNone(result.error)
 
-    def test_loci_is_a_default_compiler_provider(self):
-        self.assertIn("loci", DEFAULT_PROVIDERS)
+    def test_only_native_providers_are_defaults(self):
+        self.assertEqual(DEFAULT_PROVIDERS, ("seed", "frontmatter", "text", "graph", "source"))
 
-    def test_loci_is_the_default_graph_backend(self):
-        self.write_config(VALID_CONFIG)
+    def test_retired_graph_backends_are_rejected(self):
+        for backend in ("loci", "legacy", "automatic", 3, False):
+            self.write_config(VALID_CONFIG.replace("[compiler]\n", f"[compiler]\ngraph_backend = {json.dumps(backend)}\n"))
+            result = inspect_wiki_config(self.root)
+            self.assertEqual(result.status, "invalid")
+            self.assertEqual(result.error.details["key"], "compiler.graph_backend")
 
+    def test_loci_provider_is_rejected(self):
+        self.write_config(VALID_CONFIG.replace('"source"]', '"source", "loci"]'))
         result = inspect_wiki_config(self.root)
+        self.assertEqual(result.status, "invalid")
+        self.assertEqual(result.error.details["value"], ["loci"])
 
-        self.assertEqual(result.config.compiler.graph_backend, "loci")
-
-    def test_legacy_graph_backend_is_an_explicit_rollback(self):
-        self.write_config(
-            VALID_CONFIG.replace(
-                "[compiler]\n",
-                '[compiler]\ngraph_backend = "legacy"\n',
-            )
-        )
-
+    def test_runtime_two_requires_explicit_migration(self):
+        self.write_config(VALID_CONFIG.replace('runtime_contract = "3"', 'runtime_contract = "2"'))
         result = inspect_wiki_config(self.root)
-
-        self.assertEqual(result.config.compiler.graph_backend, "legacy")
+        self.assertEqual(result.status, "migration_required")
+        self.assertEqual(result.error.code, "RUNTIME_MIGRATION_REQUIRED")
+        self.assertIn("migrate inspect", result.error.details["next_action"])
 
     def test_unknown_graph_backend_is_rejected(self):
         self.write_config(
@@ -98,7 +100,7 @@ class WikiConfigTest(unittest.TestCase):
 
         self.assertEqual(result.status, "compatible")
         self.assertEqual(result.config.schema_version, "1")
-        self.assertEqual(result.config.runtime_contract, "2")
+        self.assertEqual(result.config.runtime_contract, "3")
         self.assertEqual(result.config.content.source_directory, "sources")
         self.assertEqual(result.config.compiler.target_bytes, 48_000)
         self.assertEqual(result.config.compiler.max_items, 96)
@@ -123,7 +125,7 @@ class WikiConfigTest(unittest.TestCase):
         self.assertEqual(result.error.details["found"], "2")
 
     def test_newer_runtime_contract_is_incompatible(self):
-        self.write_config(VALID_CONFIG.replace('runtime_contract = "2"', 'runtime_contract = "3"'))
+        self.write_config(VALID_CONFIG.replace('runtime_contract = "3"', 'runtime_contract = "4"'))
 
         result = inspect_wiki_config(self.root)
 

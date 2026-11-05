@@ -40,9 +40,9 @@ class TemporalContextTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = create_wiki_root(Path(self.directory.name) / "wiki", with_scripts=False)
         (self.root / ".llm-wiki.toml").write_text(
-            'schema_version = "1"\nruntime_contract = "2"\n'
-            '[compiler]\nproviders = ["seed", "frontmatter", "text", "source"]\n'
-            'graph_backend = "legacy"\n', encoding="utf-8",
+            'schema_version = "1"\nruntime_contract = "3"\n'
+            '[compiler]\nproviders = ["seed", "frontmatter", "text", "source"]\n',
+            encoding="utf-8",
         )
 
     def page(self, revisions=None, *, path="mode.md", body="Deploy mode is blue; use blue for every deployment.",

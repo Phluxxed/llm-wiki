@@ -118,11 +118,11 @@ class DoctorConfig(StrictOutputModel):
         "invalid",
         "unsupported_schema",
         "runtime_incompatible",
+        "migration_required",
     ]
     schema_version: str | None = None
     runtime_contract: str | None = None
     profile: str | None = None
-    graph_backend: Literal["loci", "legacy"] | None = None
     error: WikiError | None = None
 
 
@@ -136,6 +136,7 @@ class DoctorScript(StrictOutputModel):
     status: Literal[
         "missing",
         "compatible_adapter",
+        "outdated_adapter",
         "canonical_legacy_copy",
         "supported_customization",
         "modified_unknown",
@@ -170,37 +171,16 @@ class DoctorAdapterRuntime(StrictOutputModel):
     python: str | None = None
 
 
-class ProviderReady(StrictOutputModel):
-    status: Literal["ready"]
-
-
-class DoctorGraphProvider(StrictOutputModel):
-    status: Literal["ready", "degraded", "disabled"]
-    backend: Literal["loci", "legacy"]
-    rollback_available: Literal[True]
-    cache: Literal["external_read_only_mirror"] | None = None
-    code: Literal["LOCI_MCP_UNAVAILABLE", "LOCI_MCP_CONFIG_MISSING"] | None = None
-    transport: Literal["mcp_stdio"] | None = None
-    freshness: Literal["not_checked", "checked_on_provider_use"] | None = None
-    missing: list[str] | None = None
-
-
-class DoctorLociProvider(StrictOutputModel):
-    status: Literal["ready", "degraded", "disabled"]
-    transport: Literal["mcp_stdio"]
-    opt_out: Literal[True] | None = None
-    code: Literal["LOCI_MCP_UNAVAILABLE", "LOCI_MCP_CONFIG_MISSING"] | None = None
-    freshness: Literal["not_checked", "checked_on_provider_use"] | None = None
-    missing: list[str] | None = None
+class DoctorProvider(StrictOutputModel):
+    status: Literal["ready", "disabled", "unavailable"]
 
 
 class DoctorProviders(StrictOutputModel):
-    seed: ProviderReady
-    frontmatter: ProviderReady
-    text: ProviderReady
-    graph: DoctorGraphProvider
-    source: ProviderReady
-    loci: DoctorLociProvider
+    seed: DoctorProvider
+    frontmatter: DoctorProvider
+    text: DoctorProvider
+    graph: DoctorProvider
+    source: DoctorProvider
 
 
 class DoctorMigration(StrictOutputModel):

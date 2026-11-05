@@ -17,7 +17,8 @@ from .config import (
     CURRENT_RUNTIME_CONTRACT,
     CURRENT_SCHEMA_VERSION,
     DEFAULT_PROVIDERS,
-    LEGACY_DEFAULT_PROVIDERS,
+    inspect_config_values,
+    tomllib,
     inspect_wiki_config,
 )
 from .contracts import CompileRequest, ContractError
@@ -126,15 +127,18 @@ def inspect_migration(wiki_root: str | Path) -> MigrationPlan:
     )
     operations: list[MigrationOperation] = []
 
-    if config.error is not None:
+    if config.status == "migration_required":
+        try:
+            upgraded = _upgrade_runtime_two_config(root / ".llm-wiki.toml")
+        except MigrationError as exc:
+            blockers.append(f".llm-wiki.toml:{exc.code}")
+        else:
+            operations.append(_operation(root, ".llm-wiki.toml", upgraded))
+    elif config.error is not None:
         blockers.append(f".llm-wiki.toml:{config.error.code}")
     elif config.status == "legacy_missing":
         operations.append(
             _operation(root, ".llm-wiki.toml", _render_config(customizations))
-        )
-    elif config.config is not None and config.config.compiler.providers == LEGACY_DEFAULT_PROVIDERS:
-        operations.append(
-            _operation(root, ".llm-wiki.toml", _enable_loci_default(root / ".llm-wiki.toml"))
         )
 
     adapter_content = {
@@ -432,7 +436,6 @@ source_directory = "sources"
 
 [compiler]
 providers = [{rendered_providers}]
-graph_backend = "loci"
 target_bytes = 48000
 max_bytes = 192000
 target_items = 24
@@ -447,30 +450,122 @@ mode = "manual"
 '''
 
 
-def _enable_loci_default(path: Path) -> str:
-    content = path.read_text(encoding="utf-8")
-    section = re.search(r"(?ms)^\[compiler\][ \t]*\n(?P<body>.*?)(?=^\[|\Z)", content)
-    if section is None:
-        raise MigrationError(
-            "MIGRATION_CONFIG_UNSUPPORTED",
-            "Compatible config has no compiler section to upgrade",
-            {"path": ".llm-wiki.toml"},
+def _upgrade_runtime_two_config(path: Path) -> str:
+    # Keep the original representation: only the three retired runtime choices
+    # change, and a parsed comparison below proves all other values survived.
+    content = path.read_bytes().decode("utf-8")
+    raw = tomllib.loads(content)
+    expected = dict(raw)
+    expected["runtime_contract"] = CURRENT_RUNTIME_CONTRACT
+    compiler = raw.get("compiler", {})
+    if not isinstance(compiler, dict):
+        raise _unsupported_config()
+    compiler = dict(compiler)
+    backend = compiler.pop("graph_backend", None)
+    if "graph_backend" in raw.get("compiler", {}) and (not isinstance(backend, str) or backend not in {"loci", "legacy"}):
+        raise _unsupported_config()
+    providers = compiler.get("providers")
+    if providers is not None:
+        if (
+            not isinstance(providers, list)
+            or any(not isinstance(item, str) for item in providers)
+            or len(set(providers)) != len(providers)
+        ):
+            raise _unsupported_config()
+        compiler["providers"] = [item for item in providers if item.strip() != "loci"]
+    if "compiler" in raw:
+        expected["compiler"] = compiler
+    if inspect_config_values(expected).error is not None:
+        raise _unsupported_config()
+
+    root_end = re.search(r"(?m)^[ \t]*\[", content)
+    end = root_end.start() if root_end is not None else len(content)
+    root = _replace_string_setting(content[:end], "runtime_contract", CURRENT_RUNTIME_CONTRACT)
+    content = root + content[end:]
+    if backend is not None or (providers is not None and any(item.strip() == "loci" for item in providers)):
+        section = re.search(
+            r"(?ms)^[ \t]*\[compiler\][ \t]*(?:#[^\r\n]*)?\r?\n(?P<body>.*?)(?=^[ \t]*\[|\Z)",
+            content,
         )
-    body = section.group("body")
-    providers = re.search(
-        r"(?ms)^(?P<indent>[ \t]*)providers[ \t]*=[ \t]*\[.*?\](?P<suffix>[ \t]*(?:#.*)?)$",
-        body,
+        if section is None:
+            raise _unsupported_config()
+        body = section.group("body")
+        if backend is not None:
+            body = _replace_string_setting(body, "graph_backend", None)
+        if providers is not None and any(item.strip() == "loci" for item in providers):
+            body = _remove_loci_provider(body, providers)
+        content = content[:section.start("body")] + body + content[section.end("body"):]
+    try:
+        translated = tomllib.loads(content)
+    except tomllib.TOMLDecodeError as exc:
+        raise _unsupported_config() from exc
+    if translated != expected:
+        raise _unsupported_config()
+    return content
+
+
+def _replace_string_setting(content: str, key: str, value: str | None) -> str:
+    pattern = re.compile(
+        rf'''(?m)^(?P<prefix>[ \t]*{key}[ \t]*=[ \t]*)(?:"(?:\\.|[^"\\\r\n])*"|'[^'\r\n]*')(?P<suffix>[ \t]*(?:#[^\r\n]*)?)(?P<ending>\r?$)'''
     )
-    if providers is None:
-        raise MigrationError(
-            "MIGRATION_CONFIG_UNSUPPORTED",
-            "Compatible config provider list cannot be upgraded safely",
-            {"path": ".llm-wiki.toml"},
-        )
-    rendered = ", ".join(json.dumps(value) for value in DEFAULT_PROVIDERS)
-    replacement = f'{providers.group("indent")}providers = [{rendered}]{providers.group("suffix")}'
-    upgraded_body = body[: providers.start()] + replacement + body[providers.end() :]
-    return content[: section.start("body")] + upgraded_body + content[section.end("body") :]
+    matches = list(pattern.finditer(content))
+    if len(matches) != 1:
+        raise _unsupported_config()
+    match = matches[0]
+    if value is None:
+        replacement = match.group("suffix").lstrip() + match.group("ending")
+    else:
+        replacement = match.group("prefix") + json.dumps(value) + match.group("suffix") + match.group("ending")
+    return content[:match.start()] + replacement + content[match.end():]
+
+
+def _remove_loci_provider(body: str, providers: list[str]) -> str:
+    matches = list(re.finditer(r"(?m)^[ \t]*providers[ \t]*=[ \t]*(?=\[)", body))
+    if len(matches) != 1:
+        raise _unsupported_config()
+    start = matches[0].end()
+    token_pattern = re.compile(r'''\s+|\#[^\r\n]*|"(?:\\.|[^"\\])*"|'[^'\r\n]*'|.''', re.S)
+    tokens = []
+    for match in token_pattern.finditer(body, start):
+        token = match.group()
+        if token.isspace() or token.startswith("#"):
+            continue
+        tokens.append(match)
+        if token == "]":
+            break
+    if not tokens or tokens[0].group() != "[" or tokens[-1].group() != "]":
+        raise _unsupported_config()
+    values = []
+    removed: list[tuple[int, int]] = []
+    for index, match in enumerate(tokens[1:-1], 1):
+        token = match.group()
+        if token == ",":
+            continue
+        if not token.startswith(('"', "'")):
+            raise _unsupported_config()
+        try:
+            value = tomllib.loads("value = " + token)["value"]
+        except tomllib.TOMLDecodeError as exc:
+            raise _unsupported_config() from exc
+        values.append(value)
+        if value.strip() == "loci":
+            removed.append((match.start(), match.end()))
+            neighbor = tokens[index + 1] if tokens[index + 1].group() == "," else tokens[index - 1]
+            if neighbor.group() == ",":
+                removed.append((neighbor.start(), neighbor.end()))
+    if values != providers:
+        raise _unsupported_config()
+    for begin, end in sorted(removed, reverse=True):
+        body = body[:begin] + body[end:]
+    return body
+
+
+def _unsupported_config() -> MigrationError:
+    return MigrationError(
+        "MIGRATION_CONFIG_UNSUPPORTED",
+        "Runtime-2 configuration cannot be translated safely; use ordinary root and [compiler] assignments, supported provider names, and a loci or legacy graph backend",
+        {"path": ".llm-wiki.toml"},
+    )
 
 
 def _sha256(content: bytes) -> str:

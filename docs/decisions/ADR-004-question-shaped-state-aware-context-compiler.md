@@ -4,6 +4,8 @@
 
 Accepted; loci-specific provider posture superseded by ADR-005 and budget-boundary semantics amended by ADR-007
 
+External-provider portions superseded by [ADR-008](./ADR-008-native-wiki-retrieval.md) on 2026-11-05; other decisions remain applicable.
+
 ## Date
 
 2026-07-12

@@ -93,24 +93,45 @@ class MigrationInspectTest(unittest.TestCase):
         self.assertEqual(plan["blockers"], [])
         self.assertEqual(plan["operations"], [])
 
-    def test_previous_generated_config_is_upgraded_without_losing_extensions(self):
+    def test_runtime_two_config_and_official_adapters_are_upgraded(self):
         initial = inspect_migration(self.root)
         for operation in initial.operations:
             path = self.root / operation.path
             path.parent.mkdir(parents=True, exist_ok=True)
-            content = operation.content
+            content = operation.content.replace('runtime_contract = "3"', 'runtime_contract = "2"').replace(
+                "runtime_contract=3", "runtime_contract=2",
+            )
             if operation.path == ".llm-wiki.toml":
-                content = content.replace(', "loci"]', "]") + '\n[extension]\nowner = "local"\n'
+                content = content.replace('[compiler]\n', '[compiler]\ngraph_backend = "loci" # retired choice\n')
+                content = content.replace('"source"]', '"source", "loci"]')
+                content += '\n[extension]\nowner = "local"\n'
             path.write_text(content, encoding="utf-8")
 
         plan = inspect_migration(self.root).to_dict()
 
         self.assertEqual(plan["blockers"], [])
-        self.assertEqual([item["path"] for item in plan["operations"]], [".llm-wiki.toml"])
-        upgraded = plan["operations"][0]["content"]
-        self.assertIn('providers = ["seed", "frontmatter", "text", "graph", "source", "loci"]', upgraded)
-        self.assertIn('graph_backend = "loci"', upgraded)
+        self.assertEqual(len(plan["operations"]), 3)
+        upgraded = next(item["content"] for item in plan["operations"] if item["path"] == ".llm-wiki.toml")
+        self.assertIn('providers = ["seed", "frontmatter", "text", "graph", "source" ]', upgraded)
+        self.assertNotIn('graph_backend =', upgraded)
+        self.assertIn('# retired choice', upgraded)
         self.assertIn('[extension]\nowner = "local"', upgraded)
+
+    def test_unsupported_runtime_two_settings_are_blocked_without_writes(self):
+        for compiler in (
+            'providers = ["text", "unknown"]',
+            'providers = ["loci"]',
+            'providers = ["text", "text", "loci"]',
+            'graph_backend = "automatic"',
+            'graph_backend = ["loci"]',
+            '"providers" = ["text", "loci"]',
+        ):
+            content = 'schema_version = "1"\nruntime_contract = "2"\n[compiler]\n' + compiler + "\n"
+            (self.root / ".llm-wiki.toml").write_text(content, encoding="utf-8")
+            before = tree_hash(self.root)
+            plan = inspect_migration(self.root)
+            self.assertIn(".llm-wiki.toml:MIGRATION_CONFIG_UNSUPPORTED", plan.blockers, compiler)
+            self.assertEqual(tree_hash(self.root), before)
 
     def test_inspect_rejects_symlinked_tooling_outside_wiki(self):
         outside = Path(self._tmp.name) / "outside"

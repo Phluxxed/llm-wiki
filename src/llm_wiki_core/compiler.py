@@ -29,8 +29,6 @@ from .project import ProjectIndex, ProjectScope
 from .providers import (
     FrontmatterProvider,
     GraphProvider,
-    LociGraphProvider,
-    LociProvider,
     Provider,
     ProviderContext,
     ProviderResult,
@@ -49,9 +47,6 @@ from .selection import (
     finalize_response_budget,
     select_candidates,
 )
-
-
-_NON_DEGRADING_DIAGNOSTICS = {"LOCI_GRAPH_PATH_REJECTED"}
 
 
 def compile_context(
@@ -166,18 +161,12 @@ def compile_context(
         scope_seeds,
     )
 
-    graph_provider: Provider = (
-        LociGraphProvider()
-        if config.compiler.graph_backend == "loci"
-        else GraphProvider()
-    )
     built_in: tuple[Provider, ...] = (
         SeedProvider(),
         FrontmatterProvider(),
         TextProvider(),
-        graph_provider,
+        GraphProvider(),
         SourceProvider(),
-        LociProvider(),
     )
     providers = tuple(provider for provider in built_in if provider.name in config.compiler.providers) + tuple(
         extra_providers
@@ -236,6 +225,31 @@ def compile_context(
 
     def annotate(candidate: CandidateEvidence) -> CandidateEvidence:
         metadata = page_metadata.get(candidate.page) if candidate.provider != "source" else None
+        spans = candidate.locator.get("spans", ())
+        if spans:
+            # Verification of one authored hop does not verify a whole path.
+            # Retain each page's advisory provenance and use the weakest path
+            # signals for tie-breaking, including legacy unverified pages.
+            pages = {span["page"] for span in spans}
+            if pages & page_metadata.keys():
+                provenance = {page: page_metadata.get(page) for page in sorted(pages)}
+                present = [item for item in provenance.values() if item is not None]
+                trust_order = {"unverified": 0, "machine-confirmed": 1, "human-reviewed": 2}
+                trust = min((item["trust"] if item else "unverified" for item in provenance.values()),
+                            key=trust_order.__getitem__)
+                freshness = ("stale" if any(item["freshness"] == "stale" for item in present)
+                             else "fresh" if all(item and item["freshness"] == "fresh" for item in provenance.values())
+                             else "unknown")
+                metadata = {
+                    "pages": provenance, "trust": trust, "freshness": freshness,
+                    "status": (
+                        "deprecated" if any(item["status"] == "deprecated" for item in present)
+                        else "draft" if any(item["status"] == "draft" for item in present)
+                        else "stable" if all(item and item["status"] == "stable" for item in provenance.values())
+                        else None
+                    ),
+                    "flags": list(dict.fromkeys(flag for item in present for flag in item["flags"])),
+                }
         if metadata is None:
             return candidate
         return replace(
@@ -303,10 +317,7 @@ def compile_context(
     coverage_state = coverage(roles, selected)
     evidence_bytes = sum(item.byte_cost for item in selected)
     sufficient = not coverage_state.uncovered_roles
-    provider_degraded = any(
-        item.code not in _NON_DEGRADING_DIAGNOSTICS
-        for item in diagnostics
-    )
+    provider_degraded = bool(diagnostics)
     byte_limited = (
         any(item.reason == "byte_limit" for item in omissions)
         or any("hard_limit_excerpt" in item.selection_reasons for item in selected)
@@ -502,7 +513,7 @@ def _has_question_derived_project_candidate(
     """Return whether normal retrieval found query evidence for the workspace.
 
     Project scope seeds are provider discovery inputs, not query evidence.  In
-    particular, legacy graph traversal can return a path merely because the
+    particular, native graph traversal can return a path merely because the
     compiler supplied the project anchor.  Providers mark that provenance so
     it cannot accidentally suppress the required orientation fallback.
     """
@@ -532,7 +543,7 @@ def _has_question_derived_project_candidate(
             if page is None or not page_matches_question(page, question, terms):
                 continue
 
-        # Legacy graph candidates without seed-discovery provenance are
+        # Native graph candidates without seed-discovery provenance are
         # question-derived by the provider's anchor/path contract.  This also
         # preserves multi-hop paths whose intermediate page does not itself
         # contain a query term.

@@ -25,12 +25,11 @@ from .state import state_compatibility
 _PROVIDER_ORDER = {
     "seed": 0,
     "temporal": 1,
-    "loci": 2,
-    "frontmatter": 3,
-    "graph": 4,
-    "source": 5,
-    "text": 6,
-    "project": 7,
+    "frontmatter": 2,
+    "graph": 3,
+    "source": 4,
+    "text": 5,
+    "project": 6,
 }
 _MAX_RETURNED_OMISSIONS = 16
 _MAX_RETURNED_DIAGNOSTICS = 16
@@ -78,7 +77,7 @@ def select_candidates(
                      else matched_question_terms(item.content, terms))
         for item in candidates
     }
-    query_providers = {"text", "frontmatter", "loci", "source", "temporal"}
+    query_providers = {"text", "frontmatter", "source", "temporal"}
     strongest = max((len(relevance[item.id]) for item in candidates
                      if item.provider in query_providers), default=0)
     ordered = sorted(candidates, key=lambda item: (
@@ -175,11 +174,6 @@ def select_candidates(
 
         record = _to_record(candidate, required)
         uncovered = set(coverage(required, selected).uncovered_roles)
-        within_target = (
-            len(selected) < request.budget.target_items
-            and record.byte_cost <= request.budget.target_bytes - used_bytes
-        )
-        supplementary_retrieval = _is_query_selected_graph_evidence(candidate) and within_target
         mandatory_project_fallback = (
             candidate.provider == "project"
             and "project_orientation_fallback" in candidate.selection_signals
@@ -189,11 +183,9 @@ def select_candidates(
             and candidate.provider != "seed"
             and not mandatory_project_fallback
             and not (set(record.roles) & uncovered)
-            and not supplementary_retrieval
         ):
             if include_supplements and (
                 candidate.provider in query_providers and relevance[candidate.id]
-                or _is_query_selected_graph_evidence(candidate)
             ):
                 pending.append((candidate, True))
                 continue
@@ -262,22 +254,6 @@ def select_candidates(
         if candidate.id not in selected_ids and candidate.id not in omitted_ids:
             omissions.append(Omission(candidate.id, "lower_marginal_value", _candidate_cost(candidate)))
     return tuple(selected), tuple(omissions)
-
-
-def _is_query_selected_graph_evidence(candidate: CandidateEvidence) -> bool:
-    return (
-        candidate.provider == "graph"
-        and (
-            (
-                candidate.route == "evidence_backed_path"
-                and "loci_evidence_backed_path" in candidate.selection_signals
-            )
-            or (
-                candidate.route == "path_node_section"
-                and "loci_path_node" in candidate.selection_signals
-            )
-        )
-    )
 
 
 def coverage(required: tuple[str, ...], selected: Iterable[EvidenceRecord]) -> Coverage:
@@ -912,7 +888,6 @@ def _rank(candidate: CandidateEvidence, state_view: str, required: tuple[str, ..
     else:
         route_rank = 3
     coverage_rank = -len(set(candidate.roles) & set(required))
-    retrieval_rank = candidate.retrieval_rank if candidate.retrieval_rank is not None else 2**31
     metadata = candidate.metadata or {}
     lifecycle_rank = 1 if metadata.get("status") == "deprecated" else 0
     freshness_rank = 1 if metadata.get("freshness") == "stale" else 0
@@ -923,7 +898,6 @@ def _rank(candidate: CandidateEvidence, state_view: str, required: tuple[str, ..
         state_rank,
         authority_rank,
         coverage_rank,
-        retrieval_rank,
         lifecycle_rank,
         freshness_rank,
         trust_rank,

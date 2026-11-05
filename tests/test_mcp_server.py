@@ -106,6 +106,19 @@ class McpServerTest(unittest.TestCase):
                 self.assertFalse(schema["additionalProperties"])
                 self.assertIn("error", schema["properties"])
                 self.assertTrue(set(schema["properties"]) - {"error"})
+        doctor_schema = result["schemas"]["wiki_doctor"]["$defs"]
+        self.assertEqual(
+            set(doctor_schema["DoctorProviders"]["properties"]),
+            {"seed", "frontmatter", "text", "graph", "source"},
+        )
+        self.assertNotIn("graph_backend", doctor_schema["DoctorConfig"]["properties"])
+        self.assertEqual(
+            set(result["doctor"]["providers"]),
+            {"seed", "frontmatter", "text", "graph", "source"},
+        )
+        for provider in result["doctor"]["providers"].values():
+            self.assertEqual(set(provider), {"status"})
+        self.assertNotIn("graph_backend", result["doctor"]["config"])
         self.assertEqual(result["registered"]["alias"], "brain")
         self.assertEqual(result["listed"]["wikis"][0]["alias"], "brain")
         self.assertNotIn("error", result["listed"])
@@ -134,6 +147,30 @@ class McpServerTest(unittest.TestCase):
         self.assertFalse(result["proposal"]["mutation"]["allowed"])
         self.assertTrue(result["invalid_proposal_is_error"])
         self.assertEqual(result["invalid_proposal_error"]["code"], "INVALID_INPUT")
+
+    def test_stdio_doctor_reports_runtime_two_migration_with_local_provider_statuses(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            wiki = create_wiki_root(tmp / "wiki")
+            (wiki / ".llm-wiki.toml").write_text(
+                'schema_version = "1"\nruntime_contract = "2"\n'
+                '[compiler]\nproviders = ["seed", "text", "graph", "source", "loci"]\n'
+                'graph_backend = "loci"\n',
+                encoding="utf-8",
+            )
+            result = asyncio.run(_doctor_round_trip(tmp / "home", wiki))
+
+        self.assertFalse(result.is_error)
+        payload = result.structured_content
+        self.assertEqual(payload["config"]["status"], "migration_required")
+        self.assertEqual(payload["config"]["error"]["code"], "RUNTIME_MIGRATION_REQUIRED")
+        self.assertEqual(payload["compatibility"]["status"], "migration_available")
+        self.assertEqual(
+            payload["providers"],
+            {name: {"status": "unavailable"}
+             for name in ("seed", "frontmatter", "text", "graph", "source")},
+        )
+        self.assertNotIn("graph_backend", payload["config"])
 
     def test_stdio_server_returns_structured_error_without_home(self):
         result = asyncio.run(_missing_home_error())
@@ -259,6 +296,7 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
         "listed": listed.structured_content,
         "overview": overview.structured_content,
         "manual": manual.structured_content,
+        "doctor": doctor.structured_content,
         "page": page.structured_content,
         "context": context.structured_content,
         "success_text": {
@@ -284,6 +322,21 @@ async def _round_trip(home: Path, wiki: Path) -> dict[str, Any]:
         "invalid_proposal_is_error": invalid_proposal.is_error,
         "invalid_proposal_error": invalid_proposal.structured_content["error"],
     }
+
+
+async def _doctor_round_trip(home: Path, wiki: Path) -> CallToolResult:
+    env = os.environ.copy()
+    env["LLM_WIKI_HOME"] = str(home)
+    env["PYTHONPATH"] = f"{REPO_ROOT / 'src'}:{env.get('PYTHONPATH', '')}"
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "llm_wiki_mcp.mcp_server"],
+        env=env,
+        cwd=REPO_ROOT,
+    )
+    async with Client(stdio_client(params), mode="auto") as client:
+        await client.call_tool("wiki_register", {"alias": "test", "path": str(wiki)})
+        return await client.call_tool("wiki_doctor", {"alias": "test"})
 
 
 async def _missing_home_error() -> dict[str, Any]:
